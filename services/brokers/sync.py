@@ -109,7 +109,14 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                 # 신규 합산 항목은 맨 앞에 삽입되므로 역순으로 생성한다.
                 codes = {r["stock_code"] for r in previous + rows}
                 for code in sorted(codes, key=lambda code: initial_order_key(code, link.get("product")), reverse=True):
-                    await holdings.rebuild(user, code)
+                    metadata = {}
+                    imported = next((row for row in rows if row["stock_code"] == code and row.get("memo")), None)
+                    if imported:
+                        # 메모의 만기일 줄만 관리하고 사용자가 쓴 나머지 메모는 보존한다.
+                        old = await (await db.execute("SELECT memo FROM user_portfolio WHERE google_sub=? AND stock_code=?", (user, code))).fetchone()
+                        notes = [line for line in str(old["memo"] or "").splitlines() if not line.startswith("만기일 ")] if old else []
+                        metadata["memo"] = "\n".join([imported["memo"], *notes])
+                    await holdings.rebuild(user, code, **metadata)
                 if current["last_sync_at"] is None:
                     await portfolio_order.reset(user, aid)
                 snapshot = {**balances.get("_snapshot", {}), "synced_at": now} if "_snapshot" in balances else {}
@@ -117,6 +124,12 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                                  (json.dumps(snapshot, ensure_ascii=False), user, aid))
                 await db.execute("UPDATE broker_account_links SET last_sync_at=?,sync_error=NULL,balances_json=? WHERE google_sub=? AND account_id=?",
                                  (now, json.dumps(balances), user, aid))
+            if snapshot.get("display") == "holdings":
+                # 커밋 뒤에만 시세 캐시를 바꾼다. 재시작 시에는 저장된 스냅샷에서 복구한다.
+                from services.stock_quotes import remember_quote
+                for position in snapshot["positions"]:
+                    remember_quote(position["stock_code"], {"price": position["current_price"],
+                        "date": snapshot["as_of_date"], "fetched_at": now, "source": "namuh_balance"})
             return {"ok": True, "holdings_count": len(rows), "synced_at": now, "balances": balances,
                     "activity_error": activity_error}
         except BrokerError as exc:

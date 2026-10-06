@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from domain.broker_assets import is_futures_value
+from domain.broker_assets import is_futures_contract, is_futures_value
 from services import stock_quotes
 from services.portfolio import currencies, foreign, fx, runtime_quotes, special_assets
 from services.portfolio.identifiers import (
@@ -68,6 +68,9 @@ async def fetch_cash_quote(stock_code: str) -> dict:
 async def fetch_external_quote_for_stock_service(stock_code: str) -> dict:
     if _is_cash_asset(stock_code):
         return await fetch_cash_quote(stock_code)
+    elif is_futures_contract(stock_code):
+        from repositories.broker_quotes import futures_quote
+        return await futures_quote(stock_code)
     elif stock_code == "KRX_GOLD":
         return await special_assets.fetch_krx_gold_quote()
     elif stock_code == "CMA_RP_KRW" or is_futures_value(stock_code):

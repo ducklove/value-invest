@@ -87,6 +87,13 @@ async def lifespan(app):
                 if product == "gold":
                     return [{"stock_code": "KRX_GOLD", "stock_name": "KRX 금현물", "quantity": 12,
                              "avg_price": 120000, "avg_price_currency": "KRW", "currency": "KRW"}], {}
+                if product == "krfuture":
+                    positions = [{"code": "KA486B000", "stock_code": "KRFUT_KA486B000", "name": "미래에셋증 F 202611 (  10)",
+                                  "side": "매도", "quantity": 2, "multiplier": 10, "expiry_date": "2026-11-12",
+                                  "currency": "KRW", "average_price": 350, "current_price": 355, "pnl": -100}]
+                    rows, cash = derivatives.domestic_holdings(positions, 900)
+                    return rows, {"_snapshot": {"product": product, "equity": 900, "pnl": -100, "currency": "KRW",
+                        "display": "holdings", "cash": cash, "quantity_unit": "underlying", "as_of_date": today.isoformat(), "positions": positions}}
                 if product.endswith("future"):
                     equity, pnl = (900, -100) if product == "krfuture" else (1490, 90)
                     return derivatives.valuation_rows(equity, pnl), {"_snapshot": {
@@ -143,6 +150,9 @@ async def get_holdings(request: Request):
     rows = await holdings.get_portfolio(user["google_sub"], request.query_params.get("account_id"))
     for row in rows:
         quote = {"price": 1, "previous_close": 1, "change_pct": 0} if row["stock_code"] in {"CASH_KRW", "FUTURES_BASE_KRW", "FUTURES_PNL_KRW"} else {"price": 75000, "previous_close": 74000, "change_pct": 1.35}
+        if row["stock_code"].startswith("KRFUT_"):
+            from repositories.broker_quotes import futures_quote
+            quote = await futures_quote(row["stock_code"])
         row.update(avg_price_krw=row["avg_price"], quote=quote)
     return rows
 

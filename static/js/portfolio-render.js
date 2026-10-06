@@ -16,7 +16,7 @@ function pfAvgPriceKrw(item) {
 
 function pfCanEditAvgPriceCurrency(stockCode) {
   const code = String(stockCode || '').toUpperCase();
-  if (!code || code.startsWith('CASH_')) return false;
+  if (!code || code.startsWith('CASH_') || code.startsWith('KRFUT_')) return false;
   if (['KRX_GOLD', 'CMA_RP_KRW', 'FUTURES_BASE_KRW', 'FUTURES_PNL_KRW', 'CRYPTO_BTC', 'CRYPTO_ETH', 'CRYPTO_USDT'].includes(code)) return false;
   return !/^[0-9][0-9A-Z]{5}$/.test(code);
 }
@@ -623,6 +623,7 @@ function renderPortfolio(options = {}) {
 
     const liveDotE = QuoteManager.isLive(r.stock_code) ? '<span class="ws-live-dot" title="실시간"></span>' : '';
     const safeCode = escapeHtml(r.stock_code);
+    const displayCode = escapeHtml(r.stock_code.replace(/^KRFUT_/, ''));
     const pairLongCode = pfPairLongCode(r);
     const tagHtml = _renderPortfolioRowTags(pfGetTags(r)) + _renderPortfolioRowPairChip(r);
     const groupHtml = _renderPortfolioRowGroup(r);
@@ -646,8 +647,8 @@ function renderPortfolio(options = {}) {
     const signalBadgeHtml = typeof pfActionBoardBadgesForCode === 'function'
       ? pfActionBoardBadgesForCode(r.stock_code)
       : '';
-    const stockIdentity = `<span class="pf-stock-main"><span class="pf-stock-line"><a href="#" class="pf-stock-link js-pf-open-insight" title="${safeName}"><strong>${safeName}</strong></a><span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}${signalBadgeHtml}</span>${tagHtml}</span>`;
-    const stockEditIdentity = `<span class="pf-stock-main pf-stock-edit-main"><input class="pf-edit-input pf-stock-name-edit js-pf-edit-name" id="pfEditName" value="${safeName}" type="text" maxlength="80" autocomplete="off"${editAttrs}><span class="pf-stock-line"><span class="pf-stock-code">${safeCode}</span>${curTag}${liveDotE}${signalBadgeHtml}</span>${tagHtml}</span>`;
+    const stockIdentity = `<span class="pf-stock-main"><span class="pf-stock-line"><a href="#" class="pf-stock-link js-pf-open-insight" title="${safeName}"><strong>${safeName}</strong></a><span class="pf-stock-code">${displayCode}</span>${curTag}${liveDotE}${signalBadgeHtml}</span>${tagHtml}</span>`;
+    const stockEditIdentity = `<span class="pf-stock-main pf-stock-edit-main"><input class="pf-edit-input pf-stock-name-edit js-pf-edit-name" id="pfEditName" value="${safeName}" type="text" maxlength="80" autocomplete="off"${editAttrs}><span class="pf-stock-line"><span class="pf-stock-code">${displayCode}</span>${curTag}${liveDotE}${signalBadgeHtml}</span>${tagHtml}</span>`;
     const stockCellClass = canManualDrag ? 'pf-stock-cell pf-stock-cell-with-drag js-pf-analyze' : 'pf-stock-cell js-pf-analyze';
     const heatAttrs = pfHeatRowAttrs(r);
     const changeCell = pfChangeCellHtml(r);

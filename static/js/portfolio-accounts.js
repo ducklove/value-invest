@@ -49,7 +49,7 @@ function pfBrokerSnapshotHtml(snapshot) {
 function pfRenderDerivativeBalances() {
   const panel = _pfAccountEl('pfDerivativeBalances');
   if (!panel) return;
-  const rows = PfAccounts.rows.filter(row => (!PfStore.accountId || row.account_id === PfStore.accountId) && row.broker_snapshot?.product?.endsWith('future'));
+  const rows = PfAccounts.rows.filter(row => (!PfStore.accountId || row.account_id === PfStore.accountId) && row.broker_snapshot?.product?.endsWith('future') && row.broker_snapshot.display !== 'holdings');
   panel.hidden = !rows.length;
   panel.innerHTML = rows.map(row => `<details class="pf-account-card" open><summary>${escapeHtml(row.name)} · ${row.broker_snapshot.product === 'krfuture' ? '국내' : '해외'}선물 잔고</summary>${row.connection?.sync_error ? `<p class="pf-account-error">동기화 실패 · 이전 잔고 표시: ${escapeHtml(row.connection.sync_error)}</p>` : ''}${!row.broker ? '<p>연결 해제 당시 잔고입니다. 자동 갱신되지 않습니다.</p>' : ''}${pfBrokerSnapshotHtml(row.broker_snapshot)}</details>`).join('');
 }
@@ -255,8 +255,12 @@ async function pfNhWork(action) {
         _pfAccountEl('pfNhPreview').innerHTML = `<p>${data.items.length}개 잔고 · 현금 추가 차감 없이 초기 잔고로 가져옵니다.</p><table><thead><tr><th>종목</th><th>수량·잔액</th><th>통화</th></tr></thead><tbody>${data.items.map(item => `<tr><td>${escapeHtml(item.stock_name)}</td><td>${Number(item.quantity).toLocaleString('ko-KR')}</td><td>${escapeHtml(item.currency)}</td></tr>`).join('')}</tbody></table><p>${escapeHtml(pfBrokerDefinition(provider)?.products.find(item => item.id === payload.product)?.help || '')}</p>${data.items.some(item => item.stock_code === 'CMA_RP_KRW') ? '<p>CMA 원화RP는 현금과 구분하며, 수량·잔액에 증권사 조회 시점의 평가액(원)을 표시합니다.</p>' : ''}`;
         PfAccounts.previewed = true; _pfAccountEl('pfNhSave').disabled = false;
         if (data.balances?._excluded?.length) _pfAccountEl('pfNhPreview').insertAdjacentHTML('beforeend', `<p>${escapeHtml(data.balances._excluded_reason || '비상장·상장폐지')} ${data.balances._excluded.length}개 종목은 제외했습니다.</p>`);
-        if (data.broker_snapshot?.product?.endsWith('future')) {
+        if (data.broker_snapshot?.product?.endsWith('future') && data.broker_snapshot.display !== 'holdings') {
           _pfAccountEl('pfNhPreview').innerHTML = pfBrokerSnapshotHtml(data.broker_snapshot);
+        }
+        if (data.broker_snapshot?.display === 'holdings') {
+          const snapshot = data.broker_snapshot;
+          _pfAccountEl('pfNhPreview').insertAdjacentHTML('beforeend', `<p>수량은 거래단위를 반영한 주식 환산 수량이며, 매도는 음수입니다. 예수금 = 선물매도 평가액 − 선물매수 평가액 + 평가기준액 + 평가손익. 계좌 총평가액 ${Number(snapshot.equity).toLocaleString('ko-KR')}원</p><p>${data.items.filter(item => item.memo).map(item => `${escapeHtml(item.stock_name)}: ${escapeHtml(item.memo)}`).join('<br>')}</p>`);
         }
         _pfAccountEl('pfNhStatus').textContent = '미리보기를 확인한 뒤 잔고 가져오기를 누르세요.';
       } else {

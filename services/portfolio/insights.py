@@ -124,6 +124,8 @@ async def asset_history_for_insight(code: str, item: dict) -> dict:
         return await download_yfinance_history(special)
     if _is_cash_asset(code):
         return {"rows": [], "currency": code.replace("CASH_", "")}
+    if code.startswith("KRFUT_"):
+        return {"rows": [], "currency": "KRW"}
     if _is_korean_stock(code):
         return await download_korean_history(code)
     static = _static_foreign_ticker(code)

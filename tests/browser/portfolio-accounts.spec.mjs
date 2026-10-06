@@ -27,14 +27,29 @@ test('금현물·국내·해외선물의 연결 종류와 계약·평가액 표�
     await expect(page.locator('#pfNhSave')).toBeEnabled();
     if (product === 'gold') await expect(page.locator('#pfNhPreview')).toContainText('KRX 금현물');
     else {
-      await expect(page.locator('#pfNhPreview')).toContainText('계약 수');
+      await expect(page.locator('#pfNhPreview')).toContainText(product === 'krfuture' ? '주식 환산 수량' : '계약 수');
       await expect(page.locator('#pfNhPreview')).toContainText(product === 'krfuture' ? '900원' : '1,490원');
     }
     await page.locator('#pfNhSave').click();
     await expect(page.locator('#pfNhDialog')).not.toBeVisible();
     await page.locator('#pfAccountsClose').click();
     await page.locator('#pfAccountSelect').selectOption(aid);
-    if (product !== 'gold') {
+    if (product === 'krfuture') {
+      await expect(page.locator('#pfDerivativeBalances')).not.toBeVisible();
+      const row = page.locator('#pfBody [data-code="KRFUT_KA486B000"]');
+      await expect(row.locator('.pf-col-qty')).toContainText('-20');
+      await expect(row.locator('.pf-col-curprice')).toContainText('355');
+      await expect(row.locator('.pf-col-mktval')).toContainText('-7,100');
+      await expect(page.locator('#pfBody [data-code="CASH_KRW"] .pf-col-qty')).toContainText('8,000');
+      await page.locator('.js-pf-col-toggle[data-col-key="memo"]').check();
+      await expect(row.locator('.pf-col-memo')).toContainText('만기일 2026-11-12');
+      await expect(page.locator('#pfBody [data-code^="FUTURES_"]')).toHaveCount(0);
+      const response = await page.request.get('/api/portfolio?account_id='+aid);
+      const holdings = await response.json();
+      const sum = holdings.reduce((value, item) => value+item.quantity*(item.stock_code === 'CASH_KRW' ? 1 : item.quote.price), 0);
+      expect(sum).toBe(900);
+    }
+    if (product === 'gbfuture') {
       const panel=page.locator('#pfDerivativeBalances');
       await expect(panel).toBeVisible();
       await expect(panel.locator('tbody tr')).toHaveCount(1);

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-from domain.broker_assets import FUTURES_VALUE_CODES
+from domain.broker_assets import FUTURES_VALUE_CODES, is_futures_contract
 
 SPECIAL_ASSETS = {"KRX_GOLD", "CMA_RP_KRW", "CRYPTO_BTC", "CRYPTO_ETH", "CRYPTO_USDT"} | FUTURES_VALUE_CODES
 
@@ -28,7 +28,7 @@ def is_cash_asset(code: str | None) -> bool:
 
 def is_special_asset(code: str | None) -> bool:
     normalized = normalize_portfolio_code(code)
-    return normalized in SPECIAL_ASSETS or is_cash_asset(normalized)
+    return normalized in SPECIAL_ASSETS or is_cash_asset(normalized) or is_futures_contract(normalized)
 
 
 def is_korean_stock(code: str | None) -> bool:

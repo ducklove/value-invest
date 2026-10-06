@@ -387,3 +387,30 @@ test('선물 계약 수·방향과 계좌 평가액을 구분하고 미제공 �
     assert.equal(s.el('pfDerivativeBalances').hidden,true);
   } finally {s.dom.window.close();}
 });
+
+
+test('국내선물은 음수 주식 환산 수량·조정 예수금·만기로 미리보고 별도 잔고 패널을 숨긴다', async () => {
+  const s=setup();
+  try {
+    const snapshot={product:'krfuture',display:'holdings',equity:900,pnl:-100,cash:8000,as_of_date:'2026-10-06',
+      positions:[{code:'KA486B000',side:'매도',quantity:2,multiplier:10,expiry_date:'2026-11-12'}]};
+    s.w.PfAccounts.rows=[{account_id:'a',name:'국내선물',broker:'namuh',broker_snapshot:snapshot}];
+    s.w.pfRenderDerivativeBalances();
+    assert.equal(s.el('pfDerivativeBalances').hidden,true);
+    s.w.pfOpenNhConnection({account_id:'a',name:'국내선물'});
+    s.el('pfNhChoices').innerHTML='<option value="choice">계좌</option>';
+    s.el('pfNhProduct').value='krfuture';
+    s.w.apiFetchJson=async()=>({broker_snapshot:snapshot,items:[
+      {stock_code:'KRFUT_KA486B000',stock_name:'미래에셋증 F',quantity:-20,currency:'KRW',memo:'만기일 2026-11-12'},
+      {stock_code:'CASH_KRW',stock_name:'예수금',quantity:8000,currency:'KRW'}]});
+    await s.w.pfNhWork('preview');
+    const preview=s.el('pfNhPreview');
+    assert.match(preview.textContent,/-20/);
+    assert.match(preview.textContent,/8,000/);
+    assert.match(preview.textContent,/주식 환산 수량/);
+    assert.match(preview.textContent,/만기일 2026-11-12/);
+    assert.doesNotMatch(preview.textContent,/평가기준액\(계좌 평가액/);
+    assert.equal(preview.querySelector('.pf-derivative-table-wrap'),null);
+    assert.equal(s.el('pfNhSave').disabled,false);
+  } finally {s.dom.window.close();}
+});

@@ -1,15 +1,12 @@
-"""선물의 계약 잔고와 증권사 계좌 평가액을 분리해 가져온다.
-
-계약수×가격(명목금액)을 자산으로 더하지 않는다. 합산용 원화 평가기준액과
-평가손익 두 항목의 합은 증권사가 반환한 계좌 순자산과 정확히 일치한다.
-계약별 원본 단위·방향은 계좌 스냅샷에 따로 보존한다.
-"""
+"""국내선물은 부호 있는 종목 잔고와 조정 예수금으로, 해외선물은 별도 평가액으로 가져온다."""
 
 import re
+from decimal import Decimal
 
 from domain.timeutil import now_kst
 from repositories.broker_secrets import BrokerError
 from services.brokers import namuh
+from services.brokers.futures_contracts import contract_terms
 from services.brokers.parsing import number, object_block, record_block
 
 
@@ -72,7 +69,9 @@ async def fetch_derivatives(user: str, link: dict) -> tuple[list[dict], dict]:
                 if side not in {"매수", "매도"}:
                     raise BrokerError("선물의 매수·매도 구분을 확인할 수 없습니다.")
                 code = contract_code(row, "fno_iem_cd" if night else "iem_cd")
-                positions.append({"code": code, "name": str(row.get("iem_nm") or code),
+                name = str(row.get("iem_nm") or code).strip()
+                terms = await contract_terms(user, link, code, name)
+                positions.append({**terms, "code": code, "name": name, "stock_code": "KRFUT_" + code,
                                   "side": side, "quantity": qty, "currency": "KRW",
                                   "average_price": number(row, "avg_pr"), "current_price": number(row, "now_pr"),
                                   "pnl": number(row, "eal_pls_amt")})
@@ -110,4 +109,43 @@ async def fetch_derivatives(user: str, link: dict) -> tuple[list[dict], dict]:
         raise BrokerError("선물 평가손익은 있으나 계약 잔고가 없어 동기화를 보류했습니다.")
     snapshot = {"product": product, "positions": positions, "equity": equity, "pnl": pnl, "currency": "KRW",
                 "basis": basis, "as_of_date": now.date().isoformat(), "details": details}
+    if product == "krfuture":
+        rows, cash = domestic_holdings(positions, equity)
+        snapshot.update({"display": "holdings", "cash": cash, "quantity_unit": "underlying"})
+        return rows, {"_snapshot": snapshot}
     return valuation_rows(equity, pnl), {"_snapshot": snapshot}
+
+
+
+def domestic_holdings(positions: list[dict], equity: float) -> tuple[list[dict], float]:
+    # 주식과 같은 가격 단위를 쓰고 계약수를 거래승수만큼 환산한다.
+    # 동일 월물의 양방향 잔고는 부호 있는 수량·원가를 합산한다.
+    grouped = {}
+    notional = Decimal(0)
+    for position in positions:
+        qty = Decimal(str(position["quantity"])) * Decimal(str(position["multiplier"]))
+        if position["side"] == "매도":
+            qty = -qty
+        current, average = (Decimal(str(position[key])) for key in ("current_price", "average_price"))
+        if current <= 0 or average < 0:
+            raise BrokerError("선물 가격을 확인할 수 없어 기존 잔고를 유지합니다.")
+        notional += qty * current
+        code = position["stock_code"]
+        if code not in grouped:
+            grouped[code] = {"quantity": Decimal(0), "cost": Decimal(0), "position": position}
+        grouped[code]["quantity"] += qty
+        grouped[code]["cost"] += qty * average
+    rows = []
+    for code, value in grouped.items():
+        qty, position = value["quantity"], value["position"]
+        if not qty:
+            continue
+        rows.append({"stock_code": code, "stock_name": position["name"], "quantity": float(qty),
+                     "avg_price": float(value["cost"] / qty), "avg_price_currency": "KRW", "currency": "KRW",
+                     "memo": "만기일 " + position["expiry_date"]})
+    # 선물매도 평가액 - 선물매수 평가액 + 평가기준액 + 평가손익.
+    # 현재 평가액을 써야 음수 종목 평가액과 더했을 때 NH 순자산총액과 일치한다.
+    cash = float(Decimal(str(equity)) - notional)
+    rows.append({"stock_code": "CASH_KRW", "stock_name": "예수금(KRW)", "quantity": cash,
+                 "avg_price": 1, "avg_price_currency": "KRW", "currency": "KRW"})
+    return rows, cash
