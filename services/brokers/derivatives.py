@@ -13,8 +13,8 @@ from services.brokers import namuh
 from services.brokers.parsing import number, object_block, record_block
 
 
-def contract_code(row: dict) -> str:
-    code = str(row.get("iem_cd", "")).strip()
+def contract_code(row: dict, key: str = "iem_cd") -> str:
+    code = str(row.get(key, "")).strip()
     if not re.fullmatch(r"[A-Za-z0-9._/-]{1,32}", code):
         raise BrokerError("선물 종목코드를 확인할 수 없어 기존 잔고를 유지합니다.")
     return code
@@ -25,6 +25,19 @@ def quantity(row: dict, key: str) -> float:
     if value < 0 or not value.is_integer():
         raise BrokerError("선물 계약 수량을 확인할 수 없어 기존 잔고를 유지합니다.")
     return value
+
+
+def domestic_quantity(row: dict, *, night: bool) -> float:
+    if night:
+        return quantity(row, "tdy_ny_stl_qty")
+    # 주간 잔고에는 금일미결제수량이 없다. 전일 잔고에 당일 증감을 반영한다.
+    # 청산가능수량은 미체결 청산 주문에 묶인 계약을 제외할 수 있어 사용하지 않는다.
+    previous = quantity(row, "bf_dd_ny_stl_qty")
+    change = number(row, "bnc_ind_qty")
+    current = previous + change
+    if not change.is_integer() or not current.is_integer() or current < 0:
+        raise BrokerError("선물 계약 수량을 확인할 수 없어 기존 잔고를 유지합니다.")
+    return current
 
 
 def valuation_rows(equity: float, pnl: float) -> list[dict]:
@@ -41,20 +54,25 @@ async def fetch_derivatives(user: str, link: dict) -> tuple[list[dict], dict]:
     product, cid, env, account = (link[key] for key in ("product", "credential_id", "environment", "account_no"))
     now = now_kst()
     if product == "krfuture":
-        path = "/krfuture/inquiry/v1/nightBalance" if now.hour >= 18 or now.hour < 6 else "/krfuture/inquiry/v1/balance"
-        pages = await namuh.pages(user, cid, path, {"act_no": account}, env)
+        night = now.hour >= 18 or now.hour < 6
+        path = "/krfuture/inquiry/v1/nightBalance" if night else "/krfuture/inquiry/v1/balance"
+        body = {"act_no": account}
+        if night:
+            body.update({"ost_dit_cd": "9", "ost_dit_cd1": "1"})
+        pages = await namuh.pages(user, cid, path, body, env)
         total = object_block(next((page for page in reversed(pages) if page.get("Output_1")), pages[-1]), "Output_1")
         equity, pnl = number(total, "nas_tal"), number(total, "tot_eal_pls")
         positions = []
         for page in pages:
             for row in record_block(page, "Output_0"):
-                qty = quantity(row, "tdy_ny_stl_qty")
+                qty = domestic_quantity(row, night=night)
                 if not qty:
                     continue
                 side = str(row.get("sby_dit_nm", "")).strip()
                 if side not in {"매수", "매도"}:
                     raise BrokerError("선물의 매수·매도 구분을 확인할 수 없습니다.")
-                positions.append({"code": contract_code(row), "name": str(row.get("iem_nm") or row["iem_cd"]),
+                code = contract_code(row, "fno_iem_cd" if night else "iem_cd")
+                positions.append({"code": code, "name": str(row.get("iem_nm") or code),
                                   "side": side, "quantity": qty, "currency": "KRW",
                                   "average_price": number(row, "avg_pr"), "current_price": number(row, "now_pr"),
                                   "pnl": number(row, "eal_pls_amt")})

@@ -6,6 +6,7 @@ from _harness import TempDbMixin, seed_user
 from domain.timeutil import KST
 from repositories import account_holdings, accounts, brokers, portfolio
 from repositories.broker_secrets import BrokerError
+from routes import broker_accounts
 from services.brokers import derivatives, namuh, sync
 from services.portfolio import quote_service
 
@@ -27,13 +28,22 @@ class NamuhProductsTests(TempDbMixin):
         await brokers.link_account("u1", self.aid, self.cid, "12345678901", "live", product=product)
 
     @staticmethod
-    def domestic(pnl=-100, equity=900):
-        return [{"Output_0": [
-            {"iem_cd": "101V9000", "iem_nm": "코스피200 선물", "sby_dit_nm": "매수", "tdy_ny_stl_qty": 2,
+    def domestic(pnl=-100, equity=900, *, night=False):
+        page = {"Output_0": [
+            {"iem_cd": "101V9000", "iem_nm": "코스피200 선물", "sby_dit_nm": "매수",
+             "bf_dd_ny_stl_qty": 3, "bnc_ind_qty": -1, "lqd_pbl_qty": 1,
              "avg_pr": 350, "now_pr": 351, "eal_pls_amt": 50},
-            {"iem_cd": "101V9000", "iem_nm": "코스피200 선물", "sby_dit_nm": "매도", "tdy_ny_stl_qty": 1,
+            {"iem_cd": "101V9000", "iem_nm": "코스피200 선물", "sby_dit_nm": "매도",
+             "bf_dd_ny_stl_qty": 0, "bnc_ind_qty": 1, "lqd_pbl_qty": 0,
              "avg_pr": 352, "now_pr": 351, "eal_pls_amt": -150}],
-            "Output_1": {"nas_tal": equity, "tot_eal_pls": pnl, "dsg_csh": 1000, "dsg_sba_amt": 0}}]
+            "Output_1": {"nas_tal": equity, "tot_eal_pls": pnl, "dsg_csh": 1000, "dsg_sba_amt": 0}}
+        if night:
+            for row, qty in zip(page["Output_0"], (2, 1)):
+                row["fno_iem_cd"] = row.pop("iem_cd")
+                row.pop("bf_dd_ny_stl_qty")
+                row.pop("bnc_ind_qty")
+                row["tdy_ny_stl_qty"] = qty
+        return [page]
 
     async def test_gold_uses_dedicated_balance_without_stock_listing_filter(self):
         page = {"Output_0": {"dca": 1000, "nxt_dd_dca": 900, "nxt2_dd_dca": 800, "drn_pbl_amt": 700},
@@ -76,9 +86,15 @@ class NamuhProductsTests(TempDbMixin):
         for hour, suffix in ((10, "balance"), (20, "nightBalance"), (3, "nightBalance")):
             with self.subTest(hour=hour), self.owned(), \
                  patch.object(derivatives, "now_kst", return_value=datetime(2026, 9, 18, hour, tzinfo=KST)), \
-                 patch.object(namuh, "pages", AsyncMock(return_value=self.domestic())) as api:
+                 patch.object(namuh, "pages", AsyncMock(return_value=self.domestic(night=hour != 10))) as api:
                 await sync.sync_account("u1", self.aid)
-            self.assertTrue(api.await_args.args[2].endswith("/" + suffix))
+            body = {"act_no": "12345678901"}
+            if hour != 10:
+                body.update({"ost_dit_cd": "9", "ost_dit_cd1": "1"})
+            api.assert_awaited_once_with("u1", self.cid, "/krfuture/inquiry/v1/" + suffix, body, "live")
+            item = next(a for a in await accounts.list_accounts("u1") if a["account_id"] == self.aid)
+            self.assertEqual([p["quantity"] for p in item["broker_snapshot"]["positions"]], [2, 1])
+            self.assertEqual([p["code"] for p in item["broker_snapshot"]["positions"]], ["101V9000", "101V9000"])
         positions = await account_holdings.list_positions("u1", self.aid)
         self.assertEqual({p["stock_code"]: p["quantity"] for p in positions}, {"FUTURES_BASE_KRW": 1000, "FUTURES_PNL_KRW": -100})
         values = [p["quantity"] * (await quote_service.fetch_quote(p["stock_code"]))["price"] for p in positions]
@@ -97,6 +113,61 @@ class NamuhProductsTests(TempDbMixin):
         detached = next(a for a in await accounts.list_accounts("u1") if a["account_id"] == self.aid)
         self.assertIsNone(detached["broker"])
         self.assertEqual(detached["broker_snapshot"], item["broker_snapshot"])
+
+    async def test_domestic_day_preview_reads_all_pages_and_does_not_link_or_write_holdings(self):
+        first, = self.domestic()
+        second = {"Output_0": [first["Output_0"].pop()], "Output_1": first.pop("Output_1")}
+        # 전량 청산된 행은 가격·코드가 생략되어도 보유 계약으로 가져오지 않는다.
+        first["Output_0"].append({"bf_dd_ny_stl_qty": 3, "bnc_ind_qty": -3})
+        before = await account_holdings.list_positions("u1")
+        with self.owned(), patch.object(broker_accounts, "user_id", AsyncMock(return_value="u1")), \
+             patch.object(derivatives, "now_kst", return_value=datetime(2026, 10, 6, 10, tzinfo=KST)), \
+             patch.object(namuh, "pages", AsyncMock(return_value=[first, second])) as api:
+            registered = await broker_accounts.register_broker("namuh", None, {
+                "app_key": "test-products-key", "app_secret": "test-products-secret"})
+            result = await broker_accounts.preview(self.aid, "namuh", None, {
+                "selection": registered["accounts"][0]["selection"], "product": "krfuture"})
+        api.assert_awaited_once_with("u1", self.cid, "/krfuture/inquiry/v1/balance", {"act_no": "12345678901"}, "live")
+        snapshot = result["broker_snapshot"]
+        self.assertEqual([(p["side"], p["quantity"]) for p in snapshot["positions"]], [("매수", 2), ("매도", 1)])
+        self.assertEqual(snapshot["equity"], 900)
+        self.assertEqual(snapshot["pnl"], -100)
+        self.assertEqual(sum(r["quantity"] for r in result["items"]), 900)
+        self.assertEqual(await account_holdings.list_positions("u1"), before)
+        account = next(a for a in await accounts.list_accounts("u1") if a["account_id"] == self.aid)
+        self.assertIsNone(account["broker"])
+        self.assertFalse(account["broker_snapshot"])
+
+    async def test_invalid_domestic_contract_fields_preserve_entire_snapshot(self):
+        await self.link("krfuture")
+        day = datetime(2026, 10, 6, 10, tzinfo=KST)
+        with self.owned(), patch.object(derivatives, "now_kst", return_value=day), \
+             patch.object(namuh, "pages", AsyncMock(return_value=self.domestic())):
+            await sync.sync_account("u1", self.aid)
+        before = await account_holdings.list_positions("u1", self.aid)
+        snapshot = next(a for a in await accounts.list_accounts("u1") if a["account_id"] == self.aid)["broker_snapshot"]
+        cases = [
+            (False, "bf_dd_ny_stl_qty", None), (False, "bf_dd_ny_stl_qty", -1),
+            (False, "bnc_ind_qty", None), (False, "bnc_ind_qty", ""),
+            (False, "bnc_ind_qty", "NaN"), (False, "bnc_ind_qty", True),
+            (False, "bnc_ind_qty", -4), (False, "bnc_ind_qty", 0.5),
+            (True, "tdy_ny_stl_qty", None), (True, "tdy_ny_stl_qty", -1),
+            (True, "tdy_ny_stl_qty", 0.5), (True, "fno_iem_cd", ""),
+        ]
+        for night, key, value in cases:
+            pages = self.domestic(night=night)
+            if value is None:
+                del pages[0]["Output_0"][0][key]
+            else:
+                pages[0]["Output_0"][0][key] = value
+            with self.subTest(night=night, field=key, value=value), self.owned(), \
+                 patch.object(derivatives, "now_kst", return_value=day.replace(hour=20) if night else day), \
+                 patch.object(namuh, "pages", AsyncMock(return_value=pages)):
+                with self.assertRaises(BrokerError):
+                    await sync.sync_account("u1", self.aid)
+            self.assertEqual(await account_holdings.list_positions("u1", self.aid), before)
+            after = next(a for a in await accounts.list_accounts("u1") if a["account_id"] == self.aid)
+            self.assertEqual(after["broker_snapshot"], snapshot)
 
     async def test_overseas_imports_both_directions_and_uses_broker_won_total_once(self):
         calls = []
@@ -125,7 +196,8 @@ class NamuhProductsTests(TempDbMixin):
 
     async def test_failed_futures_parse_preserves_entire_snapshot(self):
         await self.link("krfuture")
-        with self.owned(), patch.object(namuh, "pages", AsyncMock(return_value=self.domestic())):
+        with self.owned(), patch.object(derivatives, "now_kst", return_value=datetime(2026, 10, 6, 10, tzinfo=KST)), \
+             patch.object(namuh, "pages", AsyncMock(return_value=self.domestic())):
             await sync.sync_account("u1", self.aid)
         before = await account_holdings.list_positions("u1", self.aid)
         old_snapshot = next(a for a in await accounts.list_accounts("u1") if a["account_id"] == self.aid)["broker_snapshot"]
@@ -140,11 +212,13 @@ class NamuhProductsTests(TempDbMixin):
 
     async def test_opposite_account_pnl_and_zero_equity_aggregate_without_stock_direction_conflict(self):
         await self.link("krfuture")
-        with self.owned(), patch.object(namuh, "pages", AsyncMock(return_value=self.domestic(pnl=-100, equity=0))):
+        with self.owned(), patch.object(derivatives, "now_kst", return_value=datetime(2026, 10, 6, 10, tzinfo=KST)), \
+             patch.object(namuh, "pages", AsyncMock(return_value=self.domestic(pnl=-100, equity=0))):
             await sync.sync_account("u1", self.aid)
         other = (await accounts.create_account("u1", name="두 번째 선물"))["account_id"]
         await brokers.link_account("u1", other, self.cid, "22222222222", "live", product="krfuture")
         with patch.object(namuh, "accounts", AsyncMock(return_value=[{"account_no": "22222222222", "environment": "live"}])), \
+             patch.object(derivatives, "now_kst", return_value=datetime(2026, 10, 6, 10, tzinfo=KST)), \
              patch.object(namuh, "pages", AsyncMock(return_value=self.domestic(pnl=100, equity=1000))):
             await sync.sync_account("u1", other)
         total = await portfolio.get_portfolio("u1")

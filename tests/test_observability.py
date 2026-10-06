@@ -275,28 +275,14 @@ class BatchStatusDataFreshnessTests(TempDbMixin):
         self.assertEqual(result["trading_days_behind"], 0)
 
     def test_staleness_counts_trading_days_only(self):
-        # Pretend today is a Wednesday and the latest data is from the
-        # previous Friday → stale by 2 trading days (Mon, Tue). Weekend
-        # days don't count.
-        #
-        # We can't actually control `today`, so fabricate a scenario
-        # where expected_latest is N weekdays ahead of `latest` by
-        # seeding a date N trading days in the past.
-        today = date.today()
-        probe = today - timedelta(days=1) if today.weekday() < 5 else today
-        while probe.weekday() >= 5:
-            probe -= timedelta(days=1)
-        # Walk back 3 trading days from expected.
-        cursor = probe
-        steps = 3
-        while steps > 0:
-            cursor -= timedelta(days=1)
-            if cursor.weekday() < 5:
-                steps -= 1
-        stale_latest = cursor.isoformat()
-        with self._morning_kst():
-            result = admin_route._compute_staleness("portfolio-snapshot", stale_latest)
+        from domain.timeutil import KST
+
+        # 휴장일이 없는 주로 고정한다. 실행일 직전이 공휴일이어도 주말 제외를
+        # 검증하며, 시스템 날짜나 당일 정산 시각에 따라 기대값이 달라지지 않는다.
+        with patch("services.portfolio.time_windows.now_kst", return_value=datetime(2026, 4, 22, 9, tzinfo=KST)):
+            result = admin_route._compute_staleness("portfolio-snapshot", "2026-04-16")
         self.assertEqual(result["level"], "stale")
+        self.assertEqual(result["expected_latest"], "2026-04-21")
         self.assertEqual(result["trading_days_behind"], 3)
 
     def test_staleness_handles_malformed_date(self):

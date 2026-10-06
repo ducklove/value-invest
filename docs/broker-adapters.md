@@ -20,6 +20,14 @@
 
 ## 공식 명세와 금액 기준
 
+### NH 국내선물
+
+출처: [NH 공식 주간·야간 잔고 명세](https://www.nhplug.com/openapi-docs/krfuture/openapi.json).
+
+- 주간 `/krfuture/inquiry/v1/balance`의 계약 수는 `bf_dd_ny_stl_qty`(전일 미결제수량)에 `bnc_ind_qty`(잔고 증감수량)를 더한다. 야간 전용 `tdy_ny_stl_qty`를 요구하지 않는다. 청산가능수량 `lqd_pbl_qty`를 보유 수량으로 대신하지 않는다.
+- 야간 `/krfuture/inquiry/v1/nightBalance`에는 `ost_dit_cd=9`(전체 상품), `ost_dit_cd1=1`(보유)를 보낸다. 종목코드는 `fno_iem_cd`, 계약 수는 `tdy_ny_stl_qty`다. 주간 종목코드는 `iem_cd`다.
+- 수량은 음수가 아닌 정수여야 하고 당일 증감에는 음수를 허용한다. 필수 수량·합계 누락이나 잘못된 값은 기존 잔고를 보존한다. 합산 평가액은 계약 명목금액 대신 `nas_tal`과 `tot_eal_pls`를 사용한다.
+
 ### 키움
 
 출처: [공식 가이드](https://openapi.kiwoom.com/guide/apiguide), [공식 명세·예제](https://github.com/Kiwoom-Securities/Kiwoom-REST-API/tree/main/kiwoom).
