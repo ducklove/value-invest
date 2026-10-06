@@ -29,7 +29,6 @@ async function pfLoadAccounts(force = false) {
   if (state) state.textContent = account?.broker ? `${pfBrokerName(account.broker)} 조회 연동 · ${account.connection?.last_sync_at ? '최근 동기화 ' + new Date(account.connection.last_sync_at).toLocaleString('ko-KR') : '첫 동기화 대기'}${account.connection?.sync_error ? ' · 동기화 확인 필요' : ''}` : account ? '이 계좌의 종목과 현금을 표시합니다.' : '모든 계좌의 동일 종목과 현금을 합산합니다.';
   if (state && account) state.textContent += ' NAV·기간 실적은 전체 계좌에서 확인하세요.';
   pfConnectNamuhQuotes();
-  pfRenderDerivativeBalances();
   return rows;
 }
 
@@ -46,20 +45,11 @@ function pfBrokerSnapshotHtml(snapshot) {
     <p>합계에는 평가기준액(계좌 평가액 − 평가손익)과 평가손익을 한 번만 반영합니다. 위 예탁금·계약금액은 다시 더하지 않습니다. ${snapshot.product === 'gbfuture' ? '해외 증거금 조회에서 제공하지 않는 개별 가격·손익은 미제공으로 표시합니다.' : ''}</p>`;
 }
 
-function pfRenderDerivativeBalances() {
-  const panel = _pfAccountEl('pfDerivativeBalances');
-  if (!panel) return;
-  const rows = PfAccounts.rows.filter(row => (!PfStore.accountId || row.account_id === PfStore.accountId) && row.broker_snapshot?.product?.endsWith('future') && row.broker_snapshot.display !== 'holdings');
-  panel.hidden = !rows.length;
-  panel.innerHTML = rows.map(row => `<details class="pf-account-card" open><summary>${escapeHtml(row.name)} · ${row.broker_snapshot.product === 'krfuture' ? '국내' : '해외'}선물 잔고</summary>${row.connection?.sync_error ? `<p class="pf-account-error">동기화 실패 · 이전 잔고 표시: ${escapeHtml(row.connection.sync_error)}</p>` : ''}${!row.broker ? '<p>연결 해제 당시 잔고입니다. 자동 갱신되지 않습니다.</p>' : ''}${pfBrokerSnapshotHtml(row.broker_snapshot)}</details>`).join('');
-}
-
 async function pfSelectAccount(id) {
   if (PfStore.loading || PfStore.edit.savingCode) { _pfAccountEl('pfAccountSelect').value = PfStore.accountId || ''; return; }
   PfStore.accountId = id || '';
   PfStore.edit.code = null;
   PfStore.items = [];
-  pfRenderDerivativeBalances();
   PfStore.manualOrder.pendingCodes = null;
   _pfAccountEl('pfAccountSelect').value = PfStore.accountId;
   await pfLoadAccounts(true);
@@ -76,7 +66,6 @@ function pfResetAccounts() {
   PfAccounts.previewed = false;
   PfStore.accountId = '';
   PfStore.items = [];
-  pfRenderDerivativeBalances();
   try { localStorage.removeItem('valueInvestPortfolioSnapshot:v2'); } catch (_) { /* 저장소 사용 불가 */ }
   pfConnectNamuhQuotes();
   for (const id of ['pfNhDialog', 'pfAccountsDialog']) {

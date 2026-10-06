@@ -364,7 +364,7 @@ test('계좌 종류를 바꾸면 미리보기를 무효화하고 금·선물에�
   } finally {s.dom.window.close();}
 });
 
-test('선물 계약 수·방향과 계좌 평가액을 구분하고 미제공 값·계좌 범위·로그아웃을 보존한다', async () => {
+test('선물 잔고는 상단에 표시하지 않고 연결 미리보기의 계약 수·방향·미제공 값은 보존한다', async () => {
   const s=setup();
   try {
     const snapshot={product:'gbfuture',equity:1490,pnl:90,currency:'KRW',as_of_date:'2026-09-18',
@@ -372,19 +372,15 @@ test('선물 계약 수·방향과 계좌 평가액을 구분하고 미제공 �
     s.w.apiFetchJson=async () => [{account_id:'a',name:'해외 선물',broker:'namuh',connection:{sync_error:'조회 실패'},broker_snapshot:snapshot},
       {account_id:'b',name:'주식 계좌'}];
     await s.w.pfLoadAccounts();
-    assert.equal(s.el('pfDerivativeBalances').hidden,false);
-    assert.match(s.el('pfDerivativeBalances').textContent,/1,490원/);
-    assert.match(s.el('pfDerivativeBalances').textContent,/매도2USD미제공미제공미제공/);
-    assert.match(s.el('pfDerivativeBalances').textContent,/이전 잔고 표시/);
-    assert.equal(s.el('pfDerivativeBalances').querySelector('선물'),null);
-    s.w.PfStore.accountId='b';
-    s.w.pfRenderDerivativeBalances();
-    assert.equal(s.el('pfDerivativeBalances').hidden,true);
-    s.w.PfStore.accountId='a';
-    s.w.pfRenderDerivativeBalances();
+    assert.equal(s.el('pfDerivativeBalances'),null);
+    const preview=s.w.document.createElement('div');
+    preview.innerHTML=s.w.pfBrokerSnapshotHtml(snapshot);
+    assert.match(preview.textContent,/1,490원/);
+    assert.match(preview.textContent,/매도2USD미제공미제공미제공/);
+    assert.equal(preview.querySelector('선물'),null);
     s.w.pfResetAccounts();
-    assert.equal(s.el('pfDerivativeBalances').textContent,'');
-    assert.equal(s.el('pfDerivativeBalances').hidden,true);
+    assert.equal(s.w.PfAccounts.rows.length,0);
+    assert.equal(s.el('pfDerivativeBalances'),null);
   } finally {s.dom.window.close();}
 });
 
@@ -395,8 +391,7 @@ test('국내선물은 음수 주식 환산 수량·조정 예수금·만기로 �
     const snapshot={product:'krfuture',display:'holdings',equity:900,pnl:-100,cash:8000,as_of_date:'2026-10-06',
       positions:[{code:'KA486B000',side:'매도',quantity:2,multiplier:10,expiry_date:'2026-11-12'}]};
     s.w.PfAccounts.rows=[{account_id:'a',name:'국내선물',broker:'namuh',broker_snapshot:snapshot}];
-    s.w.pfRenderDerivativeBalances();
-    assert.equal(s.el('pfDerivativeBalances').hidden,true);
+    assert.equal(s.el('pfDerivativeBalances'),null);
     s.w.pfOpenNhConnection({account_id:'a',name:'국내선물'});
     s.el('pfNhChoices').innerHTML='<option value="choice">계좌</option>';
     s.el('pfNhProduct').value='krfuture';

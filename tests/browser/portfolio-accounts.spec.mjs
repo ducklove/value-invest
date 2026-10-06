@@ -34,8 +34,8 @@ test('금현물·국내·해외선물의 연결 종류와 계약·평가액 표�
     await expect(page.locator('#pfNhDialog')).not.toBeVisible();
     await page.locator('#pfAccountsClose').click();
     await page.locator('#pfAccountSelect').selectOption(aid);
+    await expect(page.locator('#pfDerivativeBalances')).toHaveCount(0);
     if (product === 'krfuture') {
-      await expect(page.locator('#pfDerivativeBalances')).not.toBeVisible();
       const row = page.locator('#pfBody [data-code="KRFUT_KA486B000"]');
       await expect(row.locator('.pf-col-qty')).toContainText('-20');
       await expect(row.locator('.pf-col-curprice')).toContainText('355');
@@ -50,14 +50,10 @@ test('금현물·국내·해외선물의 연결 종류와 계약·평가액 표�
       expect(sum).toBe(900);
     }
     if (product === 'gbfuture') {
-      const panel=page.locator('#pfDerivativeBalances');
-      await expect(panel).toBeVisible();
-      await expect(panel.locator('tbody tr')).toHaveCount(1);
-      await expect(panel).toContainText('매도');
       await expect(page.locator('#pfBody [data-code="FUTURES_PNL_KRW"] .pf-col-mktval')).toContainText(product === 'krfuture' ? '-100' : '90');
       if (product === 'gbfuture') {
         await page.setViewportSize({width:390,height:844});
-        await panel.screenshot({path:testInfo.outputPath('futures-mobile.png')});
+        await page.locator('#portfolioView').screenshot({path:testInfo.outputPath('futures-mobile.png')});
         expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
       }
     }
