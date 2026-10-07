@@ -224,6 +224,9 @@ async def main():
     load_dotenv(Path.cwd() / ".env")
     from repositories.broker_secrets import decrypt
 
+    if os.environ.get("NH_INVENTORY_ONLY") == "true":
+        inventory()
+        return
     if os.environ.get("NH_MANAGE_SESSIONS") == "true":
         from repositories import brokers, db
 
@@ -269,8 +272,6 @@ async def main():
             await db.close_db()
         return
     addresses = inventory()
-    if os.environ.get("NH_INVENTORY_ONLY") == "true":
-        return
     with sqlite3.connect("file:cache.db?mode=ro", uri=True) as db:
         rows = db.execute("""SELECT DISTINCT c.secret_ciphertext,c.token_ciphertext,c.token_expires_at,c.key_fingerprint
                              FROM broker_credentials c JOIN broker_account_links l USING(credential_id)
