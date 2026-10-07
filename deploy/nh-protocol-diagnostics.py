@@ -2,6 +2,8 @@
 
 import asyncio
 import hashlib
+import importlib.util
+import io
 import json
 import os
 import re
@@ -9,7 +11,11 @@ import socket
 import sqlite3
 import ssl
 import subprocess
+import sys
+import threading
 import time
+import types
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import httpx
@@ -124,12 +130,12 @@ async def read_ack(ws, secrets):
     return {"response_code": "no_ack"}
 
 
-async def quote_probe(access, secrets, context, *, port=7070, origin=None, host=None):
+async def quote_probe(access, secrets, context, *, port=7070, origin=None, host=None, notice=False):
     mock = port == 17070
     endpoint = f"wss://{'moapi' if mock else 'api'}.nhplug.com:{port}/websocket"
-    result = {"check": "single_quote", "port": port, "origin": bool(origin), "dns_override": bool(host),
+    result = {"check": "mock_notice" if notice else "single_quote", "port": port, "origin": bool(origin), "dns_override": bool(host),
               "proxy": False, "compression": False}
-    pair = ("RC", "USAAAPL") if port == 7080 else ("mc", "005930")
+    pair = ("d2", "") if notice else ("RC", "USAAAPL") if port == 7080 else ("mc", "005930")
     packet = {"header": {"token": access, "tr_type": "1"}, "body": {"tr_cd": pair[0], "tr_key": pair[1]}}
     options = {"host": host, "server_hostname": "api.nhplug.com"} if host else {}
     try:
@@ -161,6 +167,38 @@ async def quote_probe(access, secrets, context, *, port=7070, origin=None, host=
     return result
 
 
+def sdk_probe(access, secrets):
+    # Run the pinned official subscription implementation; reuse the cached token.
+    root = Path(os.environ["NH_SDK_PROBE_DIR"])
+    sys.path.insert(0, str(root / "deps"))
+    package = types.ModuleType("nhplug")
+    package.__path__ = []
+    auth = types.ModuleType("nhplug.auth")
+    auth.get_base_url = lambda: "https://api.nhplug.com:8443"
+    auth.get_token = lambda: access
+    sys.modules.update({"nhplug": package, "nhplug.auth": auth})
+    spec = importlib.util.spec_from_file_location("nhplug.realtime", root / "realtime.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    result = {"check": "official_sdk", "sdk_commit": "13866ff45dadb25d89e7e68db69ffe79620b198a"}
+
+    def receive(message):
+        head = message.get("header", {}) if isinstance(message, dict) else {}
+        if "rsp_cd" in head:
+            result.update(response_code=safe_code(head["rsp_cd"]),
+                          response_message=safe_message(head.get("rsp_msg", ""), secrets))
+        else:
+            result["data_push_received"] = True
+
+    try:
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            module._run_session(["005930"], receive, tr_cd="mc", url="wss://api.nhplug.com:7070/websocket",
+                                max_messages=1, timeout=5, stop=threading.Event(), include_ack=True)
+    except Exception as exc:
+        result["error"] = type(exc).__name__
+    emit(result)
+
+
 async def main():
     load_dotenv(Path.cwd() / ".env")
     from repositories.broker_secrets import decrypt
@@ -183,12 +221,17 @@ async def main():
         emit({"credential_index": index, "key_fingerprint_matches": hashlib.sha256(secret["app_key"].encode()).hexdigest() == digest,
               "token_has_surrounding_whitespace": access != access.strip(), "token_has_bearer_prefix": access.startswith("Bearer ")})
         await account_probe(access, secrets, context)
+        if os.environ.get("NH_SDK_PROBE_DIR"):
+            await asyncio.to_thread(sdk_probe, access, secrets)
+            await asyncio.sleep(1)
         base = await quote_probe(access, secrets, context)
         if base.get("response_code") != "00000":
             await asyncio.sleep(1)
             await quote_probe(access, secrets, context, origin="https://api.nhplug.com:7070")
             await asyncio.sleep(1)
             await quote_probe(access, secrets, context, port=17070)
+            await asyncio.sleep(1)
+            await quote_probe(access, secrets, context, port=17070, notice=True)
             if len(addresses) > 1:
                 for address in addresses[:2]:
                     await asyncio.sleep(1)

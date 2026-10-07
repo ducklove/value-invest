@@ -27,6 +27,10 @@ on:
         description: Read process, container connection and proxy metadata only
         type: boolean
         default: false
+      official_sdk:
+        description: Compare the pinned official NH SDK in a temporary dependency directory
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -44,14 +48,29 @@ jobs:
           ISOLATE_SERVICE: ${{ inputs.isolate_service }}
           DEEP_PROBE: ${{ inputs.deep_probe }}
           NH_INVENTORY_ONLY: ${{ inputs.inventory_only }}
+          OFFICIAL_SDK: ${{ inputs.official_sdk }}
         run: |
           cd "${APP_DIR:-/home/cantabile/Works/value_invest}"
           git fetch --quiet origin master
+          nh_probe_dir=""
+          nh_service_stopped=false
+          cleanup() {
+            if [ "$nh_service_stopped" = "true" ]; then sudo /bin/systemctl start value-invest.service; fi
+            if [ -n "$nh_probe_dir" ]; then rm -rf -- "$nh_probe_dir"; fi
+          }
+          trap cleanup EXIT
+          if [ "$OFFICIAL_SDK" = "true" ]; then
+            nh_probe_dir=$(mktemp -d /tmp/value-invest-nh-sdk.XXXXXX)
+            export NH_SDK_PROBE_DIR="$nh_probe_dir" DEEP_PROBE=true
+            curl -fsSL https://raw.githubusercontent.com/PLUG-OpenAPI/nhplug-sdk/13866ff45dadb25d89e7e68db69ffe79620b198a/nhplug/realtime.py -o "$nh_probe_dir/realtime.py"
+            printf '%s\n' 'websocket-client==1.9.2 --hash=sha256:e1a673830a9c7bfa47b1cd3d5e4178f4c9651d80a4eab02c9c23a1c3ec6250ce' > "$nh_probe_dir/requirements.txt"
+            .venv-current/bin/python -m pip install --quiet --no-deps --only-binary=:all: --require-hashes --target "$nh_probe_dir/deps" -r "$nh_probe_dir/requirements.txt"
+          fi
           if [ "$DEEP_PROBE" = "true" ] && [ "$ISOLATE_SERVICE" = "true" ]; then
             git show origin/master:deploy/nh-protocol-diagnostics.py | NH_INVENTORY_ONLY=true .venv-current/bin/python -
           fi
           if [ "$ISOLATE_SERVICE" = "true" ]; then
-            trap 'sudo /bin/systemctl start value-invest.service' EXIT
+            nh_service_stopped=true
             sudo /bin/systemctl stop value-invest.service
             sleep 120
             export SUBSCRIPTION_PROBE=true REFRESH_TOKEN=false RELEASE_STALE=false
