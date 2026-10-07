@@ -11,6 +11,10 @@ on:
         description: Renew linked NH cached tokens once to recover stale sessions
         type: boolean
         default: false
+      release_stale:
+        description: Check deregistration on an otherwise rejected NH session
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -24,6 +28,7 @@ jobs:
         env:
           SUBSCRIPTION_PROBE: ${{ inputs.subscription_probe }}
           REFRESH_TOKEN: ${{ inputs.refresh_token }}
+          RELEASE_STALE: ${{ inputs.release_stale }}
         run: |
           cd "${APP_DIR:-/home/cantabile/Works/value_invest}"
           git fetch --quiet origin master

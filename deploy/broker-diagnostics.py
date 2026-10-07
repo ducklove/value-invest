@@ -101,7 +101,9 @@ async def subscription_probe():
             try:
                 async with websockets.connect(endpoint, ssl=truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT),
                                                open_timeout=15, close_timeout=2, ping_interval=None) as ws:
-                    await ws.send(json.dumps({"header": {"token": access, "tr_type": "1"},
+                    action = "2" if os.environ.get("RELEASE_STALE") == "true" else "1"
+                    result["action"] = "unsubscribe" if action == "2" else "subscribe"
+                    await ws.send(json.dumps({"header": {"token": access, "tr_type": action},
                                               "body": {"tr_cd": channel, "tr_key": key}}))
                     for _ in range(5):
                         message = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
@@ -109,7 +111,7 @@ async def subscription_probe():
                         if code:
                             result["response_code"] = code if re.fullmatch(r"[A-Z0-9]{1,20}", code) else "unknown"
                             break
-                    if result.get("response_code") == "00000":
+                    if action == "1" and result.get("response_code") == "00000":
                         await asyncio.sleep(.15)
                         await ws.send(json.dumps({"header": {"token": access, "tr_type": "2"},
                                                   "body": {"tr_cd": channel, "tr_key": key}}))
@@ -145,7 +147,7 @@ async def main():
     await asyncio.gather(probe(7070), probe(7080))
     if os.environ.get("REFRESH_TOKEN") == "true":
         await refresh_tokens()
-    if os.environ.get("SUBSCRIPTION_PROBE") == "true":
+    if os.environ.get("SUBSCRIPTION_PROBE") == "true" or os.environ.get("RELEASE_STALE") == "true":
         await subscription_probe()
 
 
