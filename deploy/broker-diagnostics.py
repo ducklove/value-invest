@@ -95,12 +95,15 @@ async def subscription_probe():
             print(json.dumps({"credential_index": index, "cached_token": "expired_or_missing"}))
             continue
         access = decrypt(sealed)
-        for port, channel, key in [(7070, "mc", "005930"), (7080, "RC", "USAAAPL")]:
+        release = os.environ.get("RELEASE_STALE") == "true"
+        channels = [(7070, "d0" if release else "mc", "" if release else "005930"), (7080, "RC", "USAAAPL")]
+        variants = ["deflate", None] if release else ["deflate"]
+        for port, channel, key, compression in [(port, channel, key, compression) for port, channel, key in channels for compression in variants]:
             endpoint = "wss://moapi.nhplug.com:17070/websocket" if env == "mock" else f"wss://api.nhplug.com:{port}/websocket"
-            result = {"credential_index": index, "port": port, "channel": channel}
+            result = {"credential_index": index, "port": port, "channel": channel, "compression": compression}
             try:
                 async with websockets.connect(endpoint, ssl=truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT),
-                                               open_timeout=15, close_timeout=2, ping_interval=None) as ws:
+                                               open_timeout=15, close_timeout=2, ping_interval=None, compression=compression) as ws:
                     action = "2" if os.environ.get("RELEASE_STALE") == "true" else "1"
                     result["action"] = "unsubscribe" if action == "2" else "subscribe"
                     await ws.send(json.dumps({"header": {"token": access, "tr_type": action},
@@ -110,6 +113,8 @@ async def subscription_probe():
                         code = str(message.get("header", {}).get("rsp_cd", ""))
                         if code:
                             result["response_code"] = code if re.fullmatch(r"[A-Z0-9]{1,20}", code) else "unknown"
+                            response_message = str(message.get("header", {}).get("rsp_msg", ""))
+                            result["message_terms"] = [term for term in ["동시", "세션", "접속", "등록", "초당", "전송", "토큰", "만료", "권한", "초과"] if term in response_message]
                             break
                     if action == "1" and result.get("response_code") == "00000":
                         await asyncio.sleep(.15)
