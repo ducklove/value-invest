@@ -70,8 +70,13 @@ def test_multiple_browsers_automatically_share_without_takeover_or_slot_acquisit
 
 def test_anonymous_client_cannot_consume_live_resources(monkeypatch):
     app, hub = setup_app(monkeypatch, None)
+    hub.holdings = {'private-owner': {'portfolio':['PRIVATE-HOLDING']}}
     with TestClient(app) as client, client.websocket_connect('/ws/quotes') as socket:
-        assert not socket.receive_json()['active']
+        initial = socket.receive_json()
+        assert not initial['active'] and not initial['sources']
+        assert 'PRIVATE-HOLDING' not in str(initial)
+        socket.send_json({'action':'ping'})
+        assert 'PRIVATE-HOLDING' not in str(socket.receive_json())
         socket.send_json({'action': 'subscribe', 'requested': {'portfolio': ['005930']}})
         assert socket.receive_json()['rest'] == ['005930']
         assert not hub.clients

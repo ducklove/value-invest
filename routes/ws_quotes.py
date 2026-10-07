@@ -43,6 +43,12 @@ async def ws_quotes(websocket: WebSocket):
     client = hub.attach(user["google_sub"]) if user else None
     send_lock = asyncio.Lock()
 
+    def status():
+        if client:
+            return hub.status(client)
+        return {"type": "stream_status", "shared": True, "active": False, "can_takeover": False,
+                "stream_state": "offline", "slots_connected": 0, "sources": [], "disconnected_codes": []}
+
     async def send(payload):
         async with send_lock:
             await asyncio.wait_for(websocket.send_json(payload), timeout=10)
@@ -56,7 +62,7 @@ async def ws_quotes(websocket: WebSocket):
 
     task = None
     try:
-        await send({**hub.status(client), "type": "ws_status", "active": client is not None,
+        await send({**status(), "type": "ws_status", "active": client is not None,
                     "forbidden": client is None})
         if client:
             task = asyncio.create_task(relay(), name="shared-quote-client")
@@ -80,7 +86,7 @@ async def ws_quotes(websocket: WebSocket):
                 continue
             action = message.get("action")
             if action == "ping":
-                await send({**hub.status(client), "type": "pong"})
+                await send({**status(), "type": "pong"})
             elif action == "subscribe":
                 requested = sanitize(message.get("requested"))
                 if client:
@@ -89,11 +95,11 @@ async def ws_quotes(websocket: WebSocket):
                     await send({"type": "subscriptions", "ws": [], "rest": [code for codes in requested.values() for code in codes], "shared": True})
             elif action in {"acquire", "takeover"}:
                 # Cached frontends may still send these; they cannot evict another browser.
-                await send({**hub.status(client), "type": "ws_status", "active": client is not None,
+                await send({**status(), "type": "ws_status", "active": client is not None,
                             "forbidden": client is None})
             elif action == "release" and client:
                 hub.subscribe(client, {})
-                await send({**hub.status(client), "type": "ws_status", "active": True, "released": True})
+                await send({**status(), "type": "ws_status", "active": True, "released": True})
     except (WebSocketDisconnect, RuntimeError, TimeoutError, OSError):
         pass
     finally:

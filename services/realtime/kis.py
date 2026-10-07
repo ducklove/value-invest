@@ -120,7 +120,7 @@ class KisSource:
         self._notice_status()
 
     def snapshot(self):
-        state = self.conn.state
+        state = "idle" if self._task is None and self.conn._ws is None else self.conn.state
         if state == "connected":
             tick_at = trade_timestamp(self.conn.last_tick_at)
             state = "live" if self.approved and tick_at and 0 <= time.time() - tick_at < 90 else "subscribed" if self.approved else "connected"

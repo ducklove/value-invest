@@ -168,7 +168,7 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
             if notice_channels:
                 notifications._states[(user, cid)] = {"state": "connecting", "approved": set(), "rejected": set()}
             access = await namuh.token(user, cid)
-            async with namuh_ws.connect(cid, "foreign" if foreign else "domestic", endpoint, ssl=context, ping_interval=None, open_timeout=15, close_timeout=3, max_size=2**20) as ws, _register(ws, cid, access, registrations, notice_channels, changed):
+            async with namuh_ws.connect(cid, "foreign" if foreign else "domestic", endpoint, ssl=context, ping_interval=30, ping_timeout=15, open_timeout=15, close_timeout=3, max_size=2**20) as ws, _register(ws, cid, access, registrations, notice_channels, changed):
                 failed_generation = namuh_ws.generation(cid)
                 approved = set()
                 rejected = set()

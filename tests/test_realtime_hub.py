@@ -91,6 +91,18 @@ async def test_nh_approved_symbols_do_not_consume_shared_capacity_and_loss_uses_
     assert set(hub.sources[0].codes) == {"005930", "AAPL"}
 
 
+def test_admin_diagnostics_include_nh_without_exposing_user_identity(monkeypatch):
+    from services.brokers import realtime
+    hub = QuoteHub()
+    hub.holdings = {'PRIVATE-OWNER': {'portfolio':['005930']}}
+    monkeypatch.setattr(hub, '_nh_coverage', lambda _: {'005930'})
+    monkeypatch.setattr(realtime, 'status', lambda _: {'domestic': {'state':'subscribed','requested':1,'subscribed':1}})
+    result = hub.status()
+    assert result['subscribed'] == 1
+    assert result['sources'][0]['provider'] == 'namuh'
+    assert 'PRIVATE-OWNER' not in str(result)
+
+
 @pytest.mark.asyncio
 async def test_prices_are_filtered_by_requested_user_and_slow_clients_coalesce(monkeypatch):
     hub = QuoteHub()

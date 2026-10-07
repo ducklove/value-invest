@@ -182,17 +182,25 @@ class QuoteHub:
 
     def status(self, client=None):
         sources = [source.snapshot() for source in self.sources]
-        if client:
-            from services.brokers import realtime
-            nh = realtime.status(client.user)
+        from services.brokers import realtime
+        demands = self._demands() if client is None else {client.user: client.requested}
+        for index, user in enumerate(sorted(demands)):
+            nh = realtime.status(user)
             for name in ("domestic", "foreign"):
                 if name in nh:
-                    sources.append({"id": f"namuh:{name}", "provider": "namuh", **nh[name]})
+                    sources.append({"id": f"namuh:{index}:{name}", "provider": "namuh", **nh[name]})
         active = [row for row in sources if row.get("requested") or row.get("reserved")]
         connected = sum(row["state"] in {"connected", "subscribed", "live"} for row in active)
-        wanted = list(dict.fromkeys(code for codes in client.requested.values() for code in codes)) if client else list(self.assignments)
+        wanted = list(dict.fromkeys(code for request in demands.values() for codes in request.values() for code in codes))
         approved = set(client.plan.get("ws", [])) if client else {code for source in self.sources for code in source.approved}
-        fresh = sum(self.quote(client.user if client else None, code) is not None for code in wanted)
+        if client is None:
+            approved |= set().union(*(self._nh_coverage(user) for user in demands))
+        if client:
+            fresh = sum(self.quote(client.user, code) is not None for code in wanted)
+        else:
+            recent = {tick["code"] for tick in self.cache.values() if (at := trade_timestamp(tick.get("as_of")))
+                      and 0 <= time.time() - at < FRESH_SECONDS}
+            fresh = len(set(wanted) & recent)
         return {"type": "stream_status", "shared": True, "active": bool(client), "can_takeover": False,
                 "stream_state": "connected" if approved else "connecting" if active and self.running else "offline",
                 "slots_active": len(active), "slots_connected": connected, "slots_total": len(sources),

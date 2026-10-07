@@ -495,7 +495,8 @@ class WsConnection:
                 async with websockets.connect(
                     WS_URI,
                     additional_headers={"approval_key": approval_key},
-                    ping_interval=None,
+                    ping_interval=30,
+                    ping_timeout=15,
                     open_timeout=15,
                     close_timeout=3,
                 ) as ws:
