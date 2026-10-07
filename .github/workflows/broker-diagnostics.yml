@@ -15,6 +15,10 @@ on:
         description: Check deregistration on an otherwise rejected NH session
         type: boolean
         default: false
+      isolate_service:
+        description: Stop the app for 120 seconds, probe one cached-token subscription, then restore it
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -22,14 +26,24 @@ permissions:
 jobs:
   diagnose:
     runs-on: [self-hosted, linux, home-server]
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
       - name: Read sanitized broker errors and check NH TLS
         env:
           SUBSCRIPTION_PROBE: ${{ inputs.subscription_probe }}
           REFRESH_TOKEN: ${{ inputs.refresh_token }}
           RELEASE_STALE: ${{ inputs.release_stale }}
+          ISOLATE_SERVICE: ${{ inputs.isolate_service }}
         run: |
           cd "${APP_DIR:-/home/cantabile/Works/value_invest}"
           git fetch --quiet origin master
+          if [ "$ISOLATE_SERVICE" = "true" ]; then
+            trap 'sudo /bin/systemctl start value-invest.service' EXIT
+            sudo /bin/systemctl stop value-invest.service
+            sleep 120
+            export SUBSCRIPTION_PROBE=true REFRESH_TOKEN=false RELEASE_STALE=false
+          fi
           git show origin/master:deploy/broker-diagnostics.py | .venv-current/bin/python -
+      - name: Restore app after isolated probe
+        if: ${{ always() && inputs.isolate_service }}
+        run: sudo /bin/systemctl start value-invest.service
