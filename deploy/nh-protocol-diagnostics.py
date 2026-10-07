@@ -264,9 +264,17 @@ async def main():
                     await namuh_ws.subscribe(ws, cid, access, *pair)
                     ack = await read_ack(ws, [access, pair[1], info["gic"]])
                     shape = "numeric" if pair[1].isdigit() else "dot" if "." in pair[1] else "hyphen" if "-" in pair[1] else "plain"
-                    counts[(info["market"], shape, ack.get("response_code", "unknown"))] += 1
-            emit({"foreign_registration_groups": [{"market": m, "key_shape": shape, "response_code": code, "count": count}
-                  for (m, shape, code), count in sorted(counts.items())]})
+                    counts[(info["market"], "native", shape, ack.get("response_code", "unknown"))] += 1
+                    if info["market"] not in {"NQQ", "NYY", "ASQ", "BTQ"}:
+                        for label, key in (("gic", info["gic"]), ("qualified", code)):
+                            alternative = ("RC", key)
+                            if alternative not in pairs:
+                                pairs.append(alternative)
+                            await namuh_ws.subscribe(ws, cid, access, *alternative)
+                            other_ack = await read_ack(ws, [access, key, info["gic"]])
+                            counts[(info["market"], label, shape, other_ack.get("response_code", "unknown"))] += 1
+            emit({"foreign_registration_groups": [{"market": m, "key_format": fmt, "key_shape": shape, "response_code": code, "count": count}
+                  for (m, fmt, shape, code), count in sorted(counts.items())]})
         finally:
             await http.close_http_clients()
             await db.close_db()
