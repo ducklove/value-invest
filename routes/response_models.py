@@ -61,6 +61,22 @@ class CashflowDelta(BaseModel):
     cash_code: str = "CASH_KRW"
 
 
+class ContributorPosition(BaseModel):
+    quantity: FiniteFloat | None = None
+    group_name: str | None = None
+    currency: str | None = None
+
+
+class ContributorTradeFlow(BaseModel):
+    stock_name: str
+    currency: str
+    quantity_change: FiniteFloat
+    cash_change: FiniteFloat
+    buy_amount: FiniteFloat
+    fx_rate: FiniteFloat | None = None
+    comparable: bool
+
+
 class PreviousDayResponse(BaseModel):
     regular_close: dict | None = None
     price_basis: str | None = None
@@ -74,6 +90,8 @@ class PreviousDayResponse(BaseModel):
     return_nav: FiniteFloat | None = None
     return_factor: FiniteFloat = 1
     stock_values: dict[str, FiniteFloat]
+    stock_positions: dict[str, ContributorPosition] | None = None
+    stock_trade_flows: dict[str, ContributorTradeFlow] | None = None
     today_net_cashflow: FiniteFloat
     today_cashflows_by_stock: dict[str, FiniteFloat]
     today_cashflows: list[CashflowDelta]
@@ -87,6 +105,8 @@ class PeriodStartResponse(ExtensibleResponse):
     total_units: FiniteFloat | None = None
     fx_usdkrw: FiniteFloat | None = None
     stock_values: dict[str, FiniteFloat]
+    stock_positions: dict[str, ContributorPosition] | None = None
+    stock_trade_flows: dict[str, ContributorTradeFlow] | None = None
     net_cashflow: FiniteFloat | None = None
     cashflows_by_stock: dict[str, FiniteFloat] | None = None
 

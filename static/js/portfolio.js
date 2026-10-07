@@ -11,6 +11,7 @@
     'portfolio-order.js',
     'portfolio-sparklines.js',
     'portfolio-render.js',
+    'portfolio-contributors.js',
     'portfolio-action-board.js',
     'portfolio-add-search.js',
     'portfolio-actions.js',

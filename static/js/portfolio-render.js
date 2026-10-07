@@ -81,6 +81,42 @@ if (typeof document !== 'undefined') {
   }
 }
 
+function pfUpdateSummaryCards(summary, html) {
+  // Keep buttons (and their children) in place while quotes tick. Replacing
+  // a pressed/focused card between pointerdown and click can lose the click.
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  const merge = (target, next) => {
+    if (target.nodeType !== next.nodeType || target.nodeName !== next.nodeName) {
+      target.replaceWith(next.cloneNode(true));
+      return;
+    }
+    if (next.nodeType === Node.TEXT_NODE) {
+      if (target.data !== next.data) target.data = next.data;
+      return;
+    }
+    if (next.nodeType === Node.ELEMENT_NODE) {
+      // Sparkline sizing is managed by its renderer, not the HTML template.
+      if (next.nodeName !== 'CANVAS') {
+        for (const attr of [...target.attributes]) {
+          if (!next.hasAttribute(attr.name)) target.removeAttribute(attr.name);
+        }
+      }
+      for (const attr of next.attributes) {
+        if (target.getAttribute(attr.name) !== attr.value) target.setAttribute(attr.name, attr.value);
+      }
+    }
+    const children = [...target.childNodes];
+    const incoming = [...next.childNodes];
+    incoming.forEach((node, i) => children[i] ? merge(children[i], node) : target.appendChild(node.cloneNode(true)));
+    children.slice(incoming.length).forEach(node => node.remove());
+  };
+  const incoming = [...template.content.childNodes];
+  const children = [...summary.childNodes];
+  incoming.forEach((node, i) => children[i] ? merge(children[i], node) : summary.appendChild(node.cloneNode(true)));
+  children.slice(incoming.length).forEach(node => node.remove());
+}
+
 function renderPortfolio(options = {}) {
   // 시세·계좌 갱신·늦은 응답이 끌고 있는 DOM을 교체하면 브라우저가 드래그를 취소한다.
   if (PfStore.manualOrder.draggingCode) {
@@ -158,6 +194,7 @@ function renderPortfolio(options = {}) {
       empty.textContent = '포트폴리오가 비어 있습니다. 위 검색창에서 종목을 추가하세요.';
     }
     summary.innerHTML = '';
+    if (typeof pfCloseSummaryContributors === 'function') pfCloseSummaryContributors();
     if (typeof pfHouseholdPortfolioValueChanged === 'function') pfHouseholdPortfolioValueChanged(0);
     return;
   }
@@ -270,6 +307,7 @@ function renderPortfolio(options = {}) {
       empty.textContent = searchText ? '검색 결과가 없습니다.' : '해당 분류의 종목이 없습니다.';
     }
     summary.innerHTML = '';
+    if (typeof pfCloseSummaryContributors === 'function') pfCloseSummaryContributors();
     return;
   }
   if (!summaryOnly) {
@@ -530,7 +568,8 @@ function renderPortfolio(options = {}) {
     return html;
   };
 
-  summary.innerHTML = `
+  const contributorFocus = typeof pfSummaryContributorFocus === 'function' ? pfSummaryContributorFocus() : null;
+  pfUpdateSummaryCards(summary, `
     <div class="pf-summary-card">
       <div class="pf-summary-text">
         <div class="pf-summary-label">Total · 최신 평가 <span class="pf-summary-date">${_timeLabel}</span></div>
@@ -542,30 +581,34 @@ function renderPortfolio(options = {}) {
         <div class="pf-summary-side-value">${_l && curNav != null ? Number(curNav).toFixed(2) : '-'}</div>
       </div>
     </div>
-    <div class="pf-summary-card">
+    <button type="button" class="pf-summary-card js-pf-contributors" data-period="today"
+      aria-label="TODAY 성과 기여 종목 보기" aria-haspopup="dialog" aria-controls="pfContributorPopover" aria-expanded="false">
       <div class="pf-summary-text">
-        <div class="pf-summary-label">Today <span class="pf-summary-date">${_todayLabel}</span></div>
+        <div class="pf-summary-label">Today <span class="pf-summary-info" aria-hidden="true">ⓘ</span><span class="pf-summary-date">${_todayLabel}</span></div>
         <div class="pf-summary-value ${_l ? returnClass(dailyNavPct) : ''}">${_l ? (dailyNavPct !== null ? fmtPct(dailyNavPct) : '-') : '-'}</div>
         ${_l && dailyNavPct !== null ? _subPair(totalDailyPnlDisplay, _dailyValueChange) : '<div class="pf-summary-sub">비교 기준 대기</div>'}
       </div>
       <canvas class="pf-sparkline" id="sparkDaily"></canvas>
-    </div>
-    <div class="pf-summary-card">
+    </button>
+    <button type="button" class="pf-summary-card js-pf-contributors" data-period="mtd"
+      aria-label="MTD 성과 기여 종목 보기" aria-haspopup="dialog" aria-controls="pfContributorPopover" aria-expanded="false">
       <div class="pf-summary-text">
-        <div class="pf-summary-label">MTD <span class="pf-summary-date">${_mtdLabel}</span></div>
+        <div class="pf-summary-label">MTD <span class="pf-summary-info" aria-hidden="true">ⓘ</span><span class="pf-summary-date">${_mtdLabel}</span></div>
         <div class="pf-summary-value ${_l ? returnClass(monthlyNavPct) : ''}">${_l ? (monthlyNavPct !== null ? fmtPct(monthlyNavPct) : '-') : '-'}</div>
         ${_l ? _subPair(_mtdPnl, _mtdValueChange) : '<div class="pf-summary-sub"></div>'}
       </div>
       <canvas class="pf-sparkline" id="sparkMonthly"></canvas>
-    </div>
-    <div class="pf-summary-card">
+    </button>
+    <button type="button" class="pf-summary-card js-pf-contributors" data-period="ytd"
+      aria-label="YTD 성과 기여 종목 보기" aria-haspopup="dialog" aria-controls="pfContributorPopover" aria-expanded="false">
       <div class="pf-summary-text">
-        <div class="pf-summary-label">YTD <span class="pf-summary-date">${_ytdLabel}</span></div>
+        <div class="pf-summary-label">YTD <span class="pf-summary-info" aria-hidden="true">ⓘ</span><span class="pf-summary-date">${_ytdLabel}</span></div>
         <div class="pf-summary-value ${_l ? returnClass(ytdReturnPct) : ''}">${_l ? (ytdReturnPct !== null ? fmtPct(ytdReturnPct) : '-') : '-'}</div>
         ${_l ? _subPair(_ytdPnl, _ytdValueChange) : '<div class="pf-summary-sub"></div>'}
       </div>
       <canvas class="pf-sparkline" id="sparkTotalReturn"></canvas>
-    </div>`;
+    </button>`);
+  if (typeof pfUpdateSummaryContributors === 'function') pfUpdateSummaryContributors(rows, latestSnap, _l, contributorFocus, allRows);
   _renderSummarySparklines(_l ? _liveNavValueKrw : null);
   if (typeof pfHouseholdPortfolioValueChanged === 'function') {
     pfHouseholdPortfolioValueChanged(grandTotalMarketValue);

@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 from repositories import snapshots
 from repositories.db import read_snapshot
-from services.portfolio import nav_link
+from services.portfolio import nav_link, summary_contributors
 from services.portfolio.time_windows import settlement_marker_seconds
 
 
@@ -93,6 +93,7 @@ async def previous_day(user: str, baseline_date: str) -> dict:
         "fx_usdkrw": snapshot.get("fx_usdkrw"), "nav": snapshot.get("nav"),
         "return_nav": snapshot.get("return_nav"), "return_factor": snapshot.get("return_factor", 1),
         "stock_values": {s["stock_code"]: s["market_value"] for s in stocks},
+        **(await summary_contributors.baseline_details(user, snapshot, stocks) if snap_date else {}),
         "today_net_cashflow": net,
         "today_cashflows_by_stock": by_stock,
         "today_cashflows": cashflows,
@@ -114,6 +115,7 @@ async def period_start(user: str, *, yearly: bool = False) -> dict:
         # 휴일·정산 누락으로 이전 날짜를 택해도 합계와 종목별 금액의 기준일은 같다.
         stocks = await snapshots.get_stock_snapshots_exact_date(user, snapshot["date"])
         result["stock_values"] = {s["stock_code"]: s["market_value"] for s in stocks}
+        result.update(await summary_contributors.baseline_details(user, snapshot, stocks))
         result["net_cashflow"], result["cashflows_by_stock"] = await net_cashflow_since_snapshot(user, snapshot["date"])
     return result
 

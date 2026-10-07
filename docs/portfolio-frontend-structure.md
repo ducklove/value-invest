@@ -83,6 +83,14 @@ CSS: 생태계 공통 토큰 `./static/ecosystem/vc-tokens.css`가 분할 CSS �
 14. `portfolio-order.js`: 보유종목 drag/drop 정렬과 저장.
 15. `portfolio-heat.js`: 컬러 모드(일간 등락 히트맵) — 강도 등급, KRX 상/하한가 판정, 등락률 셀 HTML, 요약 스트립. `portfolio-render.js`와 `portfolio-data.js`(WS tick)가 공유하므로 둘보다 먼저 로드된다.
 16. `portfolio-render.js`: 보유종목 테이블/카드 렌더링, 숫자 포맷, sparkline, benchmark 표시.
+    바로 뒤의 `portfolio-contributors.js`는 TODAY·MTD·YTD의 종목 기여 팝오버를 담당한다.
+    마우스 hover/키보드 focus로 미리 보고 클릭·터치로 고정한다. 기간별 정산과 같은
+    `stock_values`·`stock_positions`를 비교하고, `stock_trade_flows`로 매매대금·비용을
+    반영해 상승·하락 손익 금액순 각 3개와 변동률을 표시한다. 전량 매도분도 포함하며,
+    기록으로 설명되지 않는 수량 변경·기준 누락은 제외한다. 현금·배당은 순위에 넣지 않는다.
+    변동률 분모는 기준 평가액 절댓값 + 기간 매수금액이다. 달러 보기에서는 기준일·현재
+    환율을 각각 적용하고, 외화 매매대금은 현재 환율로 환산한다. quote 갱신 시 카드
+    DOM·팝오버·키보드 포커스를 유지한다. 이벤트 연결은 `portfolio-events.js`.
 17. `portfolio-actions.js`: 그룹/benchmark/편집/삭제/검색/목표가/외부 링크 액션.
 18. `portfolio-insights.js`: 투자 인사이트 모달, 태그 관리, linked dashboard 액션, 우선주/지주사 helper.
 19. `portfolio-groups-market.js`: 그룹 관리 모달, market bar, CSV import/export, 통화 전환.

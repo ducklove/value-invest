@@ -44,12 +44,19 @@
     }, true);
     document.addEventListener('click', (e) => {
       const t = e.target;
+      if (typeof pfCloseSummaryContributors === 'function' && !t.closest('.js-pf-contributors, #pfContributorPopover')) {
+        pfCloseSummaryContributors();
+      }
       const codeFromTr = (el) => {
         const host = el.closest('[data-code]');
         return host ? host.dataset.code : null;
       };
       let el;
-      if (t.closest('.js-pf-row-drag')) {
+      if ((el = t.closest('.js-pf-contributors'))) {
+        pfOpenSummaryContributors(el, true);
+      } else if (t.closest('.js-pf-contributors-close')) {
+        pfCloseSummaryContributors(true);
+      } else if (t.closest('.js-pf-row-drag')) {
         e.preventDefault();
         return;
       } else if ((el = t.closest('.js-pf-save'))) {
@@ -164,6 +171,9 @@
       }
     });
     document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && typeof pfCloseSummaryContributors === 'function') {
+        pfCloseSummaryContributors(Boolean(e.target.closest?.('#pfContributorPopover')));
+      }
       const el = e.target.closest && e.target.closest('.pf-insight-tag-input');
       if (!el || e.key !== 'Enter') return;
       e.preventDefault();
@@ -171,6 +181,13 @@
       const code = panel?.dataset.code || pfAssetInsightCode;
       pfAddAssetTag(code, el.value).catch(err => showToast(err.message));
     });
+    for (const type of ['pointerover', 'pointerout', 'focusin', 'focusout']) {
+      document.addEventListener(type, event => {
+        if (typeof pfSummaryContributorPreview === 'function') {
+          pfSummaryContributorPreview(event, type === 'pointerover' || type === 'focusin');
+        }
+      });
+    }
   };
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', onReady);

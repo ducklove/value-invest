@@ -86,3 +86,13 @@ async def list_trades(google_sub: str, limit: int = 20) -> list[dict]:
         (google_sub, limit),
     )).fetchall()
     return [json.loads(row["result_json"]) for row in rows]
+
+
+async def trades_since(google_sub: str, cutoff: str) -> list[dict]:
+    """성과 기준선 이후의 전체 체결. 저장 시각과 경계 모두 UTC로 비교한다."""
+    db = await get_db()
+    rows = await (await db.execute(
+        "SELECT result_json FROM portfolio_trades WHERE google_sub = ? AND created_at > ? ORDER BY id",
+        (google_sub, cutoff),
+    )).fetchall()
+    return [json.loads(row["result_json"]) for row in rows]
