@@ -185,7 +185,6 @@ async def test_background_uses_two_connections_with_separate_30_registration_lim
     link = {"google_sub": "owner", "credential_id": "cid", "account_id": "aid", "environment": "live"}
     rows = [{"stock_code": code} for code in ["KRX_GOLD", *[f"{i:06d}" for i in range(35)], *[f"A{i}" for i in range(35)]]]
     with patch.object(realtime.brokers, "list_links", AsyncMock(return_value=[link])), \
-         patch.object(realtime.quant_scanner, "settings", AsyncMock(return_value=[])), \
          patch.object(realtime.account_holdings, "list_positions", AsyncMock(return_value=rows)), \
          patch.object(realtime, "sync_account", AsyncMock()), patch.object(realtime, "stream", side_effect=stream):
         await asyncio.wait_for(realtime.run(stop), 2)
@@ -200,13 +199,13 @@ async def test_scanner_reserves_second_connection_and_foreign_resumes_when_stopp
     stop = asyncio.Event()
     calls, states = [], []
     link = {"google_sub": "owner", "credential_id": "cid", "account_id": "aid", "environment": "live"}
-    setting = {"google_sub": "owner", "config": {"account_id": "aid", "enabled": True}}
     scans = 0
 
-    async def settings():
+    def requested(cid, role):
         nonlocal scans
+        assert (cid, role) == ("cid", "scanner")
         scans += 1
-        return [setting] if scans == 1 else []
+        return scans == 1
 
     async def stream(user, cid, codes, env, **kwargs):
         calls.append(kwargs.get("foreign", False))
@@ -216,7 +215,7 @@ async def test_scanner_reserves_second_connection_and_foreign_resumes_when_stopp
         await stop.wait()
 
     with patch.object(realtime.brokers, "list_links", AsyncMock(return_value=[link])), \
-         patch.object(realtime.quant_scanner, "settings", side_effect=settings), \
+         patch.object(realtime.namuh_ws, "requested", side_effect=requested), \
          patch.object(realtime.account_holdings, "list_positions", AsyncMock(return_value=[{"stock_code": "005930"}, {"stock_code": "AAPL"}])), \
          patch.object(realtime, "sync_account", AsyncMock()), patch.object(realtime, "stream", side_effect=stream):
         await asyncio.wait_for(realtime.run(stop), 3)

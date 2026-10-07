@@ -18,7 +18,7 @@ import websockets
 
 from cache_layer import MemoryTTLCache
 from domain.timeutil import KST as _KST
-from repositories import account_holdings, brokers, quant_scanner
+from repositories import account_holdings, brokers
 from repositories.broker_secrets import BrokerError
 from services.brokers import namuh, namuh_ws, notifications, overseas_realtime
 from services.brokers.sync import sync_account
@@ -158,7 +158,7 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
             if notice_channels:
                 notifications._states[(user, cid)] = {"state": "connecting", "approved": set(), "rejected": set()}
             access = await namuh.token(user, cid)
-            async with namuh_ws.slot(cid), websockets.connect(endpoint, ssl=context, ping_interval=None, open_timeout=15, close_timeout=3, max_size=2**20) as ws, _register(ws, cid, access, registrations, notice_channels, changed):
+            async with namuh_ws.slot(cid, "foreign" if foreign else "domestic"), websockets.connect(endpoint, ssl=context, ping_interval=None, open_timeout=15, close_timeout=3, max_size=2**20) as ws, _register(ws, cid, access, registrations, notice_channels, changed):
                 approved = set()
                 rejected = set()
                 receiving = False
@@ -283,9 +283,7 @@ async def run(stop: asyncio.Event):
             wake.clear()
             try:
                 links = [row for row in await brokers.list_links() if row.get("provider", "namuh") == "namuh"]
-                scanner_accounts = {(setting["google_sub"], setting["config"]["account_id"])
-                                    for setting in await quant_scanner.settings() if setting["config"]["enabled"]}
-                scanner_keys = {link["credential_id"] for link in links if (link["google_sub"], link["account_id"]) in scanner_accounts}
+                scanner_keys = {link["credential_id"] for link in links if namuh_ws.requested(link["credential_id"], "scanner")}
                 desired, users, credentials, reserved = {}, set(), set(), {}
                 ordered = sorted(links, key=lambda row: (row["google_sub"], row["environment"] != "live", row["credential_id"]))
                 for link in ordered:

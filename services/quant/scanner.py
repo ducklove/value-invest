@@ -158,7 +158,7 @@ class Watcher:
             try:
                 access = await namuh.token(self.user, self.cid)
                 context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-                async with namuh_ws.slot(self.cid), websockets.connect(endpoint, ssl=context, ping_interval=None, open_timeout=15, close_timeout=3, max_size=2**20) as ws:
+                async with namuh_ws.slot(self.cid, "scanner"), websockets.connect(endpoint, ssl=context, ping_interval=None, open_timeout=15, close_timeout=3, max_size=2**20) as ws:
                     for channel, key in sorted(regs):
                         await namuh_ws.subscribe(ws, self.cid, access, channel, key)
                     approved, written = set(), {}

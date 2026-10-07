@@ -149,7 +149,6 @@ class GoldRealtimeTests(IsolatedAsyncioTestCase):
 
         link = {"google_sub": "owner", "credential_id": "credential", "account_id": "account", "environment": "live", "product": "gold"}
         with patch.object(realtime.brokers, "list_links", AsyncMock(return_value=[link])), \
-             patch.object(realtime.quant_scanner, "settings", AsyncMock(return_value=[])), \
              patch.object(realtime.account_holdings, "list_positions", AsyncMock(return_value=[{"stock_code": "KRX_GOLD"}])), \
              patch.object(realtime, "sync_account", AsyncMock()), \
              patch.object(realtime, "stream", AsyncMock(side_effect=stream)) as stream_mock:

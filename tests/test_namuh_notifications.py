@@ -59,7 +59,6 @@ async def test_server_starts_notification_sockets_for_every_key_without_holdings
         await stop.wait()
 
     with patch.object(realtime.brokers, "list_links", AsyncMock(return_value=links)), \
-         patch.object(realtime.quant_scanner, "settings", AsyncMock(return_value=[])), \
          patch.object(realtime.account_holdings, "list_positions", AsyncMock(return_value=[])), \
          patch.object(realtime, "sync_account", AsyncMock()) as sync, patch.object(realtime, "stream", side_effect=stream):
         await asyncio.wait_for(realtime.run(stop), 3)
