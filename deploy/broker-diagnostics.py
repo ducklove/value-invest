@@ -37,6 +37,21 @@ def journal_summary():
     print(json.dumps({"journal_exit": result.returncode, "broker_errors": dict(counts)}, ensure_ascii=False))
 
 
+def connection_summary():
+    main_pid = subprocess.run(["systemctl", "show", "value-invest.service", "-p", "MainPID", "--value"],
+                              capture_output=True, text=True, check=False).stdout.strip()
+    result = subprocess.run(["ss", "-Hntp", "state", "established"], capture_output=True, text=True, check=False)
+    counts = Counter()
+    for line in result.stdout.splitlines():
+        match = re.search(r":(7070|7080)\b", line)
+        if match:
+            owner = "app" if f"pid={main_pid}," in line else "other_or_unknown"
+            counts[f"{owner}:{match[1]}"] += 1
+    with sqlite3.connect("file:cache.db?mode=ro", uri=True) as db:
+        scanners = db.execute("SELECT count(*) FROM quant_scanners WHERE json_extract(config_json,'$.enabled')=1").fetchone()[0]
+    print(json.dumps({"nh_connections": dict(counts), "enabled_scanners": scanners}))
+
+
 async def probe(port):
     endpoint = f"wss://api.nhplug.com:{port}/websocket"
     try:
@@ -92,6 +107,7 @@ async def subscription_probe():
 
 async def main():
     journal_summary()
+    connection_summary()
     await asyncio.gather(probe(7070), probe(7080))
     if os.environ.get("SUBSCRIPTION_PROBE") == "true":
         await subscription_probe()
