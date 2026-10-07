@@ -46,8 +46,28 @@ def inventory():
         except OSError:
             unreadable += 1
     try:
-        docker = subprocess.run(["docker", "ps", "-q"], capture_output=True, text=True, check=False, timeout=5)
+        docker = subprocess.run(["docker", "ps", "--format", "{{.ID}}\t{{.Names}}\t{{.Image}}"],
+                                capture_output=True, text=True, check=False, timeout=5)
         containers = len(docker.stdout.splitlines()) if docker.returncode == 0 else None
+        for line in docker.stdout.splitlines() if docker.returncode == 0 else []:
+            cid, name, image = line.split("\t")
+            if not re.fullmatch(r"[a-f0-9]{12,64}", cid):
+                continue
+            result = subprocess.run(["docker", "exec", cid, "sh", "-c", "cat /proc/net/tcp /proc/net/tcp6"],
+                                    capture_output=True, text=True, check=False, timeout=5)
+            states = {}
+            for row in result.stdout.splitlines():
+                fields = row.split()
+                if len(fields) > 3 and ":" in fields[2]:
+                    try:
+                        port = int(fields[2].split(":")[1], 16)
+                    except ValueError:
+                        continue
+                    if port in {7070, 7080, 17070}:
+                        label = f"{port}:state_{fields[3]}"
+                        states[label] = states.get(label, 0) + 1
+            emit({"container_name": name, "image": image, "network_read_ok": result.returncode == 0,
+                  "nh_port_connections": states})
     except (OSError, subprocess.TimeoutExpired):
         containers = None
     proxy = get_proxy(parse_uri("wss://api.nhplug.com:7070/websocket"))

@@ -23,6 +23,10 @@ on:
         description: Compare cached-token REST and direct WebSocket protocol without preliminary TLS sockets
         type: boolean
         default: false
+      inventory_only:
+        description: Read process, container connection and proxy metadata only
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -39,6 +43,7 @@ jobs:
           RELEASE_STALE: ${{ inputs.release_stale }}
           ISOLATE_SERVICE: ${{ inputs.isolate_service }}
           DEEP_PROBE: ${{ inputs.deep_probe }}
+          NH_INVENTORY_ONLY: ${{ inputs.inventory_only }}
         run: |
           cd "${APP_DIR:-/home/cantabile/Works/value_invest}"
           git fetch --quiet origin master
@@ -51,7 +56,7 @@ jobs:
             sleep 120
             export SUBSCRIPTION_PROBE=true REFRESH_TOKEN=false RELEASE_STALE=false
           fi
-          if [ "$DEEP_PROBE" = "true" ]; then
+          if [ "$DEEP_PROBE" = "true" ] || [ "$NH_INVENTORY_ONLY" = "true" ]; then
             git show origin/master:deploy/nh-protocol-diagnostics.py | .venv-current/bin/python -
           else
             git show origin/master:deploy/broker-diagnostics.py | .venv-current/bin/python -
