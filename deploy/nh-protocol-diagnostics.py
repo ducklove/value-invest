@@ -119,6 +119,23 @@ async def account_probe(access, secrets, context):
     emit(result)
 
 
+async def reset_sessions(access, secrets, context):
+    # Official session recovery API; no account or order operation.
+    result = {"check": "reset_sessions"}
+    try:
+        async with httpx.AsyncClient(verify=context, trust_env=False, timeout=15) as client:
+            response = await client.post("https://api.nhplug.com:8443/websocket/close/session",
+                                         headers={"Authorization": "Bearer " + access,
+                                                  "Content-Type": "application/json;charset=utf-8"})
+        result["http_status"] = response.status_code
+        data = response.json()
+        result["response_code"] = safe_code(data.get("rsp_cd"))
+        result["response_message"] = safe_message(data.get("rsp_msg", ""), secrets)
+    except Exception as exc:
+        result["error"] = type(exc).__name__
+    emit(result)
+
+
 async def read_ack(ws, secrets):
     async with asyncio.timeout(5):
         for _ in range(10):
@@ -221,6 +238,10 @@ async def main():
         emit({"credential_index": index, "key_fingerprint_matches": hashlib.sha256(secret["app_key"].encode()).hexdigest() == digest,
               "token_has_surrounding_whitespace": access != access.strip(), "token_has_bearer_prefix": access.startswith("Bearer ")})
         await account_probe(access, secrets, context)
+        if os.environ.get("NH_RESET_SESSIONS") == "true":
+            await asyncio.sleep(1.1)
+            await reset_sessions(access, secrets, context)
+            await asyncio.sleep(1)
         if os.environ.get("NH_SDK_PROBE_DIR"):
             await asyncio.to_thread(sdk_probe, access, secrets)
             await asyncio.sleep(1)
