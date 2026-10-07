@@ -1,159 +1,95 @@
+import asyncio
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
-import kis_ws_manager
 from core.config import DEFAULT_CORS_ORIGINS
 from routes import ws_quotes
+from services.realtime.hub import QuoteHub
 
 
-class _FakeConn:
-    def __init__(self):
-        self.requested = None
-
-    def update_subscriptions(self, requested):
-        self.requested = requested
-
-
-def test_active_slot_reports_upstream_connection_separately():
-    session = ws_quotes._Session()
-    connection = _FakeConn()
-    connection.state = "connecting"
-    session.conns = [ws_quotes._Conn("slot-1", connection)]
-    payload = ws_quotes._ws_status_payload(None, active=True, session=session)
-    assert payload["active"] is True
-    assert payload["type"] == "ws_status"
-    assert payload["slots_connected"] == 0
-    assert payload["stream_state"] == "connecting"
-    connection.state = "connected"
-    assert ws_quotes._stream_status_payload(session)["slots_connected"] == 1
-    connection.state = "reconnecting"
-    assert ws_quotes._stream_status_payload(session)["stream_state"] == "reconnecting"
+def test_origin_allowed_accepts_local_dev_preview_and_rejects_other_origins(monkeypatch):
+    monkeypatch.setattr(ws_quotes, "get_settings", lambda: SimpleNamespace(cors_allowed_origins=DEFAULT_CORS_ORIGINS))
+    for origin in ["http://localhost:8021", "http://127.0.0.1:8021", "http://localhost:8000"]:
+        assert ws_quotes._origin_allowed(origin)
+    assert not ws_quotes._origin_allowed("http://evil.example")
+    assert not ws_quotes._origin_allowed(None)
 
 
-def test_lost_slot_invalidates_its_codes_while_other_slot_stays_connected():
-    session = ws_quotes._Session()
-    session.conns = [ws_quotes._Conn("slot-1", SimpleNamespace(state="connected", _requested={"portfolio": ["005930"]})),
-                     ws_quotes._Conn("slot-2", SimpleNamespace(state="reconnecting", _requested={"portfolio": ["000660"]}))]
-    payload = ws_quotes._stream_status_payload(session)
-    assert payload["slots_connected"] == 1
-    assert payload["stream_state"] == "connected"
-    assert payload["disconnected_codes"] == ["000660"]
+def setup_app(monkeypatch, user):
+    hub = QuoteHub()
+    hub.running = True
+    monkeypatch.setattr(hub, '_nh_coverage', lambda _: set())
+    monkeypatch.setattr(ws_quotes, "get_hub", lambda: hub)
+    monkeypatch.setattr(ws_quotes, "_origin_allowed", lambda origin: True)
+    monkeypatch.setattr(ws_quotes, "get_current_user", AsyncMock(return_value=user))
 
-
-def test_multi_connection_plan_splits_live_codes_by_connection_capacity():
-    codes = [f"{idx:06d}" for idx in range(45)]
-    session = ws_quotes._Session()
-    first = _FakeConn()
-    second = _FakeConn()
-    session.conns = [
-        ws_quotes._Conn("slot-1", first),
-        ws_quotes._Conn("slot-2", second),
-    ]
-
-    result = ws_quotes._apply_multi_connection_plan(session, {"portfolio": codes})
-
-    assert result["ws"] == codes
-    assert result["rest"] == []
-    assert first.requested == {"portfolio": codes[:kis_ws_manager.MAX_SUBSCRIPTIONS]}
-    assert second.requested == {"portfolio": codes[kis_ws_manager.MAX_SUBSCRIPTIONS:]}
-
-
-def test_origin_allowed_accepts_local_dev_preview_port(monkeypatch):
-    """launch.json 개발 서버(8021)에서 뜬 SPA의 웹소켓 핸드셰이크가 기본 허용 목록에 막히지 않는다."""
-    monkeypatch.setattr(
-        ws_quotes,
-        "get_settings",
-        lambda: SimpleNamespace(cors_allowed_origins=DEFAULT_CORS_ORIGINS),
-    )
-
-    assert ws_quotes._origin_allowed("http://localhost:8021") is True
-    assert ws_quotes._origin_allowed("http://127.0.0.1:8021") is True
-    assert ws_quotes._origin_allowed("http://localhost:8000") is True
-    assert ws_quotes._origin_allowed("http://evil.example") is False
-    assert ws_quotes._origin_allowed(None) is False
-
-
-def test_can_takeover_requires_admin_user():
-    assert ws_quotes._can_takeover({"google_sub": "admin", "is_admin": True}) is True
-    assert ws_quotes._can_takeover({"google_sub": "u1", "is_admin": False}) is False
-    assert ws_quotes._can_takeover(None) is False
-
-
-@pytest.mark.parametrize("linked", [False, True])
-def test_nh_fallback_can_only_acquire_free_slots_and_never_evicts(monkeypatch, linked):
-    app = FastAPI()
+    @asynccontextmanager
+    async def lifespan(app):
+        async def pump():
+            while True:
+                await hub.reconcile()
+                await asyncio.sleep(.02)
+        task = asyncio.create_task(pump())
+        try: yield
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    app = FastAPI(lifespan=lifespan)
     app.include_router(ws_quotes.router)
-    monkeypatch.setattr(ws_quotes, "_origin_allowed", lambda _origin: True)
-    monkeypatch.setattr(ws_quotes, "get_current_user", AsyncMock(return_value={"google_sub": "owner", "is_admin": False}))
-    monkeypatch.setattr(ws_quotes.brokers, "has_link", AsyncMock(return_value=linked))
-    monkeypatch.setattr(ws_quotes.kis_ws_manager, "get_all_cached_quotes", lambda: {})
-    monkeypatch.setattr(ws_quotes.kis_key_manager, "available_count", lambda: 0)
-    monkeypatch.setattr(ws_quotes.kis_key_manager, "total_count", lambda: 1)
-    acquire = AsyncMock(return_value=None)
-    evict = AsyncMock()
-    monkeypatch.setattr(ws_quotes.kis_key_manager, "acquire", acquire)
-    monkeypatch.setattr(ws_quotes, "_evict_oldest_session", evict)
-    with TestClient(app) as client, client.websocket_connect("/ws/quotes") as socket:
-        socket.receive_json()
-        socket.send_json({"action": "acquire"})
-        response = socket.receive_json()
-        assert not response["active"]
-        assert response.get("forbidden", False) == (not linked)
-    assert acquire.await_count == int(linked)
-    evict.assert_not_awaited()
+    return app, hub
 
 
-def test_websocket_takeover_requires_admin_session(monkeypatch):
-    app = FastAPI()
-    app.include_router(ws_quotes.router)
+def receive_type(socket, kind, predicate=lambda message: True):
+    for _ in range(20):
+        message = socket.receive_json()
+        if message['type'] == kind and predicate(message): return message
+    raise AssertionError(f'{kind} not received')
 
-    monkeypatch.setattr(ws_quotes, "_origin_allowed", lambda _origin: True)
-    monkeypatch.setattr(ws_quotes.kis_ws_manager, "ws_cache_matches_rest_market", lambda: True)
-    monkeypatch.setattr(ws_quotes.kis_ws_manager, "get_all_cached_quotes", lambda: {})
-    monkeypatch.setattr(ws_quotes.kis_key_manager, "available_count", lambda: 1)
-    monkeypatch.setattr(ws_quotes.kis_key_manager, "total_count", lambda: 1)
 
+def test_multiple_browsers_automatically_share_without_takeover_or_slot_acquisition(monkeypatch):
+    app, hub = setup_app(monkeypatch, {'google_sub': 'owner', 'is_admin': False})
     with TestClient(app) as client:
-        with client.websocket_connect("/ws/quotes", headers={"origin": "http://testserver"}) as websocket:
-            status = websocket.receive_json()
-            assert status["type"] == "ws_status"
-            assert status["can_takeover"] is False
+        with client.websocket_connect('/ws/quotes') as first, client.websocket_connect('/ws/quotes') as second:
+            for socket in [first, second]:
+                status = receive_type(socket, 'ws_status')
+                assert status['active'] and status['shared'] and not status['can_takeover']
+                socket.send_json({'action': 'subscribe', 'requested': {'portfolio': ['005930']}})
+                assert receive_type(socket, 'subscriptions', lambda message: bool(message['rest']))['rest'] == ['005930']
+            first.send_json({'action': 'takeover'})
+            assert receive_type(first, 'ws_status')['active']
+            assert len(hub.clients) == 2
+            second.send_json({'action': 'ping'})
+            assert receive_type(second, 'pong')['shared']
+        assert len(hub.clients) == 0
 
-            websocket.send_json({"action": "takeover"})
-            denied = websocket.receive_json()
-            assert denied["type"] == "ws_status"
-            assert denied["active"] is False
-            assert denied["forbidden"] is True
-            assert denied["can_takeover"] is False
+
+def test_anonymous_client_cannot_consume_live_resources(monkeypatch):
+    app, hub = setup_app(monkeypatch, None)
+    with TestClient(app) as client, client.websocket_connect('/ws/quotes') as socket:
+        assert not socket.receive_json()['active']
+        socket.send_json({'action': 'subscribe', 'requested': {'portfolio': ['005930']}})
+        assert socket.receive_json()['rest'] == ['005930']
+        assert not hub.clients
 
 
-@pytest.mark.asyncio
-async def test_session_capacity_expansion_does_not_evict_other_session_when_slot_is_busy(monkeypatch):
-    codes = [f"{idx:06d}" for idx in range(45)]
-    session = ws_quotes._Session()
-    session.is_active = True
-    session.conns = [ws_quotes._Conn("slot-1", _FakeConn())]
+def test_expired_authentication_closes_socket(monkeypatch):
+    app, hub = setup_app(monkeypatch, {'google_sub': 'owner'})
+    monkeypatch.setattr(ws_quotes, 'get_current_user', AsyncMock(side_effect=[{'google_sub': 'owner'}, None]))
+    with TestClient(app) as client, client.websocket_connect('/ws/quotes') as socket:
+        socket.receive_json()
+        socket.send_json({'action': 'ping'})
+        with pytest.raises(WebSocketDisconnect) as closed:
+            receive_type(socket, 'pong')
+        assert closed.value.code == 1008
 
-    acquired = [None]
-    evict = AsyncMock(return_value=True)
 
-    async def acquire():
-        return acquired.pop(0)
-
-    async def start_connection(_websocket, active_session, key_slot):
-        active_session.conns.append(ws_quotes._Conn(key_slot, _FakeConn()))
-
-    monkeypatch.setattr(ws_quotes.kis_key_manager, "total_count", lambda: 2)
-    monkeypatch.setattr(ws_quotes.kis_key_manager, "acquire", acquire)
-    monkeypatch.setattr(ws_quotes, "_evict_oldest_session", evict)
-    monkeypatch.setattr(ws_quotes, "_start_connection", start_connection)
-
-    await ws_quotes._ensure_session_capacity(None, session, {"portfolio": codes})
-
-    evict.assert_not_awaited()
-    assert len(session.conns) == 1
-    assert [entry.key_slot for entry in session.conns] == ["slot-1"]
+@pytest.mark.parametrize('user,status', [(None,403), ({'google_sub':'owner'},403), ({'google_sub':'owner','is_admin':True},200)])
+def test_connection_diagnostics_requires_admin(monkeypatch,user,status):
+    app, _ = setup_app(monkeypatch,user)
+    with TestClient(app) as client:
+        assert client.get('/api/realtime/status').status_code == status

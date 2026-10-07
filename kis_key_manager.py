@@ -2,8 +2,8 @@
 
 Each KIS API key pair can support one WebSocket connection with up to 40
 real-time subscriptions. This manager loads all available key pairs from
-environment variables and provides acquire/release semantics so multiple
-browser sessions can stream quotes simultaneously.
+environment variables. The realtime hub owns the connections; browser sessions
+only contribute subscription demand. Legacy acquire/release helpers remain for callers.
 
 Public API
 ----------
@@ -58,7 +58,7 @@ class KeySlot:
 
         key = data.get("approval_key", "")
         if not key:
-            raise RuntimeError(f"KIS approval key empty (slot {self.slot_id}): {data}")
+            raise RuntimeError(f"KIS approval key empty (slot {self.slot_id})")
 
         self._approval_key = key
         self._approval_key_ts = now
@@ -66,7 +66,7 @@ class KeySlot:
         return self._approval_key
 
     def __repr__(self) -> str:
-        return f"KeySlot(id={self.slot_id}, key=...{self.app_key[-6:]})"
+        return f"KeySlot(id={self.slot_id})"
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +107,8 @@ def load_keys() -> int:
         _slots.append(KeySlot(i - 1, key, secret, base_url))
         i += 1
 
+    # A duplicate environment entry must never produce a second owner for the same key.
+    _slots = list({slot.app_key: slot for slot in _slots}.values())
     _available = list(_slots)
     logger.info("KIS key manager: %d key(s) loaded", len(_slots))
     return len(_slots)
@@ -146,3 +148,7 @@ def total_count() -> int:
 def available_count() -> int:
     """Number of key slots currently available."""
     return len(_available)
+
+
+def all_slots() -> list[KeySlot]:
+    return list(_slots)

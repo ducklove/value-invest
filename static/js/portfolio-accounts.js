@@ -279,6 +279,8 @@ function pfCheckNamuhConnection() {
 function pfRenderNhQuoteState(message) {
   const label = _pfAccountEl('pfNhQuoteState');
   if (!label) return;
+  // The common quote status reports actual coverage, including broker failover.
+  if (QuoteManager.sharedMode) { label.textContent = ''; return; }
   if (!PfAccounts.rows.some(row => row.broker === 'namuh')) { label.textContent = ''; return; }
   const reason = message.reason || message.domestic?.reason || message.foreign?.reason;
   const responseCode = message.response_code || message.domestic?.response_code || message.foreign?.response_code;

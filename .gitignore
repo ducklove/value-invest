@@ -24,6 +24,7 @@ server.log
 .deploy-repair-*.done
 .superpowers/
 data/pdf_cache/
+data/realtime-owner.lock
 data/db-imports/
 *.before-prod-portfolio-import.*.db
 node_modules/

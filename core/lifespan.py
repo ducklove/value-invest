@@ -180,6 +180,13 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
         indicator_stop = asyncio.Event()
         tasks.append((asyncio.create_task(indicator_health.run_loop(indicator_stop), name="market-indicators"), indicator_stop))
 
+        from services.realtime.hub import get_hub
+        realtime_stop = asyncio.Event()
+        realtime_task = asyncio.create_task(get_hub().run(realtime_stop), name="realtime-quotes")
+        tasks.append((realtime_task, realtime_stop))
+        # Initialize the owner before account workers choose a shared KIS socket.
+        await asyncio.sleep(0)
+
         from services.brokers.registry import all_adapters
         for adapter in all_adapters():
             broker_stop = asyncio.Event()

@@ -43,6 +43,7 @@ const QuoteManager = {
   namuhSuspended: false,
   namuhAutoSlot: false,
   namuhKisPaused: false,
+  sharedMode: false,
 
   setNamuhLinked(linked) {
     if (this.namuhLinked === !!linked) return;
@@ -58,6 +59,7 @@ const QuoteManager = {
   },
 
   onNamuhQuote(code, quote) {
+    if (this.sharedMode) return;
     if (!this.namuhLinked || !isNamuhLiveQuote(quote)) return;
     if (!shouldAcceptQuoteSnapshot(this.namuhQuotes[code], quote)) return;
     this.namuhQuotes[code] = quote;
@@ -66,6 +68,7 @@ const QuoteManager = {
   },
 
   namuhUnavailable() {
+    if (this.sharedMode) return;
     this.namuhQuotes = {};
     this.namuhStartedAt = 0;
     for (const item of (typeof PfStore !== 'undefined' ? PfStore.items : [])) {
@@ -75,6 +78,7 @@ const QuoteManager = {
   },
 
   onNamuhStatus(message) {
+    if (this.sharedMode) return;
     for (const [market, state] of [['domestic', message.domestic], ['foreign', message.foreign]]) {
       if (!state || !['degraded', 'waiting'].includes(state.state) || state.reason === 'subscription_rejected') continue;
       for (const code of Object.keys(this.namuhQuotes)) {
@@ -90,7 +94,7 @@ const QuoteManager = {
     this._syncNamuhFallback();
   },
 
-  _hasNamuhQuote(code) { return this.namuhLinked && isNamuhLiveQuote(this.namuhQuotes[code]); },
+  _hasNamuhQuote(code) { return !this.sharedMode && this.namuhLinked && isNamuhLiveQuote(this.namuhQuotes[code]); },
 
   _fallbackSubscriptions() {
     return Object.fromEntries(Object.entries(this.subscriptions).map(([group, codes]) =>
@@ -98,6 +102,7 @@ const QuoteManager = {
   },
 
   _syncNamuhFallback() {
+    if (this.sharedMode) return;
     if (!this.namuhLinked) return;
     const requested = this._fallbackSubscriptions();
     const needsKis = Object.values(requested).flat().some(code => /^[0-9][0-9A-Z]{5}$/.test(code));
@@ -129,6 +134,7 @@ const QuoteManager = {
   },
 
   setManualControlAllowed(allowed) {
+    if (this.sharedMode) { this.manualControlAllowed = false; this._syncControlUi(); return; }
     const nextAllowed = !!allowed;
     this.manualControlAllowed = nextAllowed;
     if (nextAllowed) {
@@ -189,6 +195,19 @@ const QuoteManager = {
           this._fetchInitialQuotes(allCodes);
           this._startOverflowPolling();
         } else if (msg.type === 'ws_status') {
+          if (msg.shared) {
+            this.sharedMode = true;
+            this.manualControlAllowed = false;
+            this.desiredActive = false;
+            this._saveDesiredActive();
+            this.wsActive = !!msg.active;
+            this.streamState = msg.stream_state || 'connecting';
+            this.lastSlotMeta = msg;
+            this.lastStatus = msg.active ? 'active' : 'forbidden';
+            this._sendSubscriptions();
+            this._syncControlUi();
+            return;
+          }
           this.lastSlotMeta = msg;
           this.serverCanTakeover = msg.can_takeover !== false;
           if (msg.active) {
@@ -435,7 +454,7 @@ const QuoteManager = {
 
   _sendSubscriptions() {
     if (!this.connected || !this.ws || !this.wsActive) return;
-    const requested = this.namuhLinked ? this._fallbackSubscriptions() : this.subscriptions;
+    const requested = this.sharedMode ? this.subscriptions : this.namuhLinked ? this._fallbackSubscriptions() : this.subscriptions;
     this.namuhLastPlan = JSON.stringify(requested);
     this.ws.send(JSON.stringify({ action: 'subscribe', requested }));
   },
@@ -450,6 +469,13 @@ const QuoteManager = {
   },
 
   _controlStatusText() {
+    if (this.sharedMode) {
+      if (!this.connected) return '실시간 시세 재연결 중';
+      if (!this.wsActive) return '실시간 시세 · 로그인 필요';
+      const meta = this.lastSlotMeta || {};
+      if (meta.subscribed) return `실시간 ${meta.subscribed}종목 · ${meta.receiving || 0}종목 수신${meta.fallback ? ` · 조회 ${meta.fallback}종목` : ''}`;
+      return meta.requested ? '실시간 시세 연결 중 · 조회 시세 보완' : '실시간 시세 대기';
+    }
     const kisLive = [...this.wsCodes].some(code => this._hasKisQuote(code));
     if (this.wsActive) {
       if (this.streamState === 'reconnecting') return 'KIS 재연결 중';
@@ -464,6 +490,12 @@ const QuoteManager = {
   },
 
   _controlStatusDetail() {
+    if (this.sharedMode) {
+      const names = {kis: 'KIS', toss: '토스', namuh: 'NH'};
+      const states = {idle: '대기', connecting: '연결 중', connected: '구독 확인 중', subscribed: '체결 대기', live: '수신 중', reconnecting: '재연결 중', degraded: '일부 제한', waiting: '대기', offline: '미연결'};
+      const sources = (this.lastSlotMeta?.sources || []).filter(source => source.requested || source.reserved);
+      return sources.map(source => `${names[source.provider] || source.provider} ${source.subscribed || 0}/${source.requested || 0} · ${states[source.state] || '상태 확인 중'}`).join(' | ') || '서버에서 연결을 자동 관리합니다';
+    }
     if (!this.wsActive || this.streamState !== 'connected') return '조회 시세로 갱신 중';
     const latest = Math.max(0, ...[...this.wsCodes].filter(code => this._hasKisQuote(code)).map(code => this.lastWsQuoteAt[code]));
     const connections = this.lastSlotMeta?.slots_connected;
@@ -479,7 +511,7 @@ const QuoteManager = {
     }
     const button = document.getElementById('pfWsToggle');
     const status = document.getElementById('pfWsStatus');
-    const visible = !!this.manualControlAllowed;
+    const visible = !!this.manualControlAllowed && !this.sharedMode;
     if (button) {
       button.hidden = !visible;
       if (visible) {
@@ -494,7 +526,7 @@ const QuoteManager = {
     if (status) {
       status.hidden = false;
       status.textContent = this._controlStatusText();
-      status.title = '한국투자증권 웹소켓의 실제 연결 상태';
+      status.title = this.sharedMode ? '서버 공통 실시간 시세의 구독 승인과 체결 수신 상태' : '한국투자증권 웹소켓의 실제 연결 상태';
       status.dataset.state = this.wsActive && this.streamState === 'connected' ? 'active'
         : this.lastStatus === 'occupied' ? 'warning'
         : this.wsActive || this.desiredActive ? 'pending' : 'polling';
@@ -507,7 +539,7 @@ const QuoteManager = {
 
   _markWsQuoteFresh(code, quote) {
     const at = Date.parse(quote.as_of || '');
-    if (!code || !quoteIsUsable(quote) || !['ws', 'kis_ws'].includes(quote.source)
+    if (!code || !quoteIsUsable(quote) || !['ws', 'kis_ws', 'toss_ws', 'namuh_ws'].includes(quote.source)
         || !Number.isFinite(at) || Date.now() - at < 0 || Date.now() - at >= QUOTE_MANAGER_STALE_WS_MS) return;
     this.lastWsQuoteAt[code] = Math.max(this.lastWsQuoteAt[code] || 0, at);
   },

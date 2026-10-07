@@ -1,8 +1,8 @@
 """KIS WebSocket Manager — real-time quote streaming for Korean stocks.
 
 Supports multiple concurrent WebSocket connections, one per KIS API key slot.
-Each browser session that acquires a key gets its own KIS WebSocket with up to
-40 real-time subscriptions.  Quote data is cached in a shared module-level dict
+The realtime hub owns one connection per server key with up to 40 subscriptions,
+including account notices when they use that key. Quote data is cached in a shared module-level dict
 so REST fallback and other modules can read the latest prices.
 
 Public API
@@ -302,6 +302,15 @@ class WsConnection:
         self._boundary_task: asyncio.Task | None = None
         self.listener: asyncio.Queue = asyncio.Queue(maxsize=256)
         self.state = "connecting"
+        self._confirmed_subs: set[tuple[str, str]] = set()
+        self._rejected_subs: set[tuple[str, str]] = set()
+        self.extra_subscriptions: set[tuple[str, str]] = set()
+        self.on_control = None
+        self.on_frame = None
+        self._sync_lock = asyncio.Lock()
+        self.last_frame_at = None
+        self.last_tick_at = None
+        self.reconnects = 0
 
     def _set_state(self, state: str) -> None:
         if self.state == state:
@@ -323,11 +332,15 @@ class WsConnection:
     def _compute_plan(self) -> dict[str, list[str]]:
         return plan_requested_subscriptions(
             self._requested,
-            max_subscriptions=MAX_SUBSCRIPTIONS,
+            max_subscriptions=max(0, MAX_SUBSCRIPTIONS - len(self.extra_subscriptions)),
         )
 
     async def sync_subscriptions(self) -> None:
         """Add/remove WS subscriptions to match the current plan."""
+        async with self._sync_lock:
+            await self._sync_subscriptions()
+
+    async def _sync_subscriptions(self) -> None:
         if self._ws is None:
             return
         plan = self._compute_plan()
@@ -336,6 +349,9 @@ class WsConnection:
             set() if self._integrated_rejected and active_tr == "H0UNCNT0"
             else {(code, active_tr) for code in plan["ws"]}
         )
+        desired |= self.extra_subscriptions
+        self._confirmed_subs.intersection_update(desired)
+        self._rejected_subs.intersection_update(desired)
 
         for code, tr_id in (self._current_subs - desired):
             try:
@@ -346,18 +362,19 @@ class WsConnection:
                     code, tr_id, self.key_slot.slot_id,
                 )
             except Exception as exc:
-                logger.warning("Unsub %s/%s failed: %s", code, tr_id, exc)
+                logger.warning("Unsub %s/%s failed: %s", code, tr_id, type(exc).__name__)
 
-        for code, tr_id in (desired - self._current_subs):
+        for code, tr_id in sorted(desired - self._current_subs):
             try:
                 await self._ws.send(self._make_msg(code, tr_id, subscribe=True))
                 self._current_subs.add((code, tr_id))
+                await asyncio.sleep(.1)
                 logger.debug(
                     "Subscribed %s/%s (slot %d)",
                     code, tr_id, self.key_slot.slot_id,
                 )
             except Exception as exc:
-                logger.warning("Sub %s/%s failed: %s", code, tr_id, exc)
+                logger.warning("Sub %s/%s failed: %s", code, tr_id, type(exc).__name__)
 
     def _make_msg(self, code: str, tr_id: str, *, subscribe: bool = True) -> str:
         return json.dumps({
@@ -377,6 +394,24 @@ class WsConnection:
 
     async def _handle_subscription_result(self, ctrl: dict) -> None:
         body = ctrl.get("body") or {}
+        head = ctrl.get("header") or {}
+        if not isinstance(body, dict) or not isinstance(head, dict):
+            return
+        pair = (str(head.get("tr_key", "")), str(head.get("tr_id", "")))
+        if body.get("msg_cd") in {"OPSP0001", "OPSP0003"}:
+            self._confirmed_subs.discard(pair)
+            self._notify_status()
+            return
+        if pair in self._current_subs:
+            if str(body.get("rt_cd")) == "0":
+                self._confirmed_subs.add(pair)
+                self._rejected_subs.discard(pair)
+            else:
+                self._confirmed_subs.discard(pair)
+                self._rejected_subs.add(pair)
+        if self.on_control:
+            await self.on_control(ctrl)
+        self._notify_status()
         if (ctrl.get("header", {}).get("tr_id") == "H0UNCNT0"
                 and str(body.get("rt_cd", "0")) != "0"
                 and not self._integrated_rejected):
@@ -384,6 +419,11 @@ class WsConnection:
             logger.warning("통합 시세 구독 거절: REST 폴링으로 전환 (slot %d)", self.key_slot.slot_id)
             await self.sync_subscriptions()
             await self.listener.put({"type": "stream_unavailable", "reason": "integrated_subscription_rejected"})
+
+    def _notify_status(self):
+        if self.listener.full():
+            self.listener.get_nowait()
+        self.listener.put_nowait({"type": "stream_status"})
 
     # -- Lifecycle --------------------------------------------------------
 
@@ -462,6 +502,9 @@ class WsConnection:
                     self._ws = ws
                     self._set_state("connected")
                     self._current_subs = set()
+                    self._confirmed_subs.clear()
+                    self._rejected_subs.clear()
+                    self._integrated_rejected = False
                     logger.info(
                         "KIS WebSocket connected (slot %d)", self.key_slot.slot_id
                     )
@@ -469,6 +512,7 @@ class WsConnection:
                     await self.sync_subscriptions()
 
                     async for raw_msg in ws:
+                        self.last_frame_at = datetime.now(KST).isoformat()
                         if self._stop_event.is_set():
                             break
 
@@ -477,8 +521,12 @@ class WsConnection:
 
                         # Real-time data: starts with '0' or '1'
                         if raw_msg and raw_msg[0] in ("0", "1"):
+                            if raw_msg[0] == "1" and self.on_frame:
+                                await self.on_frame(raw_msg)
+                                continue
                             quote = _parse_h0stcnt0(raw_msg)
-                            if quote is not None:
+                            if quote is not None and any(code == quote["code"] for code, _ in self._current_subs):
+                                self.last_tick_at = quote.get("as_of")
                                 if quote["code"] not in _quote_cache:
                                     logger.info(
                                         "First quote: %s @ %s",
@@ -504,10 +552,9 @@ class WsConnection:
                                 logger.debug("PINGPONG echoed (slot %d)", self.key_slot.slot_id)
                             elif tr_id:
                                 rt_cd = ctrl.get("body", {}).get("rt_cd")
-                                msg1 = ctrl.get("body", {}).get("msg1", "")
                                 logger.info(
-                                    "KIS ctrl (slot %d): tr_id=%s rt_cd=%s msg=%s",
-                                    self.key_slot.slot_id, tr_id, rt_cd, msg1,
+                                    "KIS ctrl (slot %d): tr_id=%s rt_cd=%s",
+                                    self.key_slot.slot_id, tr_id, rt_cd,
                                 )
                                 await self._handle_subscription_result(ctrl)
                         except (json.JSONDecodeError, KeyError):
@@ -519,11 +566,14 @@ class WsConnection:
             except Exception as exc:
                 logger.error(
                     "KIS WebSocket error (slot %d): %s",
-                    self.key_slot.slot_id, exc, exc_info=True,
+                    self.key_slot.slot_id, type(exc).__name__,
                 )
             finally:
                 self._ws = None
                 self._current_subs = set()
+                self._confirmed_subs.clear()
+                self._rejected_subs.clear()
+                self.reconnects += 1
                 self._set_state("offline" if self._stop_event.is_set() else "reconnecting")
 
             if not self._stop_event.is_set():

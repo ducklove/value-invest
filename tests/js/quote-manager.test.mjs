@@ -71,6 +71,31 @@ const flush = async () => {
   await new Promise((r) => setImmediate(r));
 };
 
+test('공통 시세는 자동 구독하고 토스 체결을 표시하며 NH 때문에 연결을 해제하지 않는다', async () => {
+  const {qm, MockWebSocket, w} = createHarness();
+  w.document.body.insertAdjacentHTML('beforeend', '<button id="pfWsToggle"></button><span id="pfWsStatus"></span><span id="pfWsDetail"></span>');
+  qm.subscriptions = {portfolio:['005930', 'AAPL']};
+  qm.connect();
+  const ws = MockWebSocket.instances[0];
+  ws.onopen();
+  ws.onmessage({data: JSON.stringify({type:'ws_status', shared:true, active:true, stream_state:'connecting', can_takeover:false})});
+  assert.deepEqual(ws.sent.at(-1), {action:'subscribe', requested:{portfolio:['005930','AAPL']}});
+  assert.equal(w.document.getElementById('pfWsToggle').hidden, true);
+  ws.onmessage({data: JSON.stringify({type:'subscriptions', ws:['005930','AAPL'], rest:[], shared:true})});
+  ws.onmessage({data: JSON.stringify({type:'stream_status', stream_state:'connected', subscribed:2, receiving:1, fallback:0,
+    slots_connected:1, slots_active:1, sources:[{provider:'toss', requested:2, subscribed:2, state:'live'}]})});
+  ws.onmessage({data: JSON.stringify({type:'quote', code:'AAPL', price:280000, source:'toss_ws', as_of:new Date().toISOString()})});
+  assert.equal(qm.isLive('AAPL'), true);
+  qm.setNamuhLinked(true);
+  qm._syncNamuhFallback();
+  assert.ok(!ws.sent.some(message => ['release','acquire','takeover'].includes(message.action)));
+  assert.match(w.document.getElementById('pfWsStatus').textContent, /실시간 2종목/);
+  assert.match(w.document.getElementById('pfWsDetail').textContent, /토스 2\/2/);
+  ws.onmessage({data: JSON.stringify({type:'stream_status', stream_state:'connecting', slots_connected:0, disconnected_codes:['AAPL']})});
+  assert.equal(qm.isLive('AAPL'), false);
+  qm.disconnect();
+});
+
 test('NH 정상 수신 종목은 KIS 구독·조회에서 제외하고 만료 시 빈 슬롯만 요청한다', async () => {
   const {qm, MockWebSocket, fetchCalls} = createHarness();
   qm.setNamuhLinked(true);

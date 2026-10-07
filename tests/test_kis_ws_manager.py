@@ -122,7 +122,8 @@ async def test_integrated_subscription_rejection_releases_subscriptions_and_repo
         await conn.sync_subscriptions()
     assert conn._current_subs == set()
     assert conn._ws.send.await_count == 1
-    assert (await conn.listener.get())["type"] == "stream_unavailable"
+    messages = [await conn.listener.get() for _ in range(conn.listener.qsize())]
+    assert any(message["type"] == "stream_unavailable" for message in messages)
 
 
 async def test_upstream_normal_close_reports_disconnection_before_retry(monkeypatch):

@@ -26,6 +26,7 @@ from services.portfolio.quotes import should_accept_quote_snapshot
 
 _quotes = MemoryTTLCache("namuh.realtime", 90)
 _status: dict[object, dict] = {}
+_coverage: dict[object, set[str]] = {}
 logger = logging.getLogger(__name__)
 _send_locks = namuh_ws._send_locks
 _subscribe = namuh_ws.subscribe
@@ -140,6 +141,10 @@ def status(user: str) -> dict:
             "requested": sum(p.get("requested", 0) for p in parts.values()), **parts}
 
 
+def approved_codes(user: str) -> set[str]:
+    return set().union(*(_coverage.get(key, set()) for key in (user, (user, "foreign"))))
+
+
 async def stream(user: str, cid: str, codes: list[str], environment: str, *, foreign: bool = False,
                  notice_channels: tuple[str, ...] = (), changed=None):
     registrations = {code: subscription(code) for code in codes if subscription(code)}
@@ -158,6 +163,7 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
         response_codes = set()
         failed_generation = namuh_ws.generation(cid)
         try:
+            _coverage[state_key] = set()
             _status[state_key] = {"state": "connecting", "subscribed": 0, "requested": len(set(registrations.values()))}
             if notice_channels:
                 notifications._states[(user, cid)] = {"state": "connecting", "approved": set(), "rejected": set()}
@@ -213,6 +219,7 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
                         approved.update(pair for code, pair in registrations.items()
                                         if channel in (None, pair[0]) and
                                         (pair[1] in keys or (foreign and infos.get(code) and infos[code]["gic"] in keys)))
+                        _coverage[state_key] = {code for code, pair in registrations.items() if pair in approved}
                         if approved and len(approved) == len(set(registrations.values())):
                             logger.info("NH WebSocket subscribed: market=%s approved=%s requested=%s",
                                         "foreign" if foreign else "domestic", len(approved), len(set(registrations.values())))
@@ -245,6 +252,8 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
                                 logger.info("NH WebSocket receiving: market=%s", "foreign" if foreign else "domestic")
                                 receiving = True
                             _quotes.set((user, tick["code"]), tick)
+                            from services.realtime.hub import get_hub
+                            get_hub().publish(tick, user)
                             _status[state_key] = {"state": "live", "subscribed": len(approved), "requested": len(set(registrations.values())),
                                                   "rejected": len(rejected), "last_tick_at": tick["as_of"],
                                                   "response_code": response_code, "response_codes": sorted(response_codes), "reason": reason if response_code else None}
@@ -263,6 +272,7 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
                               "response_codes": sorted(response_codes),
                               "requested": len(set(registrations.values())),
                               "message": "NH 시세 연결 재시도 중 · 기존 시세 경로 사용"}
+        _coverage[state_key] = set()
         for code in codes:
             _quotes.delete((user, code))
         if response_code == "WSS10015" and await namuh_ws.recover(user, cid, failed_generation):
@@ -352,6 +362,7 @@ async def run(stop: asyncio.Event):
                         for code in old_codes:
                             _quotes.delete((old_user, code))
                         _status.pop((old_user, "foreign") if key[1] else old_user if old_codes else (old_user, key[0], "notices"), None)
+                        _coverage.pop((old_user, "foreign") if key[1] else old_user if old_codes else (old_user, key[0], "notices"), None)
                         if not key[1]:
                             notifications._states.pop((old_user, key[0]), None)
                 for state_key in list(_status):
@@ -380,5 +391,6 @@ async def run(stop: asyncio.Event):
         await asyncio.gather(*(task for _, task in jobs.values()), *sync_jobs.values(), return_exceptions=True)
         _status.clear()
         _quotes.clear()
+        _coverage.clear()
         _send_locks.clear()
         notifications._states.clear()

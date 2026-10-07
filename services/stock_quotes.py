@@ -237,6 +237,10 @@ def remember_quote(code: str | None, quote: dict[str, Any] | None) -> Stock | No
 
 
 def _get_ws_stock(code: str, *, max_age_seconds: float | None) -> Stock | None:
+    from services.realtime.hub import get_hub
+    shared = get_hub().quote(None, code)
+    if shared and (max_age_seconds is None or datetime.now().timestamp() - float(shared["ts"]) <= max_age_seconds):
+        return stock_from_quote(code, shared)
     if not kis_ws_manager.ws_cache_matches_rest_market():
         return None
     quote = kis_ws_manager.get_cached_quote(code)
