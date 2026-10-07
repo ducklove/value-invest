@@ -45,12 +45,14 @@ async def _register(ws, cid, access, registrations, notice_channels, changed):
             # 서버가 등록 중 닫아도 이미 받은 거절 ACK는 수신 루프가 처리한다.
             pass
 
-    sender = asyncio.create_task(register())
-    try:
-        yield
-    finally:
-        sender.cancel()
-        await asyncio.gather(sender, return_exceptions=True)
+    pairs = [(channel, "") for channel in notice_channels] + list(registrations.values())
+    async with namuh_ws.registrations(ws, cid, access, pairs):
+        sender = asyncio.create_task(register())
+        try:
+            yield
+        finally:
+            sender.cancel()
+            await asyncio.gather(sender, return_exceptions=True)
 
 
 def subscription(code: str) -> tuple[str, str] | None:

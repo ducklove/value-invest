@@ -101,7 +101,7 @@ class GoldRealtimeTests(IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await realtime.stream("owner", "credential", ["005930", "KRX_GOLD"], "live")
         self.assertEqual(connect.call_count, 1)
-        self.assertEqual(sent, [{"tr_cd": "mc", "tr_key": "005930"}, {"tr_cd": "g4", "tr_key": "M04020000"}])
+        self.assertEqual(sent, [{"tr_cd": "mc", "tr_key": "005930"}, {"tr_cd": "g4", "tr_key": "M04020000"}] * 2)
         self.assertEqual(realtime.quote("owner", "KRX_GOLD")["price"], 199480)
         self.assertEqual(realtime.status("owner")["subscribed"], 2)
         self.assertEqual(realtime.status("owner")["state"], "live")

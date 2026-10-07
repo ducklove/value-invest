@@ -37,7 +37,7 @@ async def test_shared_quote_socket_subscribes_empty_notification_key_and_never_b
             await realtime.stream("owner", "cid", ["KRX_GOLD"], "live", notice_channels=("d2",), changed=changed.append)
     assert connect.call_count == 1
     assert connect.call_args.args[0] == "wss://api.nhplug.com:7070/websocket"
-    assert sent == [{"tr_cd": "d2", "tr_key": ""}, {"tr_cd": "g4", "tr_key": "M04020000"}]
+    assert sent == [{"tr_cd": "d2", "tr_key": ""}, {"tr_cd": "g4", "tr_key": "M04020000"}] * 2
     assert changed == [None, "account"]  # 접속 직후 복구 조회와 실제 통보만 재조회 신호가 된다.
     assert resolve.await_count == 1  # 구독 ACK는 계좌 변경이 아니다.
     assert notifications.status("owner")["subscribed"] == 1

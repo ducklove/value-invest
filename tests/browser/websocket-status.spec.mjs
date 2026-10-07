@@ -52,7 +52,7 @@ test(`KIS·NH 연결 상태를 분리하고 모바일에서도 표시한다 (${w
   await expect(page.locator('#pfNhQuoteState')).toContainText('구독 제한');
   await expect(page.locator('#pfNhQuoteState')).not.toContainText('연결 불안정');
   sendNh({state: 'degraded', domestic: {reason: 'subscription_rejected', response_code: 'WSS10015'}});
-  await expect(page.locator('#pfNhQuoteState')).toContainText('동시 연결 한도 초과');
+  await expect(page.locator('#pfNhQuoteState')).toContainText('세션 한도 초과');
   sendNh({state: 'subscribed', foreign: {state: 'waiting', reason: 'scanner_reserved'}});
   await expect(page.locator('#pfNhQuoteState')).toContainText('해외는 조회 시세 사용');
   await expect(page.locator('#pfNhQuoteState')).not.toContainText('불안정');

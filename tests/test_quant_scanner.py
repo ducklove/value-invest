@@ -161,7 +161,8 @@ class ScannerTests(TempDbMixin):
              patch.object(quant_scanner, "record", AsyncMock(return_value=False)) as record:
             clock.now.return_value = NOW
             await asyncio.wait_for(watcher.run(), timeout=2)
-        assert len(socket.sent) == 2
+        assert len(socket.sent) == 4
+        assert [s["header"]["tr_type"] for s in socket.sent] == ["1", "1", "2", "2"]
         assert connect.call_args.args[0] == "wss://api.nhplug.com:7070/websocket"
         assert {s["body"]["tr_cd"] for s in socket.sent} == {"ob", "vH"}
         event = record.call_args.kwargs["event"]

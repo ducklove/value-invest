@@ -283,7 +283,7 @@ function pfRenderNhQuoteState(message) {
   const reason = message.reason || message.domestic?.reason || message.foreign?.reason;
   const responseCode = message.response_code || message.domestic?.response_code || message.foreign?.response_code;
   const error = {
-    WSS10015: 'NH 동시 연결 한도 초과 · 같은 앱키의 다른 연결 확인 · 보조 시세 사용',
+    WSS10015: 'NH 세션 한도 초과 · NH 세션 확인 필요 · 보조 시세 사용',
     WSS10010: 'NH 구독 요청 속도 초과 · 재시도 중',
     WSS10006: 'NH 시세 구독 요청 확인 필요 · 보조 시세 사용',
   }[responseCode] || {

@@ -164,7 +164,7 @@ async def test_overseas_socket_uses_7080_and_permission_rejection_is_isolated():
         with pytest.raises(asyncio.CancelledError):
             await realtime.stream("owner", "cid", ["AAPL"], "live", foreign=True)
     assert connect.call_args.args[0] == "wss://api.nhplug.com:7080/websocket"
-    assert sent == [{"tr_cd": "RC", "tr_key": "USAAAPL"}]
+    assert sent == [{"tr_cd": "RC", "tr_key": "USAAAPL"}] * 2
     assert realtime.quote("owner", "AAPL")["price"] == 280350
     state = realtime.status("owner")
     assert state["foreign"]["state"] == "live" and state["foreign"]["rejected"] == 1
