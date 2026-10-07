@@ -246,6 +246,9 @@ async def main():
             await asyncio.to_thread(sdk_probe, access, secrets)
             await asyncio.sleep(1)
         base = await quote_probe(access, secrets, context)
+        if os.environ.get("NH_RESET_SESSIONS") == "true":
+            await asyncio.sleep(1)
+            await quote_probe(access, secrets, context, port=7080)
         if base.get("response_code") != "00000":
             await asyncio.sleep(1)
             await quote_probe(access, secrets, context, origin="https://api.nhplug.com:7070")
