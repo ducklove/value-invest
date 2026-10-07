@@ -19,6 +19,10 @@ on:
         description: Stop the app for 120 seconds, probe one cached-token subscription, then restore it
         type: boolean
         default: false
+      deep_probe:
+        description: Compare cached-token REST and direct WebSocket protocol without preliminary TLS sockets
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -34,16 +38,24 @@ jobs:
           REFRESH_TOKEN: ${{ inputs.refresh_token }}
           RELEASE_STALE: ${{ inputs.release_stale }}
           ISOLATE_SERVICE: ${{ inputs.isolate_service }}
+          DEEP_PROBE: ${{ inputs.deep_probe }}
         run: |
           cd "${APP_DIR:-/home/cantabile/Works/value_invest}"
           git fetch --quiet origin master
+          if [ "$DEEP_PROBE" = "true" ] && [ "$ISOLATE_SERVICE" = "true" ]; then
+            git show origin/master:deploy/nh-protocol-diagnostics.py | NH_INVENTORY_ONLY=true .venv-current/bin/python -
+          fi
           if [ "$ISOLATE_SERVICE" = "true" ]; then
             trap 'sudo /bin/systemctl start value-invest.service' EXIT
             sudo /bin/systemctl stop value-invest.service
             sleep 120
             export SUBSCRIPTION_PROBE=true REFRESH_TOKEN=false RELEASE_STALE=false
           fi
-          git show origin/master:deploy/broker-diagnostics.py | .venv-current/bin/python -
+          if [ "$DEEP_PROBE" = "true" ]; then
+            git show origin/master:deploy/nh-protocol-diagnostics.py | .venv-current/bin/python -
+          else
+            git show origin/master:deploy/broker-diagnostics.py | .venv-current/bin/python -
+          fi
       - name: Restore app after isolated probe
         if: ${{ always() && inputs.isolate_service }}
         run: sudo /bin/systemctl start value-invest.service
