@@ -1,6 +1,7 @@
 import json
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from _harness import seed_user
 
 from repositories import snapshots
@@ -80,3 +81,36 @@ async def test_currency_change_in_one_position_is_not_silently_combined(temp_db)
     await insert_trade("u1", "usd", "2026-09-30T07:01:00+00:00", currency="USD")
     result = await summary_contributors.baseline_details("u1", {"date": "2026-09-30"}, [])
     assert result["stock_trade_flows"]["005930"]["comparable"] is False
+
+
+@pytest.mark.parametrize("error", [KeyError("quantity"), ValueError("legacy cutoff"), TypeError("legacy position")])
+async def test_optional_contributor_data_errors_preserve_aggregate_period_values(temp_db, error):
+    await seed_user()
+    await snapshots.save_snapshot("u1", "2026-09-30", 1000, 900, 1000, 1, 1300)
+    snap = await snapshots.get_snapshot_by_date("u1", "2026-09-30")
+    with patch.object(summary_contributors, "baseline_details", AsyncMock(side_effect=error)), \
+         patch.object(snapshots, "get_month_end_snapshot", AsyncMock(return_value=snap)), \
+         patch.object(snapshots, "get_year_start_snapshot", AsyncMock(return_value=snap)):
+        previous = PreviousDayResponse.model_validate(await snapshot_views.previous_day("u1", "2026-09-30"))
+        assert previous.total_value == 1000
+        assert previous.nav == 1000
+        assert previous.stock_positions is None
+        for yearly in (False, True):
+            response = PeriodStartResponse.model_validate(await snapshot_views.period_start("u1", yearly=yearly))
+            assert response.total_value == 1000
+            assert response.nav == 1000
+            assert response.net_cashflow == 0
+            assert response.stock_positions is None
+
+
+@pytest.mark.parametrize("stock_rows", [[], [{"stock_code": "005930", "market_value": 1000}]])
+async def test_legacy_missing_stock_baseline_keeps_ytd_nav_and_value(temp_db, stock_rows):
+    await seed_user()
+    await snapshots.save_snapshot("u1", "2025-12-31", 1000, 900, 1000, 1, 1300)
+    await snapshots.save_stock_snapshots("u1", "2025-12-31", stock_rows)
+    response = PeriodStartResponse.model_validate(await snapshot_views.period_start("u1", yearly=True))
+    assert response.date == "2025-12-31"
+    assert response.total_value == 1000
+    assert response.nav == 1000
+    assert response.net_cashflow == 0
+    assert not response.stock_positions or response.stock_positions["005930"].quantity is None

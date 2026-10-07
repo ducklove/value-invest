@@ -104,3 +104,35 @@ test('모바일에서는 탭으로 열고 스크롤·닫기를 사용할 수 있
   await expect(panel).not.toBeVisible();
   await context.close();
 });
+
+test('YTD 종목별 기준이 없으면 툴팁만 숨기고 전체 수치와 실시간 갱신을 유지한다', async ({ page }) => {
+  await openPortfolio(page);
+  const ytd = page.locator('#pfSummary [data-period="ytd"]');
+  const panel = page.locator('#pfContributorPopover');
+  await expect(ytd.locator('.pf-summary-value')).toHaveText('-1.50%');
+  await expect(ytd.locator('.pf-summary-sub')).toHaveText('손익 -90,000');
+  await ytd.click();
+  await expect(panel).toBeVisible();
+  await page.evaluate(() => {
+    delete PfStore.snapshots.yearStart.stock_positions;
+    renderPortfolio({ summaryOnly: true });
+  });
+  await expect(panel).not.toBeVisible();
+  await expect(ytd).toBeDisabled();
+  await expect(ytd.locator('.pf-summary-info')).not.toBeVisible();
+  await expect(ytd.locator('.pf-summary-value')).toHaveText('-1.50%');
+  await expect(ytd.locator('.pf-summary-sub')).toHaveText('손익 -90,000');
+  await ytd.hover();
+  await expect(panel).not.toBeVisible();
+  await page.evaluate(() => {
+    PfStore.items.find(r => r.stock_code === '005930').quote.price = 130000;
+    renderPortfolio({ summaryOnly: true });
+  });
+  await expect(ytd.locator('.pf-summary-value')).toHaveText('+0.17%');
+  await expect(ytd.locator('.pf-summary-sub')).toHaveText('손익 +10,000');
+  await expect(ytd.locator('.pf-summary-info')).not.toBeVisible();
+  const today = page.locator('#pfSummary [data-period="today"]');
+  await today.hover();
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText('TODAY 성과 기여 종목');
+});

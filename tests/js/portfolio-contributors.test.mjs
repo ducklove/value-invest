@@ -51,6 +51,56 @@ function seed(w) {
 const button = (w, period) => w.document.querySelector(`[data-period="${period}"]`);
 const panel = w => w.document.getElementById('pfContributorPopover');
 
+for (const missing of ['positions', 'quantities', 'values']) {
+  test(`YTD 종목별 ${missing} 기준이 없어도 수익률·손익은 유지하고 툴팁만 숨긴다`, t => {
+    const w = setup(t);
+    seed(w);
+    w.PfStore.items[0].quote.price = 1400;
+    w.PfStore.snapshots.yearStart.net_cashflow = 1000;
+    const snap = w.PfStore.snapshots.yearStart;
+    if (missing === 'positions') delete snap.stock_positions;
+    if (missing === 'quantities') snap.stock_positions = { '005930': { quantity: null }, '000660': { quantity: null } };
+    if (missing === 'values') snap.stock_values = {};
+    w.renderPortfolio({ summaryOnly: true });
+    const ytd = button(w, 'ytd');
+    assert.equal(ytd.querySelector('.pf-summary-value').textContent, '+10.00%');
+    assert.match(ytd.querySelector('.pf-summary-sub').textContent, /손익 \+1,000/);
+    assert.match(ytd.querySelector('.pf-summary-sub-flow').textContent, /평가액 \+2,000/);
+    assert.equal(ytd.disabled, true);
+    assert.equal(ytd.querySelector('.pf-summary-info').hidden, true);
+    assert.equal(ytd.hasAttribute('aria-haspopup'), false);
+    ytd.click();
+    ytd.focus();
+    w.pfOpenSummaryContributors(ytd);
+    assert.equal(panel(w), null);
+    assert.equal(button(w, 'today').disabled, false);
+    // A live quote refresh must still update the headline with no tooltip.
+    w.PfStore.items[0].quote.price = 1500;
+    w.renderPortfolio({ summaryOnly: true });
+    assert.equal(ytd.querySelector('.pf-summary-value').textContent, '+15.00%');
+    assert.match(ytd.querySelector('.pf-summary-sub').textContent, /손익 \+2,000/);
+  });
+}
+
+test('종목별 기준이 사라지면 열린 툴팁만 닫고 기준이 복구되면 다시 사용할 수 있다', t => {
+  const w = setup(t);
+  seed(w);
+  const ytd = button(w, 'ytd');
+  const positions = w.PfStore.snapshots.yearStart.stock_positions;
+  ytd.click();
+  assert.equal(panel(w).hidden, false);
+  delete w.PfStore.snapshots.yearStart.stock_positions;
+  w.renderPortfolio({ summaryOnly: true });
+  assert.equal(panel(w).hidden, true);
+  assert.equal(ytd.querySelector('.pf-summary-value').textContent, '0.00%');
+  w.PfStore.snapshots.yearStart.stock_positions = positions;
+  w.renderPortfolio({ summaryOnly: true });
+  assert.equal(ytd.disabled, false);
+  assert.equal(ytd.querySelector('.pf-summary-info').hidden, false);
+  ytd.click();
+  assert.equal(panel(w).hidden, false);
+});
+
 test('상승·하락 각각 금액순 3개이며 높은 등락률의 작은 종목이 순위를 왜곡하지 않는다', t => {
   const w = setup(t);
   const before = [row('BIG', 100000), row('TINY', 100), ...['P1', 'P2', 'P3', 'N1', 'N2', 'N3', 'N4', 'FLAT'].map(code => row(code, 1000))];

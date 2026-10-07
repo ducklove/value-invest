@@ -150,6 +150,8 @@ async def get_holdings(request: Request):
     user = require_user(await get_current_user(request))
     rows = await holdings.get_portfolio(user["google_sub"], request.query_params.get("account_id"))
     for row in rows:
+        if not row.get("benchmark_code"):
+            row["benchmark_code"] = portfolio._resolve_default_benchmark_fast(row["stock_code"])
         quote = {"price": 1, "previous_close": 1, "change_pct": 0} if row["stock_code"] in {"CASH_KRW", "FUTURES_BASE_KRW", "FUTURES_PNL_KRW"} else {"price": 75000, "previous_close": 74000, "change_pct": 1.35}
         if row["stock_code"].startswith("KRFUT_"):
             from repositories.broker_quotes import futures_quote

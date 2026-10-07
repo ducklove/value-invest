@@ -48,11 +48,11 @@ function pfPerformanceTooltipHtml(item, metric) {
     content += line('등락액', change, money(change));
   }
   content += line(cumulative ? '평가손익' : '당일손익', pnl, money(pnl));
-  const basis = cumulative ? '매입금액 대비' : paired ? '전일 순평가액 대비' : '전일 종가 대비 · 보유 수량 반영';
+  const basis = cumulative ? '매입금액 대비' : paired ? '롱 투자금 대비' : '전일 종가 대비 · 보유 수량 반영';
   const missing = !cumulative && stats.netPreviousValue === null;
-  const zero = !cumulative && paired && Math.abs(stats.netPreviousValue) <= 1e-8;
+  const zero = !cumulative && paired && (!Number.isFinite(stats.longInvested) || stats.longInvested <= 1e-8);
   return `<div class="pf-tooltip-title">${stats.legs.map(leg => escapeHtml(leg.name || leg.code)).join(' + ')}</div>${content}
-    <div class="pf-tooltip-note">${missing ? '전일 시세 확인 중' : zero ? '전일 순평가액이 0이라 등락률 계산 불가' : basis}</div>`;
+    <div class="pf-tooltip-note">${missing ? '전일 시세 확인 중' : zero ? '롱 투자금이 없어 등락률 계산 불가' : basis}</div>`;
 }
 
 function pfRefreshPerformanceTooltip() {

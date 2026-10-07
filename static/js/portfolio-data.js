@@ -342,7 +342,8 @@ function pfPairPreviousClose(quote, price) {
 }
 
 // 페어 합산 통계. 투자액은 수량 × 평단(KRW 환산)이라 숏은 자연히 음수 —
-// 순투자액 = 롱 투자액 + 숏 투자액. 시세가 하나라도 없으면 평가액/손익은
+// 순투자액 = 롱 투자액 + 숏 투자액, 일간 합산등락률은 롱 매입금액 기준.
+// 시세가 하나라도 없으면 평가액/손익은
 // null (부분 합산으로 오해 방지).
 function pfPairStats(longItem, shortItems) {
   const legs = [];
@@ -384,16 +385,18 @@ function pfPairStats(longItem, shortItems) {
       marketValue,
     });
   }
+  const longInvested = legs[0]?.invested ?? 0;
   return {
     legs,
+    longInvested,
     netInvested,
     netMarketValue: allPriced ? netMarketValue : null,
     totalPnl: allPriced ? totalPnl : null,
     allPriced,
     netPreviousValue: allDailyPriced ? netPreviousValue : null,
     dailyPnl: allDailyPriced ? dailyPnl : null,
-    dailyChangePct: allDailyPriced && Math.abs(netPreviousValue) > 1e-8
-      ? dailyPnl / Math.abs(netPreviousValue) * 100 : null,
+    dailyChangePct: allDailyPriced && Number.isFinite(longInvested) && longInvested > 1e-8
+      ? dailyPnl / longInvested * 100 : null,
   };
 }
 

@@ -40,6 +40,7 @@ test('금현물·국내·해외선물의 연결 종류와 계약·평가액 표�
       await expect(row.locator('.pf-col-qty')).toContainText('-20');
       await expect(row.locator('.pf-col-curprice')).toContainText('355');
       await expect(row.locator('.pf-col-changepct')).toContainText('+2.50%');
+      await expect(row.locator('.pf-benchmark-name')).toHaveText('코스피');
       await expect(row.locator('.pf-col-mktval')).toContainText('-7,100');
       await expect(page.locator('#pfBody [data-code="CASH_KRW"] .pf-col-qty')).toContainText('8,000');
       await page.locator('.js-pf-col-toggle[data-col-key="memo"]').check();
@@ -47,6 +48,7 @@ test('금현물·국내·해외선물의 연결 종류와 계약·평가액 표�
       await expect(page.locator('#pfBody [data-code^="FUTURES_"]')).toHaveCount(0);
       const response = await page.request.get('/api/portfolio?account_id='+aid);
       const holdings = await response.json();
+      expect(holdings.find(item => item.stock_code === 'KRFUT_KA486B000').benchmark_code).toBe('IDX_KOSPI');
       const sum = holdings.reduce((value, item) => value+item.quantity*(item.stock_code === 'CASH_KRW' ? 1 : item.quote.price), 0);
       expect(sum).toBe(900);
     }

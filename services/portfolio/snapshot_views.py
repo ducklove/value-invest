@@ -1,11 +1,23 @@
 """화면별 정산 기준선과 입출금 조회. 한 응답은 같은 DB 스냅샷을 사용한다."""
 
+import logging
 from datetime import date, timedelta
 
 from repositories import snapshots
 from repositories.db import read_snapshot
 from services.portfolio import nav_link, summary_contributors
 from services.portfolio.time_windows import settlement_marker_seconds
+
+logger = logging.getLogger(__name__)
+
+
+async def _contributor_details(user: str, snapshot: dict, stocks: list[dict]) -> dict:
+    # Optional per-stock history must not prevent aggregate NAV/PnL from loading.
+    try:
+        return await summary_contributors.baseline_details(user, snapshot, stocks)
+    except (KeyError, TypeError, ValueError):
+        logger.warning("종목별 성과 기준을 읽지 못해 툴팁을 생략합니다", exc_info=True)
+        return {}
 
 
 @read_snapshot()
@@ -93,7 +105,7 @@ async def previous_day(user: str, baseline_date: str) -> dict:
         "fx_usdkrw": snapshot.get("fx_usdkrw"), "nav": snapshot.get("nav"),
         "return_nav": snapshot.get("return_nav"), "return_factor": snapshot.get("return_factor", 1),
         "stock_values": {s["stock_code"]: s["market_value"] for s in stocks},
-        **(await summary_contributors.baseline_details(user, snapshot, stocks) if snap_date else {}),
+        **(await _contributor_details(user, snapshot, stocks) if snap_date else {}),
         "today_net_cashflow": net,
         "today_cashflows_by_stock": by_stock,
         "today_cashflows": cashflows,
@@ -115,7 +127,7 @@ async def period_start(user: str, *, yearly: bool = False) -> dict:
         # 휴일·정산 누락으로 이전 날짜를 택해도 합계와 종목별 금액의 기준일은 같다.
         stocks = await snapshots.get_stock_snapshots_exact_date(user, snapshot["date"])
         result["stock_values"] = {s["stock_code"]: s["market_value"] for s in stocks}
-        result.update(await summary_contributors.baseline_details(user, snapshot, stocks))
+        result.update(await _contributor_details(user, snapshot, stocks))
         result["net_cashflow"], result["cashflows_by_stock"] = await net_cashflow_since_snapshot(user, snapshot["date"])
     return result
 

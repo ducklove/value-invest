@@ -79,6 +79,7 @@ function pfBuildSummaryContributors(rows, snap, latestSnap, period, allRows = ro
     if (trade && trade.currency !== 'KRW') foreignTrades = true;
     candidates.push({ code, name, amount, pct });
   }
+  if (!candidates.length) return { message: '종목별 비교 기준이 없습니다.' };
   const tie = (a, b) => a.code.localeCompare(b.code);
   return {
     date: snap.date, pending: snap.settlement_pending, excluded, foreignTrades,
@@ -97,6 +98,17 @@ function pfUpdateSummaryContributors(rows, latestSnap, ready, focusPeriod = null
     _pfContributorData[period] = ready
       ? pfBuildSummaryContributors(rows, snap, latestSnap, period, allRows)
       : { message: '시세를 불러오는 중입니다.' };
+    // Contributor availability controls only the tooltip, never card metrics.
+    const button = document.querySelector(`.js-pf-contributors[data-period="${period}"]`);
+    if (!button) continue;
+    const available = !_pfContributorData[period].message;
+    button.disabled = !available;
+    button.querySelector('.pf-summary-info').hidden = !available;
+    button.setAttribute('aria-label', `${period.toUpperCase()} 성과${available ? ' 기여 종목 보기' : ''}`);
+    for (const [name, value] of Object.entries({ 'aria-haspopup': 'dialog', 'aria-controls': 'pfContributorPopover', 'aria-expanded': 'false' })) {
+      if (available) button.setAttribute(name, value);
+      else button.removeAttribute(name);
+    }
   }
   if (focusPeriod) {
     _pfContributorRestoringFocus = true;
@@ -119,7 +131,8 @@ function _pfContributorMoney(amount) {
 
 function _pfRenderContributorPopover() {
   const button = _pfContributorButton();
-  if (!button) { pfCloseSummaryContributors(); return; }
+  const data = _pfContributorData[_pfContributorPeriod];
+  if (!button || !data || data.message) { pfCloseSummaryContributors(); return; }
   if (!_pfContributorPopover) {
     _pfContributorPopover = document.createElement('div');
     _pfContributorPopover.id = 'pfContributorPopover';
@@ -129,7 +142,6 @@ function _pfRenderContributorPopover() {
     _pfContributorPopover.setAttribute('aria-labelledby', 'pfContributorTitle');
     document.body.appendChild(_pfContributorPopover);
   }
-  const data = _pfContributorData[_pfContributorPeriod] || { message: '종목별 비교 기준이 없습니다.' };
   const section = (key, label) => `<section class="pf-contributors-section ${key}">
     <h4>${label} <span>TOP 3</span></h4>
     ${data[key].length ? `<ol>${data[key].map(row => `<li data-code="${escapeHtml(row.code)}">
@@ -152,7 +164,7 @@ function _pfRenderContributorPopover() {
   _pfContributorPopover.querySelector('.pf-contributors-content').innerHTML = body;
   _pfContributorPopover.hidden = false;
   document.querySelectorAll('.js-pf-contributors').forEach(el => {
-    el.setAttribute('aria-expanded', String(el === button));
+    if (!el.disabled) el.setAttribute('aria-expanded', String(el === button));
   });
   pfPositionSummaryContributors();
 }
@@ -180,6 +192,7 @@ function pfOpenSummaryContributors(button, pin = false) {
   clearTimeout(_pfContributorCloseTimer);
   const period = button?.dataset.period;
   if (!['today', 'mtd', 'ytd'].includes(period)) return;
+  if (!_pfContributorData[period] || _pfContributorData[period].message) return;
   if (!pin && _pfContributorPinned) return;
   if (pin && _pfContributorPeriod === period && _pfContributorPinned) {
     pfCloseSummaryContributors();
@@ -196,7 +209,9 @@ function pfCloseSummaryContributors(restoreFocus = false) {
   _pfContributorPeriod = null;
   _pfContributorPinned = false;
   if (_pfContributorPopover) _pfContributorPopover.hidden = true;
-  document.querySelectorAll('.js-pf-contributors').forEach(el => el.setAttribute('aria-expanded', 'false'));
+  document.querySelectorAll('.js-pf-contributors').forEach(el => {
+    if (!el.disabled) el.setAttribute('aria-expanded', 'false');
+  });
   if (restoreFocus && button) {
     _pfContributorRestoringFocus = true;
     button.focus({ preventScroll: true });

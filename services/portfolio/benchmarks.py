@@ -6,6 +6,7 @@ from typing import Any
 
 from cache_layer import MemoryTTLCache
 from core.http import get_http_client
+from domain.broker_assets import is_futures_contract
 from services.market import indicators as market_indicators
 from services.portfolio import foreign, fx, quote_service
 from services.portfolio.identifiers import (
@@ -86,6 +87,8 @@ def default_benchmark_for_code(code: str, *, market_type: str | None = None) -> 
         return CASH_FX_CODE.get(code, "FX_USDKRW")
     if code in SPECIAL_ASSETS:
         return "FX_USDKRW"
+    if is_futures_contract(code):
+        return "IDX_KOSPI"
     if is_korean_stock(code):
         if is_preferred_stock(code):
             return common_stock_code(code)

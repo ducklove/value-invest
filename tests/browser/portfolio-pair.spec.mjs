@@ -63,7 +63,8 @@ test('성과 숫자의 툴팁으로 합산 성과를 확인하고 모바일·키
   await expect(trigger).toHaveText(/1\.35%/);
   await trigger.hover();
   const popup = page.getByRole('tooltip');
-  await expect(popup.locator('.pf-tooltip-line').first()).toHaveText('합산 등락률+1.35%');
+  await expect(popup.locator('.pf-tooltip-line').first()).toHaveText('합산 등락률+0.71%');
+  await expect(popup.locator('.pf-tooltip-note')).toHaveText('롱 투자금 대비');
   await expect(popup.locator('.pf-tooltip-title')).toHaveText('미래에셋 롱 + 헤지 숏');
   await expect(popup).toContainText('당일손익+50,000원');
   await expect(trigger).not.toBeFocused();

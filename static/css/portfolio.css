@@ -388,7 +388,7 @@
   font: inherit; color: var(--text); text-align: left; cursor: pointer;
   appearance: none; -webkit-tap-highlight-color: transparent;
 }
-button.pf-summary-card:hover,
+button.pf-summary-card:not(:disabled):hover,
 button.pf-summary-card[aria-expanded="true"] { background: var(--hover-bg); }
 button.pf-summary-card:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
 .pf-summary-info { font-size: 12px; margin-left: 3px; color: var(--text-secondary); }
@@ -3824,3 +3824,6 @@ body.pf-compact-rows .pf-pair-connector, body.pf-compact-rows .pf-row-position {
 .pf-tooltip-line { display: flex; justify-content: space-between; gap: 16px; margin: 4px 0; }
 .pf-tooltip-line > span { color: var(--text-secondary); }
 .pf-tooltip-note { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: 11px; }
+
+.pf-summary-card.js-pf-contributors:disabled { cursor: default; opacity: 1; }
+.pf-summary-info[hidden] { display: none; }

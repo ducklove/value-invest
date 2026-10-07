@@ -100,6 +100,7 @@ test("pfPairStats prefers avg_price_krw over the native avg_price", () => {
   };
   const stats = w.pfPairStats(usdLong, []);
   assert.equal(stats.netInvested, 1300000);
+  assert.equal(stats.longInvested, 1300000);
   assert.equal(stats.totalPnl, 100000);
 });
 
@@ -132,13 +133,19 @@ test("pfPairShortsForLong finds every short pointing at the long", () => {
   assert.deepEqual(shorts.map(s => s.stock_code), ["MIRAE_FUT", "MIRAE_FUT2"]);
 });
 
-test('pair daily change combines signed PnL over the previous net valuation', () => {
+test('pair daily change divides signed combined PnL by the long purchase cost', () => {
   const w = loadPairDom();
   const stats = w.pfPairStats({...LONG, quote: {price: 12000, previous_close: 10000}},
     [{...SHORT, quantity: -50, quote: {price: 12000, previous_close: 11000}}]);
   assert.equal(stats.netPreviousValue, 450000);
   assert.equal(stats.dailyPnl, 150000);
-  assert.ok(Math.abs(stats.dailyChangePct - 100 / 3) < 1e-8);
+  assert.equal(stats.longInvested, 1000000);
+  assert.equal(stats.dailyChangePct, 15);
+  const second = {...SHORT, stock_code: 'SECOND', quantity: -20, quote: {price: 13000, previous_close: 14000}};
+  const multiple = w.pfPairStats({...LONG, quote: {price: 12000, previous_close: 10000}},
+    [{...SHORT, quantity: -50, quote: {price: 12000, previous_close: 11000}}, second]);
+  assert.equal(multiple.longInvested, 1000000);
+  assert.equal(multiple.dailyChangePct, 17);
   w.close();
 });
 
@@ -154,13 +161,32 @@ test('actual futures previous close takes priority over its underlying stock per
   w.close();
 });
 
-test('missing daily quotes and a zero net baseline never produce a misleading percentage', () => {
+test('foreign long purchase cost uses its KRW basis while short proceeds do not change the denominator', () => {
+  const w = loadPairDom();
+  const long = {...LONG, quantity: 10, avg_price: 100, avg_price_krw: 130000,
+    quote: {price: 140000, previous_close: 130000}};
+  const short = {...SHORT, quantity: -5, avg_price: 135000,
+    quote: {price: 140000, previous_close: 135000}};
+  const stats = w.pfPairStats(long, [short]);
+  assert.equal(stats.longInvested, 1300000);
+  assert.equal(stats.dailyPnl, 75000);
+  assert.ok(Math.abs(stats.dailyChangePct - 75000 / 1300000 * 100) < 1e-8);
+  const otherSalePrice = w.pfPairStats(long, [{...short, avg_price: 200000}]);
+  assert.equal(otherSalePrice.dailyChangePct, stats.dailyChangePct);
+  w.close();
+});
+
+test('zero net valuation is valid with long capital, but missing prices or long purchase costs stay unknown', () => {
   const w = loadPairDom();
   const long = {...LONG, quote: {price: 12000, previous_close: 10000}};
   const short = {...SHORT, quote: {price: 11000, previous_close: 10000}};
   const zero = w.pfPairStats(long, [short]);
   assert.equal(zero.dailyPnl, 100000);
-  assert.equal(zero.dailyChangePct, null);
+  assert.equal(zero.netPreviousValue, 0);
+  assert.equal(zero.dailyChangePct, 10);
+  for (const avg of [0, null, -100, Infinity]) {
+    assert.equal(w.pfPairStats({...long, avg_price: avg}, [short]).dailyChangePct, null);
+  }
   const missing = w.pfPairStats(long, [{...short, quote: {price: 11000}}]);
   assert.equal(missing.dailyPnl, null);
   assert.equal(missing.dailyChangePct, null);
@@ -199,19 +225,20 @@ test('hover previews combined percentage and updates in place with live quotes',
   w.returnClass = v => v > 0 ? 'positive' : v < 0 ? 'negative' : '';
   w.fmtPct = v => `${v > 0 ? '+' : ''}${v.toFixed(2)}%`;
   appendScript(w, read('static', 'js', 'portfolio-pair.js'));
-  w.document.body.insertAdjacentHTML('beforeend', `<table><tbody id="pfBody"><tr data-code="006800"><td>${w.pfPerformanceCellHtml(LONG, '+20%')}</td></tr></tbody></table>`);
+  w.document.body.insertAdjacentHTML('beforeend', `<table><tbody id="pfBody"><tr data-code="006800"><td>${w.pfPerformanceCellHtml(LONG, '+10%')}</td></tr></tbody></table>`);
   const trigger = w.document.querySelector('.js-pf-performance-tooltip');
   trigger.getClientRects = () => [{left: 0, right: 100, top: 100, bottom: 120}];
   trigger.getBoundingClientRect = () => trigger.getClientRects()[0];
   w.pfPreviewPerformanceTooltip({target: trigger, relatedTarget: null}, true);
   const tooltip = w.document.getElementById('pfPerformanceTooltip');
   assert.equal(tooltip.getAttribute('role'), 'tooltip');
-  assert.equal(tooltip.querySelector('.pf-tooltip-line strong').textContent, '+20.00%');
+  assert.equal(tooltip.querySelector('.pf-tooltip-line strong').textContent, '+10.00%');
+  assert.equal(tooltip.querySelector('.pf-tooltip-note').textContent, '롱 투자금 대비');
   assert.notEqual(w.document.activeElement, trigger);
   w.PfStore.items[1].quote.price = 13000;
   w.updatePortfolioRowQuote('MIRAE_FUT', false);
   assert.equal(w.document.getElementById('pfPerformanceTooltip'), tooltip);
-  assert.equal(tooltip.querySelector('.pf-tooltip-line strong').textContent, '+10.00%');
+  assert.equal(tooltip.querySelector('.pf-tooltip-line strong').textContent, '+5.00%');
   w.PfStore.items[1].pair_long_code = null;
   w.pfRefreshPerformanceTooltip();
   assert.equal(tooltip.querySelector('.pf-tooltip-title').textContent, LONG.stock_name);
