@@ -15,6 +15,7 @@ import sys
 import threading
 import time
 import types
+from collections import Counter
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -234,6 +235,37 @@ async def main():
             await brokers.set_ws_session_management(user, cid, True)
             emit({"exclusive_session_management_enabled": True})
         finally:
+            await db.close_db()
+        return
+    if os.environ.get("NH_FOREIGN_SYMBOLS") == "true":
+        from core import http
+        from repositories import account_holdings, brokers, db
+        from services.brokers import namuh, namuh_ws, overseas_realtime, realtime
+
+        try:
+            keys = {(link["google_sub"], link["credential_id"]) for link in await brokers.list_links() if link["provider"] == "namuh"}
+            if len(keys) != 1:
+                raise RuntimeError("Foreign diagnostics require exactly one linked key")
+            user, cid = keys.pop()
+            await overseas_realtime.ensure_master()
+            codes = realtime.select_codes(await account_holdings.list_positions(user), 30, foreign=True)
+            access = await namuh.token(user, cid)
+            context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            counts = Counter()
+            pairs = [realtime.subscription(code) for code in codes]
+            async with websockets.connect("wss://api.nhplug.com:7080/websocket", ssl=context,
+                                           proxy=None, compression=None, ping_interval=None,
+                                           open_timeout=15, close_timeout=3) as ws, namuh_ws.registrations(ws, cid, access, pairs):
+                for code, pair in zip(codes, pairs):
+                    info = overseas_realtime.instrument(code)
+                    await namuh_ws.subscribe(ws, cid, access, *pair)
+                    ack = await read_ack(ws, [access, pair[1], info["gic"]])
+                    shape = "numeric" if pair[1].isdigit() else "dot" if "." in pair[1] else "hyphen" if "-" in pair[1] else "plain"
+                    counts[(info["market"], shape, ack.get("response_code", "unknown"))] += 1
+            emit({"foreign_registration_groups": [{"market": m, "key_shape": shape, "response_code": code, "count": count}
+                  for (m, shape, code), count in sorted(counts.items())]})
+        finally:
+            await http.close_http_clients()
             await db.close_db()
         return
     addresses = inventory()

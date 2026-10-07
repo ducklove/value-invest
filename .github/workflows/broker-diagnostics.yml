@@ -39,6 +39,10 @@ on:
         description: Enable recovery for the sole linked NH key confirmed to be exclusive to this service
         type: boolean
         default: false
+      foreign_symbols:
+        description: Compare held foreign request formats; emit only market and response counts
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -59,6 +63,7 @@ jobs:
           OFFICIAL_SDK: ${{ inputs.official_sdk }}
           NH_RESET_SESSIONS: ${{ inputs.reset_sessions }}
           NH_MANAGE_SESSIONS: ${{ inputs.manage_sessions }}
+          NH_FOREIGN_SYMBOLS: ${{ inputs.foreign_symbols }}
         run: |
           cd "${APP_DIR:-/home/cantabile/Works/value_invest}"
           git fetch --quiet origin master
@@ -71,6 +76,7 @@ jobs:
           trap cleanup EXIT
           if [ "$NH_RESET_SESSIONS" = "true" ]; then export DEEP_PROBE=true; fi
           if [ "$NH_MANAGE_SESSIONS" = "true" ]; then export DEEP_PROBE=true; fi
+          if [ "$NH_FOREIGN_SYMBOLS" = "true" ]; then export DEEP_PROBE=true; fi
           if [ "$OFFICIAL_SDK" = "true" ]; then
             nh_probe_dir=$(mktemp -d /tmp/value-invest-nh-sdk.XXXXXX)
             export NH_SDK_PROBE_DIR="$nh_probe_dir" DEEP_PROBE=true
@@ -84,7 +90,7 @@ jobs:
           if [ "$ISOLATE_SERVICE" = "true" ]; then
             nh_service_stopped=true
             sudo /bin/systemctl stop value-invest.service
-            if [ "$NH_RESET_SESSIONS" = "true" ]; then sleep 2; else sleep 120; fi
+            if [ "$NH_RESET_SESSIONS" = "true" ] || [ "$NH_FOREIGN_SYMBOLS" = "true" ]; then sleep 2; else sleep 120; fi
             export SUBSCRIPTION_PROBE=true REFRESH_TOKEN=false RELEASE_STALE=false
           fi
           if [ "$DEEP_PROBE" = "true" ] || [ "$NH_INVENTORY_ONLY" = "true" ]; then
