@@ -35,6 +35,7 @@ from typing import Any, Awaitable, Callable
 
 import kis_ws_manager
 from cache_layer import MemoryTTLCache
+from domain.portfolio_codes import normalize_portfolio_code
 from services import stock_price
 from services.portfolio.quotes import should_accept_quote_snapshot
 
@@ -97,7 +98,7 @@ def register_quote_fetcher(fetcher: QuoteFetcher) -> None:
 
 
 def _normalize_code(code: str | None) -> str:
-    return (code or "").strip().upper()
+    return normalize_portfolio_code(code)
 
 
 def _safe_float(value: Any) -> float | None:
@@ -362,7 +363,15 @@ async def get_bulk_quote_snapshots(codes: list[str]) -> dict[str, dict[str, Any]
     업스트림을 치지 않고, 다른 호출이 이미 받고 있는 코드는 그 결과를 기다리며,
     나머지 코드만 한 번의 벌크 호출로 받는다.
     """
-    normalized = [c for c in dict.fromkeys(_normalize_code(c) for c in codes) if c]
+    # 업스트림·캐시는 6자리 정본을 공유하되 응답 키는 요청 코드와 맞춘다.
+    # 이미 열려 있는 화면이나 과거 정산은 아직 .KS/.KQ로 요청할 수 있다.
+    aliases = {(code or "").strip().upper(): _normalize_code(code) for code in codes if code}
+    snapshots = await _get_bulk_quote_snapshots(list(aliases.values()))
+    return {alias: dict(snapshots[code]) for alias, code in aliases.items() if code in snapshots}
+
+
+async def _get_bulk_quote_snapshots(codes: list[str]) -> dict[str, dict[str, Any]]:
+    normalized = [c for c in dict.fromkeys(codes) if c]
     if not normalized:
         return {}
     results: dict[str, dict[str, Any]] = {}

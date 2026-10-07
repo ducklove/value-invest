@@ -13,7 +13,7 @@ from datetime import datetime
 
 import aiosqlite
 
-from domain.portfolio_codes import is_korean_listing, is_special_asset
+from domain.portfolio_codes import is_korean_listing, is_special_asset, normalize_portfolio_code
 from domain.portfolio_codes import is_korean_stock as _is_portfolio_korean_stock
 from repositories import accounts as accounts_repo
 from repositories.db import get_db, read_snapshot, transaction
@@ -583,6 +583,7 @@ async def list_preferred_dividends() -> list[dict]:
 
 
 async def get_portfolio_item(google_sub: str, stock_code: str, account_id: str | None = None) -> dict | None:
+    stock_code = normalize_portfolio_code(stock_code)
     from repositories.account_holdings import current, get_position
     aid = account_id or current(google_sub)
     if aid:

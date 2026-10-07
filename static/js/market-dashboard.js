@@ -26,7 +26,7 @@ const MD_INDEX_DESCRIPTIONS = {
 const MD_INDEX_FRAME_DEFAULT_PERIOD = '1D';
 
 // 국채(yield curve·국가비교) 렌더링 상수/상태.
-const BOND_COUNTRY_NAMES = { KR: '한국', US: '미국', JP: '일본', CN: '중국', DE: '독일', FR: '프랑스', GB: '영국', AU: '호주', IT: '이탈리아', ES: '스페인', CH: '스위스', CA: '캐나다', RU: '러시아', IN: '인도', ID: '인도네시아', BR: '브라질' };
+const BOND_COUNTRY_NAMES = { KR: '한국', US: '미국', JP: '일본', CN: '중국', DE: '독일', FR: '프랑스', GB: '영국', AU: '호주', IT: '이탈리아', ES: '스페인', CH: '스위스', CA: '캐나다', RU: '러시아', IN: '인도', ID: '인도네시아', BR: '브라질', MX: '멕시코' };
 let _bondCharts = [];  // [{ec, ro}] — 재렌더 시 dispose
 
 // 차트 색은 dashboard.css 의 CSS 토큰에서 소싱한다(다크 전환 시 재렌더로 갱신).

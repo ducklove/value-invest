@@ -16,6 +16,9 @@ class AccountHoldingsTests(TempDbMixin):
             await portfolio.save_portfolio_item(
                 "u1", code, "ETF", 10, 21000, "USD", account_id=self.second
             )
+            self.assertEqual((await portfolio.get_portfolio_item("u1", code))["stock_code"], "0074K0")
+            self.assertEqual((await account_holdings.get_position("u1", code, self.second))["stock_code"], "0074K0")
+            code = "0074K0"
             db = await get_db()
             row = await (await db.execute(
                 "SELECT currency FROM account_holdings WHERE stock_code=?", (code,)

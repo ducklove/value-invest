@@ -7,7 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator
 
 from core.errors import AppError
-from domain.portfolio_codes import is_cash_asset, is_korean_stock, is_special_asset
+from domain.portfolio_codes import is_cash_asset, is_korean_stock, is_special_asset, normalize_portfolio_code
 
 TradeCurrency = Literal["KRW", "USD", "EUR", "JPY", "CNY", "HKD", "GBP", "AUD", "CAD", "CHF", "TWD", "VND"]
 TradeNumber = Annotated[Decimal, Field(ge=0, le=1_000_000_000_000, decimal_places=8, allow_inf_nan=False)]
@@ -48,7 +48,12 @@ class TradeInput(BaseModel):
     cost_fx_rate: Annotated[TradeNumber, Field(gt=0)] | None = None
     memo: Annotated[str, Field(max_length=500)] = ""
 
-    @field_validator("stock_code", "currency", mode="before")
+    @field_validator("stock_code", mode="before")
+    @classmethod
+    def normalize_code(cls, value):
+        return normalize_portfolio_code(value) if isinstance(value, str) else value
+
+    @field_validator("currency", mode="before")
     @classmethod
     def uppercase(cls, value):
         return value.strip().upper() if isinstance(value, str) else value

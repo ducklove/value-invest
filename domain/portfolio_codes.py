@@ -19,7 +19,10 @@ _KRX_PREFERRED_CODE_RE = re.compile(r"^\d{5}[1-9A-Z]$")
 
 
 def normalize_portfolio_code(code: str | None) -> str:
-    return (code or "").strip().upper()
+    normalized = (code or "").strip().upper()
+    if normalized.endswith((".KS", ".KQ")) and _KRX_CODE_RE.fullmatch(normalized[:-3]):
+        return normalized[:-3]
+    return normalized
 
 
 def is_cash_asset(code: str | None) -> bool:
@@ -85,7 +88,9 @@ def yahoo_symbol(code: str | None) -> str:
     Yahoo 가 쓰는 거래소 접미사(7203.T, BP.L, A200.AX, 0005.HK …)와
     접미사 없는 코드는 그대로 둔다. 멱등이다.
     """
-    symbol = normalize_portfolio_code(code).replace("/", "-")
+    # Yahoo 조회용 거래소 접미사는 유지한다. 포트폴리오 식별자는 국내
+    # 6자리 코드로 통일하지만 provider 심볼까지 접미사를 지우면 안 된다.
+    symbol = (code or "").strip().upper().replace("/", "-")
     root, dot, suffix = symbol.rpartition(".")
     if not dot or not root:
         return symbol

@@ -3,11 +3,27 @@ from services.portfolio import identifiers as ids
 
 def test_normalize_and_classify_portfolio_codes():
     assert ids.normalize_portfolio_code(" a200.ax ") == "A200.AX"
+    for code in ("0074K0.KS", "0074K0.KQ", " 0074k0.ks "):
+        assert ids.normalize_portfolio_code(code) == "0074K0"
+        assert ids.is_korean_stock(code)
     assert ids.is_korean_stock("0074K0")
     assert ids.is_korean_stock("005930")
     assert ids.is_preferred_stock("33637K")
     assert not ids.is_preferred_stock("005930")
     assert ids.common_stock_code("33637K") == "336370"
+    assert ids.normalize_portfolio_code("005930.KS") == "005930"
+    assert ids.normalize_portfolio_code("AAPL.KS") == "AAPL.KS"
+
+
+def test_domestic_alias_is_canonical_in_trade_and_websocket_requests():
+    import kis_ws_manager
+    from domain.portfolio_trades import TradeInput
+
+    trade = TradeInput(stock_code=" 0074k0.ks ", stock_name="ETF", side="sell", quantity=1, price=17880)
+    assert trade.stock_code == "0074K0"
+    assert kis_ws_manager.plan_requested_subscriptions(
+        {"portfolio": ["0074K0.KS", "0074K0", "0074K0.KQ"]}
+    ) == {"ws": ["0074K0"], "rest": []}
 
 
 def test_cash_and_special_asset_identifiers():

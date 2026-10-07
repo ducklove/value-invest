@@ -5,7 +5,7 @@ from contextvars import ContextVar
 from datetime import datetime
 from decimal import Decimal
 
-from domain.portfolio_codes import is_hong_kong_rmb_counter, is_korean_listing
+from domain.portfolio_codes import is_hong_kong_rmb_counter, is_korean_listing, normalize_portfolio_code
 from repositories import accounts
 from repositories.db import get_db, transaction
 
@@ -104,6 +104,7 @@ async def list_positions(user: str, account_id: str | None = None) -> list[dict]
 
 
 async def get_position(user: str, code: str, account_id: str) -> dict | None:
+    code = normalize_portfolio_code(code)
     await require_account(user, account_id)
     db = await get_db()
     row = await (await db.execute(
@@ -144,6 +145,7 @@ async def rebuild(user: str, code: str, **metadata) -> dict | None:
 
 
 async def save(user, code, name, quantity, avg_price, currency="KRW", *, account_id=None, avg_price_currency=None, **metadata):
+    code = normalize_portfolio_code(code)
     if is_korean_listing(code):
         currency = "KRW"
     async with transaction() as db:

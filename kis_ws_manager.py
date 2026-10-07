@@ -27,6 +27,7 @@ from typing import Any
 import websockets
 
 from cache_layer import MemoryTTLCache
+from domain.portfolio_codes import normalize_portfolio_code
 from domain.timeutil import KST
 from services.market.quote_policy import integrated_market_enabled
 from services.portfolio.identifiers import is_korean_stock as _is_portfolio_korean_stock
@@ -146,7 +147,7 @@ def plan_requested_subscriptions(
     safe_requested = requested if isinstance(requested, dict) else {}
     for category in PRIORITY_ORDER:
         for raw_code in safe_requested.get(category, []) or []:
-            code = str(raw_code or "").strip()
+            code = normalize_portfolio_code(str(raw_code or ""))
             if not code or code in seen:
                 continue
             seen.add(code)

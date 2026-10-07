@@ -101,7 +101,8 @@ async def test_get_stock_uses_rest_when_websocket_unavailable_and_caches_result(
 
 
 @pytest.mark.asyncio
-async def test_get_stock_treats_alphanumeric_krx_etf_as_domestic_rest_quote():
+@pytest.mark.parametrize("code", ["0074K0", "0074K0.KS", "0074K0.KQ", " 0074k0.ks "])
+async def test_get_stock_treats_alphanumeric_krx_etf_as_domestic_rest_quote(code):
     rest_quote = {
         "price": 21480,
         "previous_close": 21300,
@@ -111,7 +112,7 @@ async def test_get_stock_treats_alphanumeric_krx_etf_as_domestic_rest_quote():
     }
     with patch.object(stock_quotes.kis_ws_manager, "ws_cache_matches_rest_market", return_value=False), \
          patch.object(stock_quotes.stock_price, "fetch_quote_snapshot", new=AsyncMock(return_value=rest_quote)) as rest:
-        stock = await stock_quotes.get_stock("0074K0")
+        stock = await stock_quotes.get_stock(code)
 
     rest.assert_awaited_once_with(
         "0074K0",
@@ -119,8 +120,22 @@ async def test_get_stock_treats_alphanumeric_krx_etf_as_domestic_rest_quote():
         max_ws_age_seconds=stock_quotes.stock_price.WS_QUOTE_MAX_AGE_SECONDS,
     )
     assert stock is not None
+    assert stock.code == "0074K0"
     assert stock.current_price == 21480
     assert stock.market == "J"
+
+
+@pytest.mark.asyncio
+async def test_bulk_domestic_aliases_share_one_quote_and_preserve_requested_keys():
+    quote = {"price": 17880, "previous_close": 17880, "change": 0, "source": "naver"}
+    with patch.object(stock_quotes.stock_price, "fetch_bulk_quotes_kr", AsyncMock(return_value={"0074K0": quote})) as bulk:
+        result = await stock_quotes.get_bulk_quote_snapshots(["0074K0.KS", "0074K0", "0074K0.KQ"])
+    bulk.assert_awaited_once_with(["0074K0"])
+    assert set(result) == {"0074K0.KS", "0074K0", "0074K0.KQ"}
+    for snapshot in result.values():
+        assert snapshot["code"] == "0074K0"
+        assert snapshot["change_pct"] == 0
+    assert stock_quotes.get_stock_cached("0074K0.KS") == stock_quotes.get_stock_cached("0074K0")
 
 
 @pytest.mark.asyncio
