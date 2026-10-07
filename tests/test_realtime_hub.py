@@ -188,6 +188,16 @@ async def test_toss_ack_partial_rejection_normal_close_and_secret_safe_error(mon
         assert source.rejected == {"AAPL": "stock-not-found"}
         await socket.incoming.put(trade())
         await eventually(lambda: bool(published))
+        monkeypatch.setattr(source, '_to_won', AsyncMock(side_effect=lambda tick: tick))
+        await source.set_codes(['BRK.B', 'BRK-B'])
+        declaration = socket.sent[-1]
+        assert declaration[1]['codes'] == ['BRK.B']
+        await socket.incoming.put({'type':'subscriptions', 'id':declaration[0]['id'],
+                                   'subscribed':['trade:us:BRK.B'], 'rejected':[]})
+        await eventually(lambda: len(source.approved) == 2)
+        await socket.incoming.put(trade('BRK.B', price='200', currency='USD'))
+        await eventually(lambda: len(published) == 3)
+        assert {tick['code'] for tick in published[1:]} == {'BRK.B', 'BRK-B'}
         await socket.incoming.put(OSError("PRIVATE-TOKEN"))
         await eventually(lambda: source.state == 'reconnecting')
         assert not source.approved

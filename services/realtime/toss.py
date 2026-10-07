@@ -121,6 +121,7 @@ class TossSource:
         self.token, self.publish = token, publish
         self.codes: list[str] = []
         self.approved: set[str] = set()
+        self._topics: dict[str, list[str]] = {}
         self.rejected: dict[str, str] = {}
         self.state = "idle"
         self.reason = None
@@ -146,6 +147,7 @@ class TossSource:
             return
         self.codes = list(codes)
         self.approved.intersection_update(codes)
+        self._index_topics()
         if (self._task is None or self._task.done()) and codes:
             self._task = asyncio.create_task(self._run(), name=self.id)
         elif self._ws is not None:
@@ -168,6 +170,13 @@ class TossSource:
                     declarations.append({"type": f"trade:{market}", "codes": symbols})
             # An empty array really removes all subscriptions (an id-only array is unnecessary).
             await self._ws.send(json.dumps(declarations if self.codes else []))
+
+    def _index_topics(self):
+        topics = {}
+        for code in self.approved:
+            market, symbol = instrument(code)
+            topics.setdefault(f"trade:{market}:{symbol}", []).append(code)
+        self._topics = topics
 
     async def _run(self):
         delay, expired = 2, None
@@ -210,6 +219,7 @@ class TossSource:
                                 raise TossError("subscription_response_invalid")
                             self.approved = {code for code in self.codes if (pair := instrument(code))
                                              and f"trade:{pair[0]}:{pair[1]}" in topics}
+                            self._index_topics()
                             for rejected in message.get("rejected", []):
                                 if not isinstance(rejected, dict):
                                     continue
@@ -221,7 +231,7 @@ class TossSource:
                             self.state = "subscribed" if self.approved else "degraded" if self.codes else "connected"
                             delay = 2
                         elif kind == "message":
-                            for code in self.approved:
+                            for code in self._topics.get(message.get("topic"), []):
                                 tick = normalize(message, code)
                                 if tick:
                                     if tick["currency"] == "USD":
@@ -232,7 +242,6 @@ class TossSource:
                                         self.last_tick_at = tick["as_of"]
                                         self.state = "live"
                                         self.publish(tick)
-                                    break
                         elif kind == "error":
                             error = message.get("error")
                             code = error.get("code") if isinstance(error, dict) else None
@@ -254,6 +263,7 @@ class TossSource:
             finally:
                 self._ws = None
                 self.approved.clear()
+                self._topics.clear()
                 self._ack_at = 0
                 self.state = "reconnecting"
             self.reconnects += 1
@@ -276,6 +286,7 @@ class TossSource:
             await asyncio.gather(self._task, return_exceptions=True)
         self._task, self._ws = None, None
         self.approved.clear()
+        self._topics.clear()
         self.state = "offline"
 
     def snapshot(self):

@@ -33,6 +33,7 @@ FRESH_SECONDS = 90
 class Client:
     user: str
     requested: dict = field(default_factory=dict)
+    wanted: set[str] = field(default_factory=set)
     pending: dict = field(default_factory=dict)
     wake: asyncio.Event = field(default_factory=asyncio.Event)
     plan: dict = field(default_factory=dict)
@@ -78,6 +79,7 @@ class QuoteHub:
     def subscribe(self, client, requested):
         client.requested = sanitize(requested)
         wanted = {code for codes in client.requested.values() for code in codes}
+        client.wanted = wanted
         for key in list(client.pending):
             if isinstance(key, tuple) and key[1] not in wanted:
                 client.pending.pop(key)
@@ -123,7 +125,7 @@ class QuoteHub:
         for client in self.clients:
             if user is not None and client.user != user:
                 continue
-            if any(code in codes for codes in client.requested.values()):
+            if code in client.wanted:
                 accepted = self.quote(client.user, code)
                 if accepted:
                     client.put(accepted)
