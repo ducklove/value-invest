@@ -2,13 +2,18 @@
 
 import asyncio
 import json
+import os
 import re
+import sqlite3
 import ssl
 import subprocess
+import time
 from collections import Counter
+from pathlib import Path
 
 import truststore
 import websockets
+from dotenv import load_dotenv
 
 
 def journal_summary():
@@ -46,9 +51,50 @@ async def probe(port):
                           "errno": getattr(exc, "errno", None)}))
 
 
+async def subscription_probe():
+    # Keep tokens on the server; emit only fixed channel names and response codes.
+    load_dotenv(Path.cwd() / ".env")
+    from repositories.broker_secrets import decrypt
+
+    with sqlite3.connect("file:cache.db?mode=ro", uri=True) as db:
+        rows = db.execute("""SELECT DISTINCT c.credential_id, c.token_ciphertext, c.token_expires_at, l.environment
+                             FROM broker_credentials c JOIN broker_account_links l USING(credential_id)
+                             WHERE l.provider='namuh'""").fetchall()
+    print(json.dumps({"linked_credentials": len(rows)}))
+    for index, (_, sealed, expires, env) in enumerate(rows):
+        if not sealed or (expires or 0) <= time.time():
+            print(json.dumps({"credential_index": index, "cached_token": "expired_or_missing"}))
+            continue
+        access = decrypt(sealed)
+        for port, channel, key in [(7070, "mc", "005930"), (7080, "RC", "USAAAPL")]:
+            endpoint = "wss://moapi.nhplug.com:17070/websocket" if env == "mock" else f"wss://api.nhplug.com:{port}/websocket"
+            result = {"credential_index": index, "port": port, "channel": channel}
+            try:
+                async with websockets.connect(endpoint, ssl=truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT),
+                                               open_timeout=15, close_timeout=2, ping_interval=None) as ws:
+                    await ws.send(json.dumps({"header": {"token": access, "tr_type": "1"},
+                                              "body": {"tr_cd": channel, "tr_key": key}}))
+                    for _ in range(5):
+                        message = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+                        code = str(message.get("header", {}).get("rsp_cd", ""))
+                        if code:
+                            result["response_code"] = code if re.fullmatch(r"[A-Z0-9]{1,20}", code) else "unknown"
+                            break
+                    if result.get("response_code") == "00000":
+                        await asyncio.sleep(.15)
+                        await ws.send(json.dumps({"header": {"token": access, "tr_type": "2"},
+                                                  "body": {"tr_cd": channel, "tr_key": key}}))
+            except Exception as exc:
+                result["error"] = type(exc).__name__
+                result["close_code"] = getattr(getattr(exc, "rcvd", None), "code", None)
+            print(json.dumps(result))
+
+
 async def main():
     journal_summary()
     await asyncio.gather(probe(7070), probe(7080))
+    if os.environ.get("SUBSCRIPTION_PROBE") == "true":
+        await subscription_probe()
 
 
 asyncio.run(main())

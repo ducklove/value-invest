@@ -2,6 +2,11 @@ name: Broker connection diagnostics
 
 on:
   workflow_dispatch:
+    inputs:
+      subscription_probe:
+        description: Check one quote registration using cached tokens (no token renewal)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -12,6 +17,8 @@ jobs:
     timeout-minutes: 3
     steps:
       - name: Read sanitized broker errors and check NH TLS
+        env:
+          SUBSCRIPTION_PROBE: ${{ inputs.subscription_probe }}
         run: |
           cd "${APP_DIR:-/home/cantabile/Works/value_invest}"
           git fetch --quiet origin master
