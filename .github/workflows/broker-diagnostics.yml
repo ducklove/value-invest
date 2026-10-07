@@ -35,6 +35,10 @@ on:
         description: Clear this appkey's stale WebSocket sessions using the official recovery API
         type: boolean
         default: false
+      manage_sessions:
+        description: Enable recovery for the sole linked NH key confirmed to be exclusive to this service
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -54,6 +58,7 @@ jobs:
           NH_INVENTORY_ONLY: ${{ inputs.inventory_only }}
           OFFICIAL_SDK: ${{ inputs.official_sdk }}
           NH_RESET_SESSIONS: ${{ inputs.reset_sessions }}
+          NH_MANAGE_SESSIONS: ${{ inputs.manage_sessions }}
         run: |
           cd "${APP_DIR:-/home/cantabile/Works/value_invest}"
           git fetch --quiet origin master
@@ -65,6 +70,7 @@ jobs:
           }
           trap cleanup EXIT
           if [ "$NH_RESET_SESSIONS" = "true" ]; then export DEEP_PROBE=true; fi
+          if [ "$NH_MANAGE_SESSIONS" = "true" ]; then export DEEP_PROBE=true; fi
           if [ "$OFFICIAL_SDK" = "true" ]; then
             nh_probe_dir=$(mktemp -d /tmp/value-invest-nh-sdk.XXXXXX)
             export NH_SDK_PROBE_DIR="$nh_probe_dir" DEEP_PROBE=true

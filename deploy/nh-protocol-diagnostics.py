@@ -147,12 +147,15 @@ async def read_ack(ws, secrets):
     return {"response_code": "no_ack"}
 
 
-async def quote_probe(access, secrets, context, *, port=7070, origin=None, host=None, notice=False):
+async def quote_probe(access, secrets, context, *, port=7070, origin=None, host=None, notice=False, foreign_key=None):
     mock = port == 17070
     endpoint = f"wss://{'moapi' if mock else 'api'}.nhplug.com:{port}/websocket"
     result = {"check": "mock_notice" if notice else "single_quote", "port": port, "origin": bool(origin), "dns_override": bool(host),
               "proxy": False, "compression": False}
     pair = ("d2", "") if notice else ("RC", "USAAAPL") if port == 7080 else ("mc", "005930")
+    if port == 7080 and foreign_key is not None:
+        pair = ("RC", foreign_key)
+        result["key_format"] = "padded_gic" if foreign_key.endswith(" ") else "ticker"
     packet = {"header": {"token": access, "tr_type": "1"}, "body": {"tr_cd": pair[0], "tr_key": pair[1]}}
     options = {"host": host, "server_hostname": "api.nhplug.com"} if host else {}
     try:
@@ -220,6 +223,19 @@ async def main():
     load_dotenv(Path.cwd() / ".env")
     from repositories.broker_secrets import decrypt
 
+    if os.environ.get("NH_MANAGE_SESSIONS") == "true":
+        from repositories import brokers, db
+
+        try:
+            keys = {(link["google_sub"], link["credential_id"]) for link in await brokers.list_links() if link["provider"] == "namuh"}
+            if len(keys) != 1:
+                raise RuntimeError("Exclusive NH session management requires exactly one linked key")
+            user, cid = keys.pop()
+            await brokers.set_ws_session_management(user, cid, True)
+            emit({"exclusive_session_management_enabled": True})
+        finally:
+            await db.close_db()
+        return
     addresses = inventory()
     if os.environ.get("NH_INVENTORY_ONLY") == "true":
         return
@@ -249,6 +265,9 @@ async def main():
         if os.environ.get("NH_RESET_SESSIONS") == "true":
             await asyncio.sleep(1)
             await quote_probe(access, secrets, context, port=7080)
+            for key in ("USAAAPL".ljust(15), "AAPL"):
+                await asyncio.sleep(1)
+                await quote_probe(access, secrets, context, port=7080, foreign_key=key)
         if base.get("response_code") != "00000":
             await asyncio.sleep(1)
             await quote_probe(access, secrets, context, origin="https://api.nhplug.com:7070")
