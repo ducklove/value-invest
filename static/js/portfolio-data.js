@@ -276,6 +276,46 @@ function pfPairShortsForLong(longCode, items = PfStore.items) {
   return (Array.isArray(items) ? items : []).filter(i => pfPairLongCode(i) === longCode);
 }
 
+function pfPairAnchorCode(item, items = PfStore.items) {
+  const longCode = pfPairLongCode(item);
+  const longItem = longCode && items.find(i => i.stock_code === longCode);
+  return longItem && !pfPairLongCode(longItem) ? longCode : item.stock_code;
+}
+
+function pfKeepPairsTogether(items) {
+  const shorts = new Map();
+  const pinned = new Set();
+  for (const item of items) {
+    const anchor = pfPairAnchorCode(item, items);
+    if (anchor === item.stock_code) continue;
+    if (!shorts.has(anchor)) shorts.set(anchor, []);
+    shorts.get(anchor).push(item);
+    pinned.add(item.stock_code);
+  }
+  return items.flatMap(item => pinned.has(item.stock_code) ? [] : [item, ...(shorts.get(item.stock_code) || [])]);
+}
+
+// 기존 등락률 숫자를 그대로 사용한다. 합산 보기에서는 양쪽 숫자 모두
+// 같은 팝오버를 열며, 열·행·배지는 추가하지 않는다.
+function pfPairChangeCellHtml(item, contents) {
+  if (PfStore.accountId) return contents;
+  const longCode = pfPairAnchorCode(item);
+  if (!pfPairShortsForLong(longCode).length) return contents;
+  return `<button type="button" class="pf-pair-change js-pf-open-pair-summary" data-long-code="${escapeHtml(longCode)}" title="클릭하여 롱·숏 합산 등락률 보기" aria-label="롱·숏 합산 등락률 보기" aria-haspopup="dialog">${contents}</button>`;
+}
+
+function pfPairPreviousClose(quote, price) {
+  if (price === null || !Number.isFinite(Number(price)) || Number(price) <= 0 || quote._stale === true) return null;
+  const number = value => value === null || value === undefined || value === '' ? null
+    : (Number.isFinite(Number(value)) ? Number(value) : null);
+  const previous = number(quote.previous_close);
+  if (previous !== null && previous > 0) return previous;
+  const change = number(quote.change);
+  if (change !== null && price - change > 0) return price - change;
+  const pct = number(quote.change_pct);
+  return pct !== null && pct > -100 ? price / (1 + pct / 100) : null;
+}
+
 // 페어 합산 통계. 투자액은 수량 × 평단(KRW 환산)이라 숏은 자연히 음수 —
 // 순투자액 = 롱 투자액 + 숏 투자액. 시세가 하나라도 없으면 평가액/손익은
 // null (부분 합산으로 오해 방지).
@@ -285,14 +325,25 @@ function pfPairStats(longItem, shortItems) {
   let netMarketValue = 0;
   let totalPnl = 0;
   let allPriced = true;
+  let netPreviousValue = 0;
+  let dailyPnl = 0;
+  let allDailyPriced = true;
   for (const item of [longItem, ...(Array.isArray(shortItems) ? shortItems : [])]) {
     if (!item) continue;
     const qty = Number(item.quantity) || 0;
-    const avgKrwRaw = Number(item.avg_price_krw);
+    const avgKrwRaw = item.avg_price_krw == null ? NaN : Number(item.avg_price_krw);
     const avgKrw = Number.isFinite(avgKrwRaw) ? avgKrwRaw : (Number(item.avg_price) || 0);
     const invested = qty * avgKrw;
-    const price = quotePriceOrNull(item.quote || {});
+    const rawPrice = quotePriceOrNull(item.quote || {});
+    const price = rawPrice !== null && Number.isFinite(Number(rawPrice)) ? Number(rawPrice) : null;
     const marketValue = price !== null ? qty * price : null;
+    const previous = pfPairPreviousClose(item.quote || {}, price);
+    if (previous === null) {
+      allDailyPriced = false;
+    } else {
+      netPreviousValue += qty * previous;
+      dailyPnl += qty * (price - previous);
+    }
     netInvested += invested;
     if (marketValue === null) {
       allPriced = false;
@@ -314,20 +365,11 @@ function pfPairStats(longItem, shortItems) {
     netMarketValue: allPriced ? netMarketValue : null,
     totalPnl: allPriced ? totalPnl : null,
     allPriced,
+    netPreviousValue: allDailyPriced ? netPreviousValue : null,
+    dailyPnl: allDailyPriced ? dailyPnl : null,
+    dailyChangePct: allDailyPriced && Math.abs(netPreviousValue) > 1e-8
+      ? dailyPnl / Math.abs(netPreviousValue) * 100 : null,
   };
-}
-
-// 페어 칩 — 숏 행에는 "⇄ 롱 종목명", 롱 행에는 "⇄ 롱숏". 클릭하면 순투자액
-// 요약 팝오버(pfShowPairSummary). 페어와 무관한 행은 빈 문자열.
-function _renderPortfolioRowPairChip(item, items = PfStore.items) {
-  const longCode = pfPairLongCode(item);
-  if (longCode) {
-    const longItem = (Array.isArray(items) ? items : []).find(i => i.stock_code === longCode);
-    const label = `⇄ ${longItem && longItem.stock_name ? longItem.stock_name : longCode}`;
-    return `<div class="pf-stock-tags"><button type="button" class="pf-stock-tag pf-pair-chip js-pf-open-pair-summary" data-long-code="${escapeHtml(longCode)}" title="롱숏 페어 — 클릭하면 순투자액 요약">${escapeHtml(label)}</button></div>`;
-  }
-  if (!pfPairShortsForLong(item.stock_code, items).length) return '';
-  return `<div class="pf-stock-tags"><button type="button" class="pf-stock-tag pf-pair-chip js-pf-open-pair-summary" data-long-code="${escapeHtml(item.stock_code)}" title="롱숏 페어 — 클릭하면 순투자액 요약">⇄ 롱숏</button></div>`;
 }
 
 function pfNormalizeSearchText(value) {
@@ -389,6 +431,7 @@ function pfToggleGroupFilter(groupName) {
 // '커서 있는 행이 깜빡임' 문제. 영향 받는 셀만 in-place 로 덮어 쓰고
 // flash 클래스를 그 행에만 붙여 갱신된 행만 번쩍이게 한다.
 function updatePortfolioRowQuote(code, shouldFlash = true) {
+  if (typeof pfRefreshPairSummary === 'function') pfRefreshPairSummary();
   const tbody = document.getElementById('pfBody');
   if (!tbody) return;
   // Hot path (runs per quote tick): let the browser match the row by attribute
@@ -423,7 +466,22 @@ function updatePortfolioRowQuote(code, shouldFlash = true) {
     ? (price / targetPrice * 100) : null;
 
   const setText = (sel, txt) => { const el = tr.querySelector(sel); if (el) el.textContent = txt; };
-  const setHtml = (sel, html) => { const el = tr.querySelector(sel); if (el) el.innerHTML = html; };
+  const setHtml = (sel, html) => {
+    const el = tr.querySelector(sel);
+    if (!el) return;
+    const button = sel === '.pf-col-changepct' && el.querySelector('.js-pf-open-pair-summary');
+    if (button) {
+      const next = document.createElement('template');
+      next.innerHTML = html;
+      const nextButton = next.content.querySelector('.js-pf-open-pair-summary');
+      if (nextButton?.dataset.longCode === button.dataset.longCode) {
+        // 시세 갱신 중에도 클릭 대상과 키보드 포커스를 유지한다.
+        button.innerHTML = nextButton.innerHTML;
+        return;
+      }
+    }
+    el.innerHTML = html;
+  };
 
   // 컬러 모드는 등락률 셀 내용과 <tr> 의 히트 등급을 함께 갱신해야 tick 이
   // 흘러도 행 색·게이지가 현재 시세와 어긋나지 않는다(재렌더 없이).

@@ -1,6 +1,6 @@
 // jsdom behavior tests for the long/short pair helpers in portfolio-data.js:
 // net-invested aggregation (pfPairStats), pointer parsing (pfPairLongCode) and
-// the pair chip renderer used by the holdings table.
+// pair ordering and the existing daily-change cell's combined-performance action.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -28,10 +28,12 @@ function loadPairDom() {
     url: "https://app.example.com/",
   });
   const { window: w } = dom;
+  w.CSS = {escape: value => String(value)};
   appendScript(w, STORE_SRC);
   appendScript(w, DATA_SRC);
   w.escapeHtml = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
   w.quotePriceOrNull = (q) => {
+    if (q?.price === null || q?.price === undefined) return null;
     const price = Number(q && q.price);
     return Number.isFinite(price) ? price : null;
   };
@@ -101,21 +103,22 @@ test("pfPairStats prefers avg_price_krw over the native avg_price", () => {
   assert.equal(stats.totalPnl, 100000);
 });
 
-test("pair chip renders on both legs and nowhere else", () => {
+test("existing change figures open the pair on both legs without adding badges", () => {
   const w = loadPairDom();
   w.PfStore.items = [LONG, SHORT, { stock_code: "005930", stock_name: "삼성전자", quantity: 5 }];
 
-  const shortChip = w._renderPortfolioRowPairChip(SHORT);
-  assert.match(shortChip, /js-pf-open-pair-summary/);
-  assert.match(shortChip, /data-long-code="006800"/);
-  assert.match(shortChip, /미래에셋증권2우B/);
-
-  const longChip = w._renderPortfolioRowPairChip(LONG);
-  assert.match(longChip, /js-pf-open-pair-summary/);
-  assert.match(longChip, /data-long-code="006800"/);
-  assert.match(longChip, /롱숏/);
-
-  assert.equal(w._renderPortfolioRowPairChip(w.PfStore.items[2]), "");
+  for (const item of [LONG, SHORT]) {
+    const html = w.pfPairChangeCellHtml(item, '<span>+1.23%</span>');
+    assert.match(html, /js-pf-open-pair-summary/);
+    assert.match(html, /data-long-code="006800"/);
+    assert.doesNotMatch(html, /pf-stock-tag|pf-pair-chip/);
+    const holder = w.document.createElement('div');
+    holder.innerHTML = html;
+    assert.equal(holder.textContent, '+1.23%');
+  }
+  assert.equal(w.pfPairChangeCellHtml(w.PfStore.items[2], '+1%'), '+1%');
+  w.PfStore.accountId = 'manual';
+  assert.equal(w.pfPairChangeCellHtml(SHORT, '+1%'), '+1%');
 });
 
 test("pfPairShortsForLong finds every short pointing at the long", () => {
@@ -124,4 +127,91 @@ test("pfPairShortsForLong finds every short pointing at the long", () => {
   w.PfStore.items = [LONG, SHORT, secondShort];
   const shorts = w.pfPairShortsForLong("006800");
   assert.deepEqual(shorts.map(s => s.stock_code), ["MIRAE_FUT", "MIRAE_FUT2"]);
+});
+
+test('pair daily change combines signed PnL over the previous net valuation', () => {
+  const w = loadPairDom();
+  const stats = w.pfPairStats({...LONG, quote: {price: 12000, previous_close: 10000}},
+    [{...SHORT, quantity: -50, quote: {price: 12000, previous_close: 11000}}]);
+  assert.equal(stats.netPreviousValue, 450000);
+  assert.equal(stats.dailyPnl, 150000);
+  assert.ok(Math.abs(stats.dailyChangePct - 100 / 3) < 1e-8);
+  w.close();
+});
+
+test('actual futures previous close takes priority over its underlying stock percentage', () => {
+  const w = loadPairDom();
+  assert.equal(w.pfPairPreviousClose({previous_close: 11000, change: 1000, change_pct: 30}, 12000), 11000);
+  assert.equal(w.pfPairPreviousClose({change: 1000, change_pct: 30}, 12000), 11000);
+  assert.equal(w.pfPairPreviousClose({change_pct: 20}, 12000), 10000);
+  assert.equal(w.pfPairPreviousClose({change_pct: null}, 12000), null);
+  assert.equal(w.pfPairPreviousClose({change_pct: -100}, 12000), null);
+  assert.equal(w.pfPairPreviousClose({previous_close: 11000, _stale: true}, 12000), null);
+  assert.equal(w.pfPairPreviousClose({previous_close: 11000}, NaN), null);
+  w.close();
+});
+
+test('missing daily quotes and a zero net baseline never produce a misleading percentage', () => {
+  const w = loadPairDom();
+  const long = {...LONG, quote: {price: 12000, previous_close: 10000}};
+  const short = {...SHORT, quote: {price: 11000, previous_close: 10000}};
+  const zero = w.pfPairStats(long, [short]);
+  assert.equal(zero.dailyPnl, 100000);
+  assert.equal(zero.dailyChangePct, null);
+  const missing = w.pfPairStats(long, [{...short, quote: {price: 11000}}]);
+  assert.equal(missing.dailyPnl, null);
+  assert.equal(missing.dailyChangePct, null);
+  const noPrice = w.pfPairStats(long, [{...short, quote: {price: null, previous_close: 10000}}]);
+  assert.equal(noPrice.dailyPnl, null);
+  assert.equal(noPrice.totalPnl, null);
+  const negative = w.pfPairStats(long, [{...short, quantity: -200}]);
+  assert.equal(negative.dailyChangePct, 0);
+  w.close();
+});
+
+test('shorts stay below their long and moving or dropping onto a pair preserves the whole block', () => {
+  const w = loadPairDom();
+  appendScript(w, read('static', 'js', 'portfolio-order.js'));
+  const other = {stock_code: '005930'};
+  const second = {...SHORT, stock_code: 'MIRAE_FUT2'};
+  const items = [SHORT, other, LONG, second];
+  const codes = list => Array.from(list, item => item.stock_code);
+  assert.deepEqual(codes(w.pfKeepPairsTogether(items)), ['005930', '006800', 'MIRAE_FUT', 'MIRAE_FUT2']);
+  assert.deepEqual(codes(items), ['MIRAE_FUT', '005930', '006800', 'MIRAE_FUT2']);
+  assert.equal(w._pfNextOrderAfterDrop(items, 'MIRAE_FUT', '005930'), null);
+  assert.equal(w._pfNextOrderAfterDrop(items, '006800', 'MIRAE_FUT'), null);
+  assert.deepEqual(codes(w._pfNextOrderAfterDrop(items, '006800', '005930')), ['006800', 'MIRAE_FUT', 'MIRAE_FUT2', '005930']);
+  assert.deepEqual(codes(w._pfNextOrderAfterDrop(items, '005930', 'MIRAE_FUT', 'after')), ['006800', 'MIRAE_FUT', 'MIRAE_FUT2', '005930']);
+  assert.deepEqual(codes(w._pfNextOrderAfterDrop(items, '005930', 'MIRAE_FUT', 'before')), ['005930', '006800', 'MIRAE_FUT', 'MIRAE_FUT2']);
+  w.PfStore.accountId = 'manual';
+  assert.deepEqual(codes(w._pfNextOrderAfterDrop(items, 'MIRAE_FUT', '006800', 'after')), ['005930', '006800', 'MIRAE_FUT', 'MIRAE_FUT2']);
+  w.close();
+});
+
+test('combined percentage popup updates in place with live quotes and supports Escape', () => {
+  const w = loadPairDom();
+  w.PfStore.items = [{...LONG, quote: {price: 12000, previous_close: 10000}},
+    {...SHORT, quantity: -50, quote: {price: 12000, previous_close: 10000}}];
+  w.pfFmtPortfolioValue = v => String(v);
+  w.returnClass = v => v > 0 ? 'positive' : v < 0 ? 'negative' : '';
+  w.fmtPct = v => `${v > 0 ? '+' : ''}${v.toFixed(2)}%`;
+  w._positionPortfolioPopupMenu = () => {};
+  appendScript(w, read('static', 'js', 'portfolio-pair.js'));
+  const button = w.document.createElement('button');
+  button.className = 'js-pf-open-pair-summary';
+  w.document.body.appendChild(button);
+  w.pfShowPairSummary('006800', {target: button});
+  const menu = w.document.getElementById('pfPairSummary');
+  assert.equal(menu.querySelector('.pf-pair-value').textContent, '+20.00%');
+  w.PfStore.items[1].quote.price = 13000;
+  w.updatePortfolioRowQuote('MIRAE_FUT', false);
+  assert.equal(w.document.getElementById('pfPairSummary'), menu);
+  assert.equal(menu.querySelector('.pf-pair-value').textContent, '+10.00%');
+  w.document.dispatchEvent(new w.KeyboardEvent('keydown', {key: 'Escape'}));
+  assert.equal(w.document.getElementById('pfPairSummary'), null);
+  w.pfShowPairSummary('006800', {target: button});
+  w.PfStore.items[1].pair_long_code = null;
+  w.pfRefreshPairSummary();
+  assert.equal(w.document.getElementById('pfPairSummary'), null);
+  w.close();
 });

@@ -3530,15 +3530,18 @@ body.pf-heat-mode.pf-mobile-simple .pf-col-changepct { width: 72px; }
 }
 
 /* --- 롱숏 페어 ------------------------------------------------------------ */
-/* 페어 칩: 태그 칩과 같은 자리지만 남보라 톤으로 구분. */
-.pf-pair-chip {
-  background: rgba(99, 102, 241, 0.12);
-  color: #4338ca;
+/* 등락률 숫자만 클릭 대상으로 사용: 추가 배지나 열 없이 합산 성과를 연다. */
+.pf-pair-change {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 4px;
 }
-.pf-pair-chip:hover {
-  background: rgba(99, 102, 241, 0.20);
-  color: #3730a3;
-}
+.pf-pair-change:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 /* 편집 모드에서 숏 행 그룹 셀 아래 붙는 페어 선택 박스. */
 .pf-pair-select {
   display: block;
@@ -3557,41 +3560,19 @@ body.pf-heat-mode.pf-mobile-simple .pf-col-changepct { width: 72px; }
 .pf-pair-select:focus { color: var(--text); outline: none; }
 .pf-group-select[disabled] { opacity: 0.55; cursor: default; }
 /* 페어 요약 팝오버 (pf-pref-menu 베이스 위 콘텐츠 스타일). */
-.pf-pair-menu { min-width: 260px; padding: 10px 12px; }
+.pf-pair-menu { min-width: 220px; max-width: min(340px, calc(100vw - 16px)); padding: 14px 16px; }
 .pf-pair-title {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
-  margin-bottom: 6px;
+  margin-bottom: 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
-.pf-pair-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 12px;
-  padding: 3px 0;
-  font-size: 12px;
-}
-.pf-pair-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pf-pair-name em {
-  font-style: normal;
-  font-size: 10px;
-  color: var(--text-secondary);
-}
-.pf-pair-nums { color: var(--text-secondary); white-space: nowrap; }
-.pf-pair-total {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--border);
-}
-.pf-pair-total > div {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-}
+.pf-pair-label { font-size: 12px; color: var(--text-secondary); }
+.pf-pair-value { font-size: 26px; font-weight: 700; margin: 3px 0 6px; }
+.pf-pair-pnl { font-size: 12px; }
+.pf-pair-basis { margin-top: 8px; font-size: 11px; color: var(--text-secondary); }
 /* 투자 논거와 수익 원인 분해 */
 .pf-insight-controls,.pf-thesis-buttons,.pf-thesis-links { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:12px 0; }
 .pf-insight-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:16px 0; }

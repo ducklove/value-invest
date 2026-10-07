@@ -164,6 +164,7 @@ async def get_holdings(request: Request):
 app.add_api_route("/api/portfolio/order", portfolio.save_portfolio_order, methods=["PUT"])
 app.add_api_route("/api/portfolio/{stock_code}/metadata", portfolio.save_holding_metadata, methods=["PUT"])
 app.add_api_route("/api/portfolio/{stock_code}/group", portfolio.set_holding_group, methods=["PUT"])
+app.add_api_route("/api/portfolio/{stock_code}/pair", portfolio.update_portfolio_pair, methods=["PUT"])
 
 
 @app.put("/api/portfolio/{stock_code}/benchmark")

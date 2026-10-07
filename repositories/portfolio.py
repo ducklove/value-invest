@@ -15,6 +15,7 @@ import aiosqlite
 
 from domain.portfolio_codes import is_korean_listing, is_special_asset, normalize_portfolio_code
 from domain.portfolio_codes import is_korean_stock as _is_portfolio_korean_stock
+from domain.portfolio_order import pin_long_short_pairs
 from repositories import accounts as accounts_repo
 from repositories.db import get_db, read_snapshot, transaction
 
@@ -181,7 +182,8 @@ async def get_portfolio(google_sub: str, account_id: str | None = None) -> list[
         # 페어된 숏은 태그를 가질 수 없다 (서버 차단의 표시-측 방어).
         item["tags"] = [] if item.get("pair_long_code") else tags_by_code.get(item["stock_code"], [])
     from repositories.account_holdings import annotate
-    return await annotate(google_sub, items, account_id)
+    items = await annotate(google_sub, items, account_id)
+    return items if account_id else pin_long_short_pairs(items)
 
 
 async def get_portfolio_tags_for_user(google_sub: str) -> list[dict]:

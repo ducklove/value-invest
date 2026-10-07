@@ -294,7 +294,11 @@ function renderPortfolio(options = {}) {
   // instant: it filters the already-loaded holdings by name, code, group, tag.
   const groupRows = PfStore.filters.group === null ? allRows : allRows.filter(r => PfStore.filters.group.has(pfGetGroup(r)));
   const searchText = String(PfStore.filters.searchText || '').trim();
-  const rows = searchText ? groupRows.filter(r => pfRowMatchesSearch(r, searchText)) : groupRows;
+  let rows = searchText ? groupRows.filter(r => pfRowMatchesSearch(r, searchText)) : groupRows.slice();
+  if (!PfStore.accountId && searchText) {
+    const anchors = new Set(rows.map(r => pfPairAnchorCode(r, allRows)));
+    rows = groupRows.filter(r => anchors.has(pfPairAnchorCode(r, allRows)));
+  }
   const searchMeta = document.getElementById('pfSearchMeta');
   if (searchMeta && !summaryOnly) {
     searchMeta.textContent = searchText ? `검색 결과 ${rows.length.toLocaleString()} / ${groupRows.length.toLocaleString()}` : '';
@@ -365,12 +369,15 @@ function renderPortfolio(options = {}) {
     });
   }
   if (!summaryOnly && PfStore.edit.code) {
-    const idx = rows.findIndex(r => r.stock_code === PfStore.edit.code);
+    const editingItem = rows.find(r => r.stock_code === PfStore.edit.code);
+    const editingCode = !PfStore.accountId && editingItem ? pfPairAnchorCode(editingItem, rows) : PfStore.edit.code;
+    const idx = rows.findIndex(r => r.stock_code === editingCode);
     if (idx > 0) {
       const [editing] = rows.splice(idx, 1);
       rows.unshift(editing);
     }
   }
+  if (!summaryOnly && !PfStore.accountId) rows = pfKeepPairsTogether(rows);
 
   // Update sort arrows in header
   if (!summaryOnly) {
@@ -668,7 +675,7 @@ function renderPortfolio(options = {}) {
     const safeCode = escapeHtml(r.stock_code);
     const displayCode = escapeHtml(r.stock_code.replace(/^KRFUT_/, ''));
     const pairLongCode = pfPairLongCode(r);
-    const tagHtml = _renderPortfolioRowTags(pfGetTags(r)) + _renderPortfolioRowPairChip(r);
+    const tagHtml = _renderPortfolioRowTags(pfGetTags(r));
     const groupHtml = _renderPortfolioRowGroup(r);
     const isSaving = PfStore.edit.savingCode === r.stock_code;
     const editAttrs = isSaving ? ' disabled' : '';
@@ -683,7 +690,8 @@ function renderPortfolio(options = {}) {
     const saveContent = isSaving
       ? '<span class="pf-save-spinner" aria-hidden="true"></span><span class="pf-save-label">저장중</span>'
       : '✓';
-    const dragHandle = canManualDrag
+    const canDragRow = canManualDrag && (PfStore.accountId || pfPairAnchorCode(r) === r.stock_code);
+    const dragHandle = canDragRow
       ? '<button type="button" class="pf-row-drag-handle js-pf-row-drag" draggable="true" title="드래그하여 순서 변경" aria-label="드래그하여 순서 변경">&#x2630;</button>'
       : '';
     const safeName = escapeHtml(r.stock_name);
@@ -692,7 +700,7 @@ function renderPortfolio(options = {}) {
       : '';
     const stockIdentity = `<span class="pf-stock-main"><span class="pf-stock-line"><a href="#" class="pf-stock-link js-pf-open-insight" title="${safeName}"><strong>${safeName}</strong></a><span class="pf-stock-code">${displayCode}</span>${curTag}${liveDotE}${signalBadgeHtml}</span>${tagHtml}</span>`;
     const stockEditIdentity = `<span class="pf-stock-main pf-stock-edit-main"><input class="pf-edit-input pf-stock-name-edit js-pf-edit-name" id="pfEditName" value="${safeName}" type="text" maxlength="80" autocomplete="off"${editAttrs}><span class="pf-stock-line"><span class="pf-stock-code">${displayCode}</span>${curTag}${liveDotE}${signalBadgeHtml}</span>${tagHtml}</span>`;
-    const stockCellClass = canManualDrag ? 'pf-stock-cell pf-stock-cell-with-drag js-pf-analyze' : 'pf-stock-cell js-pf-analyze';
+    const stockCellClass = canDragRow ? 'pf-stock-cell pf-stock-cell-with-drag js-pf-analyze' : 'pf-stock-cell js-pf-analyze';
     const heatAttrs = pfHeatRowAttrs(r);
     const changeCell = pfChangeCellHtml(r);
     // 메모 — 기본 숨김 컬럼. 폭이 부족하면 셀 안에서 줄바꿈되도록
@@ -828,14 +836,15 @@ function renderPortfolio(options = {}) {
         e.dataTransfer.dropEffect = 'move';
         _pfClearPortfolioDragOver(tbody);
         if (!tr.classList.contains('dragging')) {
-          tr.classList.add(_pfDropPositionForEvent(e, tr) === 'after' ? 'drag-over-after' : 'drag-over-before');
+          const position = _pfDropPositionForEvent(e, tr);
+          _pfDropMarkerRow(tr, position, tbody).classList.add(position === 'after' ? 'drag-over-after' : 'drag-over-before');
         }
       });
-      tr.addEventListener('dragleave', () => tr.classList.remove('drag-over-before', 'drag-over-after'));
+      tr.addEventListener('dragleave', () => _pfClearPortfolioDragOver(tbody));
       tr.addEventListener('drop', (e) => {
         e.preventDefault();
         const dropPosition = _pfDropPositionForEvent(e, tr);
-        tr.classList.remove('drag-over-before', 'drag-over-after');
+        _pfClearPortfolioDragOver(tbody);
         const fromCode = e.dataTransfer.getData('text/plain');
         const toCode = tr.dataset.code;
         if (fromCode && toCode && fromCode !== toCode) pfDropRow(fromCode, toCode, dropPosition);
@@ -843,6 +852,7 @@ function renderPortfolio(options = {}) {
     });
   }
   _pfApplyFocus();
+  if (typeof pfRefreshPairSummary === 'function') pfRefreshPairSummary();
 }
 
 // --- /portfolio?focus=CODE 딥링크 — 보유 행으로 한 번 스크롤하고 잠시 강조한다 ---

@@ -51,6 +51,20 @@ class PortfolioOrderTests(TempDbMixin):
         await self.resync()
         self.assertEqual(await self.codes(self.aid), self.default_order)
 
+    async def test_pair_is_pinned_only_in_aggregate_and_unpair_restores_independent_order(self):
+        for code, qty in [("006800", 100), ("005930", -50), ("000660", 10)]:
+            await portfolio.save_portfolio_item("u1", code, code, qty, 100, account_id=self.manual)
+        order = ["005930", "000660", "006800"]
+        await portfolio.save_portfolio_order("u1", order)
+        await portfolio_order.save("u1", self.manual, order)
+        await portfolio.set_portfolio_pair("u1", "005930", "006800")
+        self.assertEqual(await self.codes(), ["000660", "006800", "005930"])
+        self.assertEqual(await self.codes(self.manual), order)
+        await portfolio.save_portfolio_order("u1", ["005930", "006800", "000660"])
+        self.assertEqual(await self.codes(), ["006800", "005930", "000660"])
+        await portfolio.set_portfolio_pair("u1", "005930", None)
+        self.assertEqual(await self.codes(), ["005930", "006800", "000660"])
+
     async def test_custom_order_survives_balance_updates_and_new_symbols(self):
         await self.resync()
         manual_order = list(reversed(self.default_order))

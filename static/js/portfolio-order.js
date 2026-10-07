@@ -36,6 +36,21 @@ function _pfSetPortfolioSortOrder(orderCodes) {
 function _pfNextOrderAfterDrop(items, fromCode, toCode, dropPosition = 'before') {
   const fromIdx = items.findIndex(i => i.stock_code === fromCode);
   if (fromIdx < 0 || !toCode || fromCode === toCode) return null;
+  if (!PfStore.accountId) {
+    const fromAnchor = pfPairAnchorCode(items[fromIdx], items);
+    const target = items.find(i => i.stock_code === toCode);
+    // 페어 숏은 독립 이동할 수 없다. 롱을 옮기면 연결된 숏도 함께 옮긴다.
+    if (fromAnchor !== fromCode || !target) return null;
+    const toAnchor = pfPairAnchorCode(target, items);
+    if (fromAnchor === toAnchor) return null;
+    const ordered = pfKeepPairsTogether(items);
+    const moved = ordered.filter(i => pfPairAnchorCode(i, items) === fromAnchor);
+    const next = ordered.filter(i => pfPairAnchorCode(i, items) !== fromAnchor);
+    const targetIndices = next.map((item, index) => pfPairAnchorCode(item, items) === toAnchor ? index : -1).filter(index => index >= 0);
+    const insertIdx = dropPosition === 'after' ? targetIndices[targetIndices.length - 1] + 1 : targetIndices[0];
+    next.splice(insertIdx, 0, ...moved);
+    return next;
+  }
   const next = items.slice();
   const [moved] = next.splice(fromIdx, 1);
   const targetIdx = next.findIndex(i => i.stock_code === toCode);
@@ -54,6 +69,18 @@ function _pfClearPortfolioDragOver(root = document) {
 function _pfDropPositionForEvent(e, row) {
   const rect = row.getBoundingClientRect();
   return e.clientY > rect.top + rect.height / 2 ? 'after' : 'before';
+}
+
+function _pfDropMarkerRow(row, position, tbody) {
+  if (PfStore.accountId) return row;
+  const item = PfStore.items.find(i => i.stock_code === row.dataset.code);
+  if (!item) return row;
+  const anchor = pfPairAnchorCode(item);
+  const legs = [...tbody.querySelectorAll('tr[data-code]')].filter(tr => {
+    const leg = PfStore.items.find(i => i.stock_code === tr.dataset.code);
+    return leg && pfPairAnchorCode(leg) === anchor;
+  });
+  return (position === 'after' ? legs[legs.length - 1] : legs[0]) || row;
 }
 
 async function pfDropRow(fromCode, toCode, dropPosition = 'before') {

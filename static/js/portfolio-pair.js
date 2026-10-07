@@ -1,5 +1,5 @@
-// 롱숏 페어 액션: 페어 설정/해제 API 호출과 순투자액 요약 팝오버.
-// 순수 데이터 헬퍼(pfPairLongCode/pfPairStats/pfPairShortsForLong/칩 렌더러)는
+// 롱숏 페어 액션: 페어 설정/해제 API 호출과 합산 등락률 팝오버.
+// 순수 데이터 헬퍼(pfPairLongCode/pfPairStats/pfPairShortsForLong)는
 // portfolio-data.js 에 있다. 이 파일은 portfolio-actions.js 의 유지보수 상한
 // (1,000줄)을 지키기 위해 분리된 페어 전용 액션 홈.
 async function pfChangePair(stockCode, longCode) {
@@ -21,35 +21,65 @@ async function pfChangePair(stockCode, longCode) {
   } catch (e) { reportApiError(e, '롱숏 페어'); }
 }
 
-// 페어 칩 클릭 → 순투자액 요약 팝오버. 롱 다리 + 그 롱을 가리키는 숏 다리
-// 전부의 투자액/평가액과 순투자액·순평가액·합산 손익을 보여준다.
+let _pfPairSummaryAnchor = null;
+
+function pfClosePairSummary(restoreFocus = false) {
+  document.getElementById('pfPairSummary')?.remove();
+  if (restoreFocus && _pfPairSummaryAnchor) {
+    const row = document.querySelector(`#pfBody tr[data-code="${CSS.escape(_pfPairSummaryAnchor)}"]`);
+    row?.querySelector('.js-pf-open-pair-summary')?.focus({ preventScroll: true });
+  }
+  _pfPairSummaryAnchor = null;
+}
+
+function pfRefreshPairSummary() {
+  const menu = document.getElementById('pfPairSummary');
+  if (!menu) return;
+  const longItem = PfStore.items.find(i => i.stock_code === menu.dataset.longCode);
+  const shorts = pfPairShortsForLong(menu.dataset.longCode);
+  if (PfStore.accountId || !longItem || !shorts.length) { pfClosePairSummary(); return; }
+  const stats = pfPairStats(longItem, shorts);
+  const pnl = stats.dailyPnl;
+  const pnlText = pnl === null ? '-' : `${pnl > 0 ? '+' : pnl < 0 ? '-' : ''}${pfFmtPortfolioValue(Math.abs(pnl))}`;
+  const basis = stats.netPreviousValue === null ? '전일 시세 확인 중'
+    : Math.abs(stats.netPreviousValue) <= 1e-8 ? '전일 순평가액이 0이라 등락률 계산 불가'
+    : '전일 순평가액 대비';
+  menu.innerHTML = `
+    <div class="pf-pair-title">${stats.legs.map(leg => escapeHtml(leg.name || leg.code)).join(' + ')}</div>
+    <div class="pf-pair-label">합산 등락률</div>
+    <div class="pf-pair-value ${returnClass(stats.dailyChangePct)}">${stats.dailyChangePct === null ? '-' : fmtPct(stats.dailyChangePct)}</div>
+    <div class="pf-pair-pnl ${returnClass(pnl)}">당일 합산 손익 ${pnlText}</div>
+    <div class="pf-pair-basis" title="합산 손익 ÷ 전일 순평가액의 절댓값 × 100">${basis}</div>`;
+}
+
+// 기존 등락률 클릭 → 롱과 연결된 숏 전체의 일간 합산 성과.
 function pfShowPairSummary(longCode, e) {
+  if (PfStore.accountId) return;
   const longItem = PfStore.items.find(i => i.stock_code === longCode);
   const shorts = pfPairShortsForLong(longCode);
   if (!longItem || !shorts.length) return;
-  const stats = pfPairStats(longItem, shorts);
+  pfClosePairSummary();
   document.querySelectorAll('.pf-pref-menu').forEach(el => el.remove());
-  const fmtVal = v => (v === null || v === undefined) ? '-' : pfFmtPortfolioValue(v);
   const menu = document.createElement('div');
+  menu.id = 'pfPairSummary';
   menu.className = 'pf-pref-menu pf-pair-menu';
-  const legRows = stats.legs.map(leg => `
-    <div class="pf-pair-row">
-      <span class="pf-pair-name">${escapeHtml(leg.name || leg.code)} <em>${leg.qty < 0 ? '숏' : '롱'}</em></span>
-      <span class="pf-pair-nums">투자 ${fmtVal(leg.invested)} · 평가 ${fmtVal(leg.marketValue)}</span>
-    </div>`).join('');
-  menu.innerHTML = `
-    <div class="pf-pair-title">롱숏 페어</div>
-    ${legRows}
-    <div class="pf-pair-total">
-      <div><span>순투자액</span><strong>${fmtVal(stats.netInvested)}</strong></div>
-      <div><span>순평가액</span><strong>${fmtVal(stats.netMarketValue)}</strong></div>
-      <div><span>합산 손익</span><strong class="${returnClass(stats.totalPnl)}">${stats.totalPnl === null ? '-' : fmtSignedKrw(stats.totalPnl)}</strong></div>
-    </div>`;
+  menu.dataset.longCode = longCode;
+  menu.setAttribute('role', 'dialog');
+  menu.setAttribute('aria-label', '롱·숏 합산 등락률');
+  menu.tabIndex = -1;
+  _pfPairSummaryAnchor = e?.target?.closest('tr[data-code]')?.dataset.code || longCode;
   document.body.appendChild(menu);
+  pfRefreshPairSummary();
   _positionPortfolioPopupMenu(menu, e);
-  setTimeout(() => {
-    document.addEventListener('click', function close(ev) {
-      if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', close); }
-    });
-  }, 0);
+  menu.focus({ preventScroll: true });
 }
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('#pfPairSummary, .js-pf-open-pair-summary')) pfClosePairSummary();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('pfPairSummary')) {
+    e.preventDefault();
+    pfClosePairSummary(true);
+  }
+});
