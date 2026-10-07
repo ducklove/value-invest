@@ -518,7 +518,7 @@ def test_quote_manager_polls_stale_websocket_quotes_as_rest_fallback():
 
     assert "const QUOTE_MANAGER_STALE_WS_MS = 55_000;" in source
     assert "lastWsQuoteAt: {}" in source
-    assert "_markWsQuoteFresh(msg.code)" in source
+    assert "_markWsQuoteFresh(msg.code, msg)" in source
     rest_fetch_loop = source.split("const data = await apiFetchJson('/api/asset-quotes',", 1)[1].split("} catch", 1)[0]
     assert "_markWsQuoteFresh" not in rest_fetch_loop
     assert "async _pollAll()" in source

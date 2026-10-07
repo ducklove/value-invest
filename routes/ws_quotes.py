@@ -113,8 +113,20 @@ def _ws_status_payload(
     }
     if session is not None:
         payload["slots_active"] = len(session.conns)
+        payload.update(_stream_status_payload(session))
+        payload["type"] = "ws_status"
     payload.update(extra)
     return payload
+
+
+def _stream_status_payload(session: _Session) -> dict:
+    states = [getattr(entry.ws_conn, "state", "connecting") for entry in session.conns]
+    connected = states.count("connected")
+    disconnected_codes = sorted({code for entry, state in zip(session.conns, states) if state != "connected"
+                                 for codes in getattr(entry.ws_conn, "_requested", {}).values() for code in codes})
+    return {"type": "stream_status", "slots_connected": connected,
+            "disconnected_codes": disconnected_codes,
+            "stream_state": "connected" if connected else "reconnecting" if "reconnecting" in states else "connecting" if states else "offline"}
 
 
 async def _send_json(websocket: WebSocket, session: _Session, payload: dict) -> None:
@@ -150,6 +162,9 @@ async def _start_connection(
         try:
             while True:
                 quote = await ws_conn.listener.get()
+                if quote.get("type") == "stream_status":
+                    await _send_json(websocket, session, _stream_status_payload(session))
+                    continue
                 if quote.get("type") == "stream_unavailable":
                     await _send_json(websocket, session, quote)
                     continue
@@ -314,7 +329,7 @@ async def ws_quotes(websocket: WebSocket):
             action = msg.get("action")
 
             if action == "ping":
-                await _send_json(websocket, session, {"type": "pong"})
+                await _send_json(websocket, session, {**_stream_status_payload(session), "type": "pong"})
 
             elif action in {"takeover", "acquire"}:
                 current_user = await get_current_user(websocket)

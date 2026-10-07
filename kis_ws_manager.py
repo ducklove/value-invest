@@ -301,6 +301,15 @@ class WsConnection:
         self._integrated_rejected = False
         self._boundary_task: asyncio.Task | None = None
         self.listener: asyncio.Queue = asyncio.Queue(maxsize=256)
+        self.state = "connecting"
+
+    def _set_state(self, state: str) -> None:
+        if self.state == state:
+            return
+        self.state = state
+        if self.listener.full():
+            self.listener.get_nowait()
+        self.listener.put_nowait({"type": "stream_status"})
 
     # -- Subscription management ------------------------------------------
 
@@ -447,8 +456,11 @@ class WsConnection:
                     WS_URI,
                     additional_headers={"approval_key": approval_key},
                     ping_interval=None,
+                    open_timeout=15,
+                    close_timeout=3,
                 ) as ws:
                     self._ws = ws
+                    self._set_state("connected")
                     self._current_subs = set()
                     logger.info(
                         "KIS WebSocket connected (slot %d)", self.key_slot.slot_id
@@ -512,6 +524,7 @@ class WsConnection:
             finally:
                 self._ws = None
                 self._current_subs = set()
+                self._set_state("offline" if self._stop_event.is_set() else "reconnecting")
 
             if not self._stop_event.is_set():
                 logger.info(

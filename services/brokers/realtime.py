@@ -26,6 +26,15 @@ from services.portfolio.quotes import should_accept_quote_snapshot
 _quotes = MemoryTTLCache("namuh.realtime", 90)
 _status: dict[object, dict] = {}
 logger = logging.getLogger(__name__)
+_send_locks: dict[str, asyncio.Lock] = {}
+
+
+async def _subscribe(ws, cid: str, access: str, channel: str, key: str) -> None:
+    # 국내·해외 소켓이 동시에 등록해도 앱키 전체가 초당 10건을 넘지 않는다.
+    async with _send_locks.setdefault(cid, asyncio.Lock()):
+        await ws.send(json.dumps({"header": {"token": access, "tr_type": "1"},
+                                  "body": {"tr_cd": channel, "tr_key": key}}))
+        await asyncio.sleep(.12)
 
 
 def subscription(code: str) -> tuple[str, str] | None:
@@ -102,7 +111,7 @@ def status(user: str) -> dict:
         if key not in _status:
             continue
         part = dict(_status[key])
-        if part.get("state") == "live" and (datetime.now(_KST) - datetime.fromisoformat(part["last_tick_at"])).total_seconds() >= 90:
+        if part.get("state") == "live" and not 0 <= (datetime.now(_KST) - datetime.fromisoformat(part["last_tick_at"])).total_seconds() < 90:
             part["state"] = "subscribed"
         parts[name] = part
     if not parts:
@@ -126,21 +135,20 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
     infos = {code: overseas_realtime.instrument(code) for code in codes} if foreign else {}
     context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     while True:
+        reason = "connection_closed"
         try:
-            access = await namuh.token(user, cid)
+            _status[state_key] = {"state": "connecting", "subscribed": 0, "requested": len(set(registrations.values()))}
             if notice_channels:
                 notifications._states[(user, cid)] = {"state": "connecting", "approved": set(), "rejected": set()}
-            _status[state_key] = {"state": "connecting", "subscribed": 0, "requested": len(set(registrations.values()))}
+            access = await namuh.token(user, cid)
             async with websockets.connect(endpoint, ssl=context, ping_interval=None, open_timeout=15, close_timeout=3, max_size=2**20) as ws:
                 for channel in notice_channels:
-                    await ws.send(json.dumps({"header": {"token": access, "tr_type": "1"}, "body": {"tr_cd": channel, "tr_key": ""}}))
-                    await asyncio.sleep(.12)
+                    await _subscribe(ws, cid, access, channel, "")
                 if changed:
                     # 재접속 동안 놓친 통보는 REST 재조회로 복구한다.
                     changed(None)
                 for channel, key in dict.fromkeys(registrations.values()):
-                    await ws.send(json.dumps({"header": {"token": access, "tr_type": "1"}, "body": {"tr_cd": channel, "tr_key": key}}))
-                    await asyncio.sleep(.12)
+                    await _subscribe(ws, cid, access, channel, key)
                 approved = set()
                 rejected = set()
                 async for raw in ws:
@@ -156,6 +164,12 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
                     if "rsp_cd" in head:
                         body = message.get("body") or {}
                         channel = head.get("tr_cd") or (body.get("tr_cd") if isinstance(body, dict) else None)
+                        response_code = str(head["rsp_cd"])
+                        if response_code != "00000":
+                            # 응답 원문에는 인증정보가 섞일 수 있어 코드·채널만 기록한다.
+                            safe_code = response_code if re.fullmatch(r"[A-Z0-9]{1,20}", response_code) else "unknown"
+                            safe_channel = channel if channel in notice_channels or channel in {p[0] for p in registrations.values()} else "unknown"
+                            logger.warning("NH WebSocket subscription rejected: channel=%s code=%s", safe_channel, safe_code)
                         if channel in notice_channels:
                             state = notifications._states[(user, cid)]
                             if str(head["rsp_cd"]) == "00000":
@@ -170,12 +184,12 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
                         keys = keys if isinstance(keys, list) else [keys]
                         if str(head["rsp_cd"]) != "00000":
                             rejected.update(keys or [pair[1] for pair in registrations.values() if pair not in approved])
-                            _status[state_key] = {"state": "degraded", "subscribed": len(approved),
+                            _status[state_key] = {"state": "degraded", "reason": "subscription_rejected", "subscribed": len(approved),
                                                   "requested": len(set(registrations.values())), "rejected": len(rejected),
                                                   "message": "해외 실시간 시세 권한·구독 한도 확인 필요" if foreign else "NH 시세 구독 권한·한도 확인 필요"}
                             continue
-                        approved.update(pair for pair in registrations.values() if pair[1] in keys)
-                        _status[state_key] = {"state": "subscribed", "subscribed": len(approved), "requested": len(set(registrations.values())), "rejected": len(rejected)}
+                        approved.update(pair for pair in registrations.values() if pair[1] in keys and channel in (None, pair[0]))
+                        _status[state_key] = {"state": "subscribed" if approved else "connecting", "subscribed": len(approved), "requested": len(set(registrations.values())), "rejected": len(rejected)}
                         continue
                     if head.get("tr_cd") in notice_channels:
                         aid = await notifications.account_for_message(user, cid, environment, message)
@@ -201,12 +215,21 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
                         if tick and tick["code"] in registrations and should_accept_quote_snapshot(quote(user, tick["code"]), tick):
                             _quotes.set((user, tick["code"]), tick)
                             _status[state_key] = {"state": "live", "subscribed": len(approved), "requested": len(set(registrations.values())),
-                                                  "rejected": len(rejected), "last_tick_at": tick["received_at"]}
+                                                  "rejected": len(rejected), "last_tick_at": tick["as_of"]}
                             delay = 2
-        except (BrokerError, OSError, websockets.exceptions.WebSocketException, TimeoutError):
-            if notice_channels:
-                notifications._states[(user, cid)] = {"state": "degraded", "approved": set()}
-            _status[state_key] = {"state": "degraded", "message": "NH 시세 연결 재시도 중 · 기존 시세 경로 사용"}
+                logger.warning("NH WebSocket closed: market=%s code=%s", "foreign" if foreign else "domestic", getattr(ws, "close_code", None))
+        except (BrokerError, OSError, websockets.exceptions.WebSocketException, TimeoutError) as exc:
+            reason = "tls_error" if isinstance(exc, ssl.SSLError) else "authentication_error" if isinstance(exc, BrokerError) else "connection_error"
+            logger.warning("NH WebSocket disconnected: market=%s reason=%s error=%s",
+                           "foreign" if foreign else "domestic", reason, type(exc).__name__)
+        # 정상 close(1000)도 실제 연결 종료다. ACK·live 상태를 재시도 동안 남기지 않는다.
+        if notice_channels:
+            notifications._states[(user, cid)] = {"state": "degraded", "approved": set()}
+        _status[state_key] = {"state": "degraded", "reason": reason, "subscribed": 0,
+                              "requested": len(set(registrations.values())),
+                              "message": "NH 시세 연결 재시도 중 · 기존 시세 경로 사용"}
+        for code in codes:
+            _quotes.delete((user, code))
         await asyncio.sleep(delay + random.random())
         delay = min(delay * 2, 60)
 
@@ -308,4 +331,7 @@ async def run(stop: asyncio.Event):
         for task in sync_jobs.values():
             task.cancel()
         await asyncio.gather(*(task for _, task in jobs.values()), *sync_jobs.values(), return_exceptions=True)
+        _status.clear()
+        _quotes.clear()
+        _send_locks.clear()
         notifications._states.clear()

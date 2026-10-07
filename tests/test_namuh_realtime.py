@@ -1,5 +1,7 @@
 import asyncio
 import json
+import ssl
+import time
 from datetime import datetime, timedelta
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, patch
@@ -115,3 +117,66 @@ class GoldRealtimeTests(IsolatedAsyncioTestCase):
         self.assertEqual(stream_mock.await_args.args, ("owner", "credential", ["KRX_GOLD"], "live"))
         self.assertEqual(stream_mock.await_args.kwargs["notice_channels"], ("d3", "de"))
         self.assertTrue(callable(stream_mock.await_args.kwargs["changed"]))
+
+    async def test_domestic_and_foreign_subscriptions_share_key_rate_limit(self):
+        sent = []
+
+        class Socket:
+            async def send(self, message):
+                sent.append((time.monotonic(), json.loads(message)["body"]["tr_cd"]))
+
+        cid = "rate-limit-test"
+        try:
+            await asyncio.gather(
+                realtime._subscribe(Socket(), cid, "token", "mc", "005930"),
+                realtime._subscribe(Socket(), cid, "token", "RC", "USAAAPL"),
+                realtime._subscribe(Socket(), cid, "token", "d2", ""),
+            )
+            self.assertEqual({channel for _, channel in sent}, {"mc", "RC", "d2"})
+            self.assertTrue(all(right[0] - left[0] >= .1 for left, right in zip(sent, sent[1:])))
+        finally:
+            realtime._send_locks.pop(cid, None)
+
+    async def test_normal_close_invalidates_live_state_quotes_and_notifications_before_retry(self):
+        now = self.now
+
+        class Socket:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): pass
+            async def send(self, message): pass
+            async def __aiter__(self):
+                yield json.dumps({"header": {"rsp_cd": "00000", "tr_cd": "g4"}, "body": {"tr_key": ["M04020000"]}})
+                yield json.dumps(gold_message(now))
+                self.live_before_close = realtime.status("owner")["state"]
+
+        socket = Socket()
+
+        async def sleep(delay):
+            if delay >= 2:
+                raise asyncio.CancelledError
+
+        with patch.object(realtime.namuh, "token", AsyncMock(return_value="token")), \
+             patch.object(realtime.websockets, "connect", return_value=socket), \
+             patch.object(realtime.asyncio, "sleep", side_effect=sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                await realtime.stream("owner", "cid", ["KRX_GOLD"], "live", notice_channels=("d2",))
+        self.assertEqual(socket.live_before_close, "live")
+        self.assertEqual(realtime.status("owner")["domestic"]["reason"], "connection_closed")
+        self.assertEqual(realtime.status("owner")["state"], "degraded")
+        self.assertIsNone(realtime.quote("owner", "KRX_GOLD"))
+        self.assertEqual(realtime.notifications.status("owner")["state"], "degraded")
+        realtime.notifications._states.clear()
+
+    async def test_tls_failure_is_distinguished_without_logging_secrets(self):
+        class Socket:
+            async def __aenter__(self): raise ssl.SSLError("PRIVATE-TOKEN")
+            async def __aexit__(self, *args): pass
+
+        with patch.object(realtime.namuh, "token", AsyncMock(return_value="PRIVATE-TOKEN")), \
+             patch.object(realtime.websockets, "connect", return_value=Socket()), \
+             patch.object(realtime.asyncio, "sleep", side_effect=asyncio.CancelledError), \
+             self.assertLogs(realtime.logger, level="WARNING") as logs:
+            with self.assertRaises(asyncio.CancelledError):
+                await realtime.stream("owner", "cid", ["KRX_GOLD"], "live")
+        self.assertEqual(realtime.status("owner")["domestic"]["reason"], "tls_error")
+        self.assertNotIn("PRIVATE-TOKEN", " ".join(logs.output))

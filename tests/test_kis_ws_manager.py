@@ -123,3 +123,32 @@ async def test_integrated_subscription_rejection_releases_subscriptions_and_repo
     assert conn._current_subs == set()
     assert conn._ws.send.await_count == 1
     assert (await conn.listener.get())["type"] == "stream_unavailable"
+
+
+async def test_upstream_normal_close_reports_disconnection_before_retry(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    conn = kis_ws_manager.WsConnection(SimpleNamespace(slot_id=0, get_approval_key=AsyncMock(return_value="test")))
+    observed = []
+
+    class Socket:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def __aiter__(self):
+            observed.append(conn.state)
+            if False:
+                yield ""
+
+    async def finish_retry(awaitable, timeout):
+        conn._stop_event.set()
+        await awaitable
+
+    monkeypatch.setattr(kis_ws_manager.websockets, "connect", lambda *args, **kwargs: Socket())
+    monkeypatch.setattr(kis_ws_manager.asyncio, "wait_for", finish_retry)
+    await conn._ws_loop()
+    assert observed == ["connected"]
+    assert conn._ws is None
+    assert conn.state == "reconnecting"
+    assert conn.listener.qsize() == 2
+    assert (await conn.listener.get())["type"] == "stream_status"

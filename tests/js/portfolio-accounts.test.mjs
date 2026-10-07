@@ -46,6 +46,31 @@ test('NH 상태 안내는 재연결·구독 실패를 구분하고 잔고 표를
   } finally {s.dom.window.close();}
 });
 
+test('NH 연결 종료 즉시 기존 수신 표시를 지우고 구독 제한은 장애와 구분한다', () => {
+  const s = setup();
+  try {
+    s.w.PfAccounts.rows = [{account_id: 'a', broker: 'namuh'}];
+    s.w.pfConnectNamuhQuotes();
+    const socket = s.sockets[0];
+    const send = state => socket.onmessage({data: JSON.stringify({type: 'namuh_status', ...state})});
+    send({state: 'live'});
+    assert.match(s.el('pfNhQuoteState').textContent, /실시간/);
+    send({state: 'degraded', domestic: {reason: 'subscription_rejected', rejected: 1}});
+    assert.match(s.el('pfNhQuoteState').textContent, /구독 제한/);
+    assert.doesNotMatch(s.el('pfNhQuoteState').textContent, /연결 불안정/);
+    send({state: 'degraded', domestic: {reason: 'tls_error'}});
+    assert.match(s.el('pfNhQuoteState').textContent, /보안 연결 확인/);
+    send({state: 'live', notifications: {state: 'received'}});
+    assert.match(s.el('pfNhQuoteState').textContent, /계좌 통보 연결/);
+    socket.onclose();
+    assert.match(s.el('pfNhQuoteState').textContent, /전달 재연결/);
+    assert.doesNotMatch(s.el('pfNhQuoteState').textContent, /실시간/);
+    s.w.PfAccounts.rows = [];
+    s.w.pfConnectNamuhQuotes();
+    assert.equal(s.el('pfNhQuoteState').textContent, '');
+  } finally { s.dom.window.close(); }
+});
+
 test('계좌 변경 통보는 드래그와 순서 저장이 끝난 뒤 잔고를 한 번 갱신한다', async () => {
   const s=setup();
   try {

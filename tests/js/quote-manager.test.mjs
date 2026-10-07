@@ -122,9 +122,20 @@ function createHarness({ wsThrows = false, quotes = {} } = {}) {
       // Mock에는 실제 핸드셰이크가 없으므로 open 상태가 필요한 테스트는
       // ws.onopen() 호출과 함께 readyState = 1 을 직접 세팅한다.
       this.readyState = 0; // CONNECTING
+      this.respondToPing = true;
       MockWebSocket.instances.push(this);
     }
-    send(data) { this.sent.push(JSON.parse(data)); }
+    set onopen(handler) {
+      this._onopen = handler && ((...args) => { this.readyState = 1; handler(...args); });
+    }
+    get onopen() { return this._onopen; }
+    send(data) {
+      const message = JSON.parse(data);
+      this.sent.push(message);
+      if (message.action === 'ping' && this.respondToPing) {
+        w.queueMicrotask(() => this.onmessage?.({data: JSON.stringify({type: 'pong'})}));
+      }
+    }
     // Like the browser, close() does NOT fire onclose synchronously; tests
     // deliver the close event explicitly via instance.onclose(...).
     close() { this.closed = true; this.readyState = 3; }
@@ -180,7 +191,7 @@ test("connect: ws:// URL, passive open, general poll interval armed", () => {
   const ws = MockWebSocket.instances[0];
   assert.equal(ws.url, "ws://app.example.com/ws/quotes");
   assert.equal(qm.connected, false);
-  assert.equal(clock.pending(), 1); // the 60s general poll interval
+  assert.equal(clock.pending(), 2); // general polling + connection heartbeat
 
   ws.onopen();
   assert.equal(qm.connected, true);
@@ -232,7 +243,7 @@ test("ws_status active → subscribe message with the requested map; isLive per 
 
   // Server splits codes: ws slot for 005930, REST overflow for AAPL.
   ws.onmessage({ data: JSON.stringify({ type: "subscriptions", ws: ["005930"], rest: ["AAPL"] }) });
-  assert.equal(qm.isLive("005930"), true);
+  assert.equal(qm.isLive("005930"), false, '구독 목록만으로 실시간으로 표시하지 않는다');
   assert.equal(qm.isLive("AAPL"), false);
 
   await flush();
@@ -285,7 +296,8 @@ test("quote message → onQuote with the parsed tick; null price still dispatche
   const ws = MockWebSocket.instances[0];
   ws.onopen();
 
-  ws.onmessage({ data: JSON.stringify({ type: "quote", code: "005930", price: 70100, change_pct: 1.2 }) });
+  ws.onmessage({ data: JSON.stringify({ type: "quote", code: "005930", price: 70100, change_pct: 1.2,
+    source: 'ws', as_of: new Date().toISOString() }) });
   assert.equal(ticks.length, 1);
   assert.equal(ticks[0].code, "005930");
   assert.equal(ticks[0].q.price, 70100);
@@ -301,6 +313,89 @@ test("quote message → onQuote with the parsed tick; null price still dispatche
   // Malformed frames are swallowed (console.warn), not thrown.
   assert.doesNotThrow(() => ws.onmessage({ data: "not-json{{" }));
   assert.equal(ticks.length, 2);
+  qm.disconnect();
+});
+
+test('슬롯 확보·서버 접속·최근 체결 수신을 구분하고 과거 캐시를 실시간으로 표시하지 않는다', () => {
+  const {w, qm, MockWebSocket} = createHarness();
+  let now = Date.now();
+  w.Date.now = () => now;
+  qm.connect();
+  const ws = MockWebSocket.instances[0];
+  ws.onopen();
+  const send = message => ws.onmessage({data: JSON.stringify(message)});
+  send({type: 'ws_status', active: true, stream_state: 'connecting', slots_connected: 0});
+  send({type: 'subscriptions', ws: ['005930'], rest: []});
+  assert.match(qm._controlStatusText(), /시세 서버 연결 중/);
+  assert.equal(qm.isLive('005930'), false);
+  send({type: 'stream_status', stream_state: 'connected', slots_connected: 1});
+  assert.match(qm._controlStatusText(), /체결 대기/);
+  const tick = {type: 'quote', code: '005930', price: 70000, source: 'ws'};
+  send({...tick, as_of: new Date(now - 120_000).toISOString()});
+  assert.equal(qm.isLive('005930'), false);
+  send({...tick, as_of: new Date(now + 1000).toISOString()});
+  assert.equal(qm.isLive('005930'), false);
+  send({...tick, as_of: new Date(now).toISOString()});
+  assert.equal(qm.isLive('005930'), true);
+  assert.match(qm._controlStatusText(), /실시간 시세 수신/);
+  w.document.body.insertAdjacentHTML('beforeend', '<div data-code="005930"><span class="ws-live-dot"></span></div>');
+  now += 55_000;
+  assert.equal(qm.isLive('005930'), false);
+  assert.match(qm._controlStatusText(), /체결 대기/);
+  qm._syncControlUi();
+  assert.equal(w.document.querySelector('.ws-live-dot'), null);
+  send({...tick, as_of: new Date(now).toISOString()});
+  send({type: 'stream_status', stream_state: 'reconnecting', slots_connected: 0});
+  assert.equal(qm.isLive('005930'), false);
+  assert.match(qm._controlStatusText(), /시세 재연결 중/);
+  qm.disconnect();
+});
+
+test('켜진 탭에서도 응답 없는 소켓을 주기적으로 검증하고 이전 소켓 메시지를 무시한다', async () => {
+  const {qm, clock, MockWebSocket} = createHarness();
+  qm.connect();
+  const old = MockWebSocket.instances[0];
+  old.onopen();
+  old.respondToPing = false;
+  await clock.tick(14_000);
+  assert.equal(old.closed, true);
+  assert.equal(MockWebSocket.instances.length, 2);
+  old.onmessage({data: JSON.stringify({type: 'ws_status', active: true, stream_state: 'connected'})});
+  old.onopen();
+  assert.equal(qm.wsActive, false);
+  assert.equal(qm.connected, false);
+  qm.disconnect();
+});
+
+test('KIS 여러 슬롯 중 끊긴 슬롯의 종목만 실시간 상태를 해제한다', () => {
+  const {qm, MockWebSocket} = createHarness();
+  qm.connect();
+  const ws = MockWebSocket.instances[0];
+  ws.onopen();
+  const send = message => ws.onmessage({data: JSON.stringify(message)});
+  send({type: 'ws_status', active: true, stream_state: 'connected', slots_connected: 2});
+  send({type: 'subscriptions', ws: ['005930', '000660'], rest: []});
+  for (const code of ['005930', '000660']) send({type: 'quote', code, price: 100, source: 'ws', as_of: new Date().toISOString()});
+  send({type: 'stream_status', stream_state: 'connected', slots_connected: 1, disconnected_codes: ['000660']});
+  assert.equal(qm.isLive('005930'), true);
+  assert.equal(qm.isLive('000660'), false);
+  qm.disconnect();
+});
+
+test('NH 일부 시장의 연결 종료는 해당 시세만 해제하고 구독 거절과 구분한다', () => {
+  const {w, qm} = createHarness();
+  qm.setNamuhLinked(true);
+  const tick = {price: 100, source: 'namuh_ws', as_of: new Date().toISOString()};
+  qm.onNamuhQuote('005930', tick);
+  qm.onNamuhQuote('AAPL', tick);
+  w.PfStore.items = [{stock_code: '005930', quote: {...tick}}, {stock_code: 'AAPL', quote: {...tick}}];
+  qm.onNamuhStatus({foreign: {state: 'degraded', reason: 'subscription_rejected'}});
+  assert.equal(qm.isLive('AAPL'), true);
+  qm.onNamuhStatus({domestic: {state: 'degraded', reason: 'connection_closed'}});
+  assert.equal(qm.isLive('005930'), false);
+  assert.equal(qm.isLive('AAPL'), true);
+  assert.equal(w.PfStore.items[0].quote._stale, true);
+  assert.equal(w.PfStore.items[1].quote._stale, undefined);
   qm.disconnect();
 });
 
@@ -516,6 +611,7 @@ test("verifyConnection: OPEN 이지만 pong 없음(half-open) → 타임아웃 �
   qm.setManualControlAllowed(true);
   qm.requestActive();
   const ws = MockWebSocket.instances[0];
+  ws.respondToPing = false;
   ws.readyState = 1;
   ws.onopen();
   ws.onmessage({ data: JSON.stringify({ type: "ws_status", active: true }) });
@@ -622,7 +718,7 @@ test("general poll pauses while the tab is hidden and refreshes once on return",
   setState("visible");
   await flush();
   assert.equal(fetchCalls.length, 1, "stale on return → exactly one immediate poll");
-  assert.equal(clock.pending(), 1, "interval re-armed once (no duplicate timers)");
+  assert.equal(clock.pending(), 2, "quote polling and heartbeat each re-armed once");
   setState("visible");
   await flush();
   assert.equal(fetchCalls.length, 1, "a repeated visible event inside the window does not refetch");

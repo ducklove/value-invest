@@ -18,6 +18,32 @@ class _FakeConn:
         self.requested = requested
 
 
+def test_active_slot_reports_upstream_connection_separately():
+    session = ws_quotes._Session()
+    connection = _FakeConn()
+    connection.state = "connecting"
+    session.conns = [ws_quotes._Conn("slot-1", connection)]
+    payload = ws_quotes._ws_status_payload(None, active=True, session=session)
+    assert payload["active"] is True
+    assert payload["type"] == "ws_status"
+    assert payload["slots_connected"] == 0
+    assert payload["stream_state"] == "connecting"
+    connection.state = "connected"
+    assert ws_quotes._stream_status_payload(session)["slots_connected"] == 1
+    connection.state = "reconnecting"
+    assert ws_quotes._stream_status_payload(session)["stream_state"] == "reconnecting"
+
+
+def test_lost_slot_invalidates_its_codes_while_other_slot_stays_connected():
+    session = ws_quotes._Session()
+    session.conns = [ws_quotes._Conn("slot-1", SimpleNamespace(state="connected", _requested={"portfolio": ["005930"]})),
+                     ws_quotes._Conn("slot-2", SimpleNamespace(state="reconnecting", _requested={"portfolio": ["000660"]}))]
+    payload = ws_quotes._stream_status_payload(session)
+    assert payload["slots_connected"] == 1
+    assert payload["stream_state"] == "connected"
+    assert payload["disconnected_codes"] == ["000660"]
+
+
 def test_multi_connection_plan_splits_live_codes_by_connection_capacity():
     codes = [f"{idx:06d}" for idx in range(45)]
     session = ws_quotes._Session()
