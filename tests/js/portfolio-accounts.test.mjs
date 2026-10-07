@@ -60,6 +60,11 @@ test('NH 연결 종료 즉시 기존 수신 표시를 지우고 구독 제한은
     assert.doesNotMatch(s.el('pfNhQuoteState').textContent, /연결 불안정/);
     send({state: 'degraded', domestic: {reason: 'tls_error'}});
     assert.match(s.el('pfNhQuoteState').textContent, /보안 연결 확인/);
+    send({state: 'degraded', domestic: {reason: 'subscription_rejected', response_code: 'WSS10015'}});
+    assert.match(s.el('pfNhQuoteState').textContent, /동시 연결 한도 초과/);
+    send({state: 'subscribed', foreign: {state: 'waiting', reason: 'scanner_reserved'}});
+    assert.match(s.el('pfNhQuoteState').textContent, /해외는 조회 시세 사용 · 현선물 감시 실행 중/);
+    assert.doesNotMatch(s.el('pfNhQuoteState').textContent, /불안정/);
     send({state: 'live', notifications: {state: 'received'}});
     assert.match(s.el('pfNhQuoteState').textContent, /계좌 통보 연결/);
     socket.onclose();

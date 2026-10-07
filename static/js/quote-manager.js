@@ -76,7 +76,7 @@ const QuoteManager = {
 
   onNamuhStatus(message) {
     for (const [market, state] of [['domestic', message.domestic], ['foreign', message.foreign]]) {
-      if (!state || state.state !== 'degraded' || state.reason === 'subscription_rejected') continue;
+      if (!state || !['degraded', 'waiting'].includes(state.state) || state.reason === 'subscription_rejected') continue;
       for (const code of Object.keys(this.namuhQuotes)) {
         const domestic = /^[0-9][0-9A-Z]{5}$/.test(code) || code === 'KRX_GOLD';
         if (domestic === (market === 'domestic')) {
@@ -366,6 +366,7 @@ const QuoteManager = {
   _updateStreamState(message) {
     if (!this.wsActive || !message.stream_state) return;
     this.streamState = message.stream_state;
+    this.lastSlotMeta = {...this.lastSlotMeta, ...message};
     if (message.slots_connected === 0) this.lastWsQuoteAt = {};
     for (const code of message.disconnected_codes || []) delete this.lastWsQuoteAt[code];
     this._syncControlUi();
@@ -450,24 +451,24 @@ const QuoteManager = {
 
   _controlStatusText() {
     const kisLive = [...this.wsCodes].some(code => this._hasKisQuote(code));
-    if (this.namuhLinked && Object.keys(this.namuhQuotes).some(code => this._hasNamuhQuote(code))) {
-      return kisLive ? 'NH 우선 · KIS 보조 수신' : 'NH 실시간 우선';
-    }
-    if (this.namuhLinked) return kisLive ? 'NH 체결 대기 · KIS 보조 수신' : 'NH 체결 대기 · 조회 시세';
     if (this.wsActive) {
-      if (this.streamState === 'reconnecting') return '시세 재연결 중 · 조회 시세';
-      if (this.streamState !== 'connected') return '시세 서버 연결 중 · 조회 시세';
-      if (!kisLive) return '시세 연결 · 체결 대기';
-      const slots = this.lastSlotMeta?.slots_active;
-      return slots ? `실시간 시세 수신 · ${slots}슬롯` : '실시간 시세 수신';
+      if (this.streamState === 'reconnecting') return 'KIS 재연결 중';
+      if (this.streamState === 'connecting') return 'KIS 연결 중';
+      if (this.streamState !== 'connected') return 'KIS 미연결';
+      const partial = this.lastSlotMeta?.slots_connected < this.lastSlotMeta?.slots_active;
+      return `${partial ? 'KIS 일부 연결' : 'KIS 연결됨'} · ${kisLive ? '시세 수신 중' : '체결 대기'}`;
     }
-    if (this.lastStatus === 'connecting') return '연결 중';
-    if (this.lastStatus === 'reconnecting') return '재연결 중';
-    if (this.lastStatus === 'occupied') return '다른 세션 사용 중';
-    if (this.lastStatus === 'forbidden') return '관리자 전용';
-    if (this.lastStatus === 'taken_over') return '폴링 전환됨';
-    if (this.connected) return '폴링';
-    return '오프라인';
+    if (this.desiredActive && ['connecting', 'reconnecting'].includes(this.lastStatus)) return 'KIS 연결 중';
+    if (this.lastStatus === 'occupied') return 'KIS 미연결 · 다른 세션 사용 중';
+    return 'KIS 미연결';
+  },
+
+  _controlStatusDetail() {
+    if (!this.wsActive || this.streamState !== 'connected') return '조회 시세로 갱신 중';
+    const latest = Math.max(0, ...[...this.wsCodes].filter(code => this._hasKisQuote(code)).map(code => this.lastWsQuoteAt[code]));
+    const connections = this.lastSlotMeta?.slots_connected;
+    const count = connections ? `연결 ${connections}개 · ` : '';
+    return count + (latest ? `최근 체결 ${new Date(latest).toLocaleTimeString('ko-KR', {hour12: false})}` : '새 체결 수신을 기다립니다');
   },
 
   _syncControlUi() {
@@ -483,24 +484,23 @@ const QuoteManager = {
       button.hidden = !visible;
       if (visible) {
         const activeOrPending = this.wsActive || this.desiredActive;
-        button.textContent = this.namuhLinked ? (activeOrPending ? 'KIS 보조 해제' : 'KIS 보조 연결') : (activeOrPending ? '웹소켓 해제' : '웹소켓 연결');
+        button.textContent = activeOrPending ? 'KIS 해제' : 'KIS 연결';
         button.classList.toggle('active', activeOrPending);
         button.setAttribute('aria-pressed', activeOrPending ? 'true' : 'false');
         button.disabled = this.desiredActive && !this.connected && !!this.reconnectTimer;
-        button.title = this.namuhLinked ? 'KIS 보조 시세 연결 제어 · NH 연결은 계좌 관리에서 설정' : activeOrPending ? '실시간 웹소켓 연결 해제' : '실시간 웹소켓 연결';
+        button.title = activeOrPending ? '한국투자증권 웹소켓 연결 해제' : '한국투자증권 웹소켓 연결';
       }
     }
     if (status) {
-      status.hidden = !(visible || this.namuhLinked);
-      if (visible || this.namuhLinked) {
-        status.textContent = this._controlStatusText();
-        status.dataset.state = ([...this.wsCodes].some(code => this._hasKisQuote(code))
-          || Object.keys(this.namuhQuotes).some(code => this._hasNamuhQuote(code))) ? 'active'
-          : this.lastStatus === 'forbidden' || this.lastStatus === 'occupied' ? 'warning'
-          : this.wsActive || this.lastStatus === 'reconnecting' || this.lastStatus === 'connecting' ? 'pending'
-          : 'polling';
-      }
+      status.hidden = false;
+      status.textContent = this._controlStatusText();
+      status.title = '한국투자증권 웹소켓의 실제 연결 상태';
+      status.dataset.state = this.wsActive && this.streamState === 'connected' ? 'active'
+        : this.lastStatus === 'occupied' ? 'warning'
+        : this.wsActive || this.desiredActive ? 'pending' : 'polling';
     }
+    const detail = document.getElementById('pfWsDetail');
+    if (detail) detail.textContent = this._controlStatusDetail();
   },
 
   _retryTimer: null,

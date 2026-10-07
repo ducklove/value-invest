@@ -17,14 +17,21 @@ from dotenv import load_dotenv
 
 
 def journal_summary():
+    invocation = subprocess.run(["systemctl", "show", "value-invest.service", "-p", "InvocationID", "--value"],
+                                capture_output=True, text=True, check=False).stdout.strip()
+    command = ["journalctl", "-u", "value-invest.service", "--since", "2 hours ago", "-o", "cat", "--no-pager"]
+    if re.fullmatch(r"[a-f0-9]{32}", invocation):
+        command.append(f"_SYSTEMD_INVOCATION_ID={invocation}")
     result = subprocess.run(
-        ["journalctl", "-u", "value-invest.service", "--since", "2 hours ago", "-o", "cat", "--no-pager"],
+        command,
         capture_output=True, text=True, check=False,
     )
     patterns = [
         r"NH WebSocket disconnected: market=(domestic|foreign) reason=([a-z_]+) error=([A-Za-z]+)",
         r"NH WebSocket subscription rejected: channel=([A-Za-z0-9]+) code=([A-Z0-9]{1,20}|unknown)",
         r"NH WebSocket closed: market=(domestic|foreign) code=(\d+|None)",
+        r"NH WebSocket subscribed: market=(domestic|foreign) approved=(\d+) requested=(\d+)",
+        r"NH WebSocket receiving: market=(domestic|foreign)",
         r"NH 계좌 동기화 보류: ([A-Za-z]+)",
         r"NH 연결 목록 재확인 예정: ([A-Za-z]+)",
     ]

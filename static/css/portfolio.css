@@ -689,6 +689,21 @@ button.pf-summary-card:focus-visible { outline: 2px solid var(--primary); outlin
   border-color: var(--primary);
   color: #fff;
 }
+.pf-realtime-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.pf-realtime-label { font-size: 12px; font-weight: 700; }
+.pf-ws-detail { font-size: 11px; color: var(--text-secondary); }
+.pf-nh-status { flex-basis: 100%; font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.pf-nh-status:empty { display: none; }
 .pf-ws-toggle[hidden],
 .pf-ws-status[hidden] {
   display: none !important;
@@ -748,9 +763,6 @@ button.pf-summary-card:focus-visible { outline: 2px solid var(--primary); outlin
 .pf-ws-status[data-state="pending"]::before { background: var(--primary); }
 .pf-ws-status[data-state="warning"] { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 40%, var(--border)); }
 .pf-ws-status[data-state="warning"]::before { background: var(--warning); }
-@media (max-width: 720px) {
-  .pf-ws-status { display: none; }
-}
 
 /* Currency toggle */
 .pf-currency-toggle { display: flex; gap: 0; margin-left: auto; }
@@ -2830,8 +2842,6 @@ body.pf-compact-rows .pf-table tfoot td {
 #portfolioView.pf-household-active #pfActionBoard,
 #portfolioView.pf-household-active .pf-action-toggle,
 #portfolioView.pf-household-active .pf-simple-toggle,
-#portfolioView.pf-household-active .pf-ws-toggle,
-#portfolioView.pf-household-active .pf-ws-status,
 #portfolioView.pf-household-active .pf-currency-toggle { display: none !important; }
 .pf-household-tab {
   --hh-indigo: #4f46e5;

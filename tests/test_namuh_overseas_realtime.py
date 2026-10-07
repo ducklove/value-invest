@@ -141,13 +141,17 @@ def test_fresh_nh_is_primary_and_expired_nh_yields_to_kis():
 @pytest.mark.asyncio
 async def test_overseas_socket_uses_7080_and_permission_rejection_is_isolated():
     sent = []
+    registered = asyncio.Event()
     now = datetime.now(realtime._KST)
 
     class Socket:
         async def __aenter__(self): return self
         async def __aexit__(self, *args): pass
-        async def send(self, text): sent.append(json.loads(text)["body"])
+        async def send(self, text):
+            sent.append(json.loads(text)["body"])
+            registered.set()
         async def __aiter__(self):
+            await registered.wait()
             yield json.dumps({"header": {"rsp_cd": "WSS10006"}, "body": {"tr_key": "OTHER"}})
             yield json.dumps({"header": {"rsp_cd": "00000"}, "body": {"tr_key": "USAAAPL"}})
             yield json.dumps(message(now))
@@ -181,6 +185,7 @@ async def test_background_uses_two_connections_with_separate_30_registration_lim
     link = {"google_sub": "owner", "credential_id": "cid", "account_id": "aid", "environment": "live"}
     rows = [{"stock_code": code} for code in ["KRX_GOLD", *[f"{i:06d}" for i in range(35)], *[f"A{i}" for i in range(35)]]]
     with patch.object(realtime.brokers, "list_links", AsyncMock(return_value=[link])), \
+         patch.object(realtime.quant_scanner, "settings", AsyncMock(return_value=[])), \
          patch.object(realtime.account_holdings, "list_positions", AsyncMock(return_value=rows)), \
          patch.object(realtime, "sync_account", AsyncMock()), patch.object(realtime, "stream", side_effect=stream):
         await asyncio.wait_for(realtime.run(stop), 2)
@@ -188,3 +193,34 @@ async def test_background_uses_two_connections_with_separate_30_registration_lim
     domestic = next(codes for codes, options in calls if not options.get("foreign"))
     assert domestic[0] == "KRX_GOLD"
     assert len(next(codes for codes, options in calls if options.get("foreign"))) == 30
+
+
+@pytest.mark.asyncio
+async def test_scanner_reserves_second_connection_and_foreign_resumes_when_stopped():
+    stop = asyncio.Event()
+    calls, states = [], []
+    link = {"google_sub": "owner", "credential_id": "cid", "account_id": "aid", "environment": "live"}
+    setting = {"google_sub": "owner", "config": {"account_id": "aid", "enabled": True}}
+    scans = 0
+
+    async def settings():
+        nonlocal scans
+        scans += 1
+        return [setting] if scans == 1 else []
+
+    async def stream(user, cid, codes, env, **kwargs):
+        calls.append(kwargs.get("foreign", False))
+        states.append(realtime.status(user))
+        if kwargs.get("foreign"):
+            stop.set()
+        await stop.wait()
+
+    with patch.object(realtime.brokers, "list_links", AsyncMock(return_value=[link])), \
+         patch.object(realtime.quant_scanner, "settings", side_effect=settings), \
+         patch.object(realtime.account_holdings, "list_positions", AsyncMock(return_value=[{"stock_code": "005930"}, {"stock_code": "AAPL"}])), \
+         patch.object(realtime, "sync_account", AsyncMock()), patch.object(realtime, "stream", side_effect=stream):
+        await asyncio.wait_for(realtime.run(stop), 3)
+    assert calls == [False, True]
+    assert states[0]["foreign"]["reason"] == "scanner_reserved"
+    assert states[0]["foreign"]["requested"] == 1
+    assert "foreign" not in states[1]

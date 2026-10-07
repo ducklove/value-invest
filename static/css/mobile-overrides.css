@@ -275,9 +275,8 @@ body.pf-mobile-simple .pf-ws-toggle {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-body.pf-mobile-simple .pf-ws-status {
-  display: none !important;
-}
+body.pf-mobile-simple .pf-realtime-status { gap: 6px; padding: 8px; margin-bottom: 8px; }
+body.pf-mobile-simple .pf-realtime-label { font-size: 11px; }
 body.pf-mobile-simple .pf-currency-btn {
   padding: 4px 8px;
   font-size: 12px;

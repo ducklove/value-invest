@@ -326,7 +326,7 @@ test('슬롯 확보·서버 접속·최근 체결 수신을 구분하고 과거 
   const send = message => ws.onmessage({data: JSON.stringify(message)});
   send({type: 'ws_status', active: true, stream_state: 'connecting', slots_connected: 0});
   send({type: 'subscriptions', ws: ['005930'], rest: []});
-  assert.match(qm._controlStatusText(), /시세 서버 연결 중/);
+  assert.match(qm._controlStatusText(), /KIS 연결 중/);
   assert.equal(qm.isLive('005930'), false);
   send({type: 'stream_status', stream_state: 'connected', slots_connected: 1});
   assert.match(qm._controlStatusText(), /체결 대기/);
@@ -337,7 +337,7 @@ test('슬롯 확보·서버 접속·최근 체결 수신을 구분하고 과거 
   assert.equal(qm.isLive('005930'), false);
   send({...tick, as_of: new Date(now).toISOString()});
   assert.equal(qm.isLive('005930'), true);
-  assert.match(qm._controlStatusText(), /실시간 시세 수신/);
+  assert.match(qm._controlStatusText(), /KIS 연결됨 · 시세 수신 중/);
   w.document.body.insertAdjacentHTML('beforeend', '<div data-code="005930"><span class="ws-live-dot"></span></div>');
   now += 55_000;
   assert.equal(qm.isLive('005930'), false);
@@ -347,7 +347,31 @@ test('슬롯 확보·서버 접속·최근 체결 수신을 구분하고 과거 
   send({...tick, as_of: new Date(now).toISOString()});
   send({type: 'stream_status', stream_state: 'reconnecting', slots_connected: 0});
   assert.equal(qm.isLive('005930'), false);
-  assert.match(qm._controlStatusText(), /시세 재연결 중/);
+  assert.match(qm._controlStatusText(), /KIS 재연결 중/);
+  qm.disconnect();
+});
+
+test('일반 사용자도 KIS 상태를 볼 수 있고 NH 수신이 KIS 연결 표시를 바꾸지 않는다', () => {
+  const {w, qm, MockWebSocket} = createHarness();
+  w.document.body.insertAdjacentHTML('beforeend', '<button id="pfWsToggle"></button><span id="pfWsStatus" hidden></span><span id="pfWsDetail"></span>');
+  const status = w.document.getElementById('pfWsStatus');
+  qm.connect();
+  const ws = MockWebSocket.instances[0];
+  ws.onopen();
+  qm.setNamuhLinked(true);
+  qm.onNamuhQuote('005930', {price: 100, source: 'namuh_ws', as_of: new Date().toISOString()});
+  qm._syncControlUi();
+  assert.equal(status.hidden, false);
+  assert.equal(status.textContent, 'KIS 미연결');
+  assert.equal(status.dataset.state, 'polling');
+  assert.equal(w.document.getElementById('pfWsToggle').hidden, true);
+  const send = message => ws.onmessage({data: JSON.stringify(message)});
+  send({type: 'ws_status', active: true, stream_state: 'connected', slots_connected: 2, slots_active: 2});
+  assert.equal(status.textContent, 'KIS 연결됨 · 체결 대기');
+  assert.match(w.document.getElementById('pfWsDetail').textContent, /연결 2개/);
+  send({type: 'stream_status', stream_state: 'connected', slots_connected: 1, slots_active: 2});
+  assert.match(status.textContent, /KIS 일부 연결/);
+  assert.match(w.document.getElementById('pfWsDetail').textContent, /연결 1개/);
   qm.disconnect();
 });
 
@@ -396,6 +420,9 @@ test('NH 일부 시장의 연결 종료는 해당 시세만 해제하고 구독 
   assert.equal(qm.isLive('AAPL'), true);
   assert.equal(w.PfStore.items[0].quote._stale, true);
   assert.equal(w.PfStore.items[1].quote._stale, undefined);
+  qm.onNamuhStatus({foreign: {state: 'waiting', reason: 'scanner_reserved'}});
+  assert.equal(qm.isLive('AAPL'), false);
+  assert.equal(w.PfStore.items[1].quote._stale, true);
   qm.disconnect();
 });
 

@@ -10,6 +10,7 @@ from services.brokers import notifications, realtime
 @pytest.mark.asyncio
 async def test_shared_quote_socket_subscribes_empty_notification_key_and_never_books_push_amounts():
     sent, changed = [], []
+    registered = asyncio.Event()
 
     class Socket:
         async def __aenter__(self):
@@ -20,8 +21,11 @@ async def test_shared_quote_socket_subscribes_empty_notification_key_and_never_b
 
         async def send(self, value):
             sent.append(json.loads(value)["body"])
+            if len(sent) == 2:
+                registered.set()
 
         async def __aiter__(self):
+            await registered.wait()
             yield json.dumps({"header": {"tr_cd": "d2", "rsp_cd": "00000"}})
             yield json.dumps({"header": {"tr_cd": "d2"}, "body": {"accountno": "12345678901", "concprc": "invalid"}})
             raise asyncio.CancelledError
@@ -55,6 +59,7 @@ async def test_server_starts_notification_sockets_for_every_key_without_holdings
         await stop.wait()
 
     with patch.object(realtime.brokers, "list_links", AsyncMock(return_value=links)), \
+         patch.object(realtime.quant_scanner, "settings", AsyncMock(return_value=[])), \
          patch.object(realtime.account_holdings, "list_positions", AsyncMock(return_value=[])), \
          patch.object(realtime, "sync_account", AsyncMock()) as sync, patch.object(realtime, "stream", side_effect=stream):
         await asyncio.wait_for(realtime.run(stop), 3)

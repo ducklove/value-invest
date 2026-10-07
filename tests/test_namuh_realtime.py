@@ -75,6 +75,7 @@ class GoldRealtimeTests(IsolatedAsyncioTestCase):
     async def test_single_connection_subscribes_stock_and_gold_and_rejects_older_tick(self):
         now = self.now
         sent = []
+        registered = asyncio.Event()
 
         class Socket:
             async def __aenter__(self):
@@ -85,8 +86,11 @@ class GoldRealtimeTests(IsolatedAsyncioTestCase):
 
             async def send(self, message):
                 sent.append(json.loads(message)["body"])
+                if len(sent) == 2:
+                    registered.set()
 
             async def __aiter__(self):
+                await registered.wait()
                 yield json.dumps({"header": {"rsp_cd": "00000"}, "body": {"tr_key": ["005930", "M04020000"]}})
                 yield json.dumps(gold_message(now))
                 yield json.dumps(gold_message(now - timedelta(seconds=1), cheprice="199000"))
@@ -102,6 +106,41 @@ class GoldRealtimeTests(IsolatedAsyncioTestCase):
         self.assertEqual(realtime.status("owner")["subscribed"], 2)
         self.assertEqual(realtime.status("owner")["state"], "live")
 
+    async def test_receives_rejection_while_sender_waits_and_preserves_reason_after_close(self):
+        sent = asyncio.Event()
+        closed = asyncio.Event()
+
+        class Socket:
+            close_code = 1000
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): pass
+            async def send(self, message):
+                sent.set()
+                await closed.wait()
+                from websockets.exceptions import ConnectionClosedOK
+                from websockets.frames import Close
+                raise ConnectionClosedOK(Close(1000, "PRIVATE-TOKEN"), Close(1000, ""), True)
+
+            async def __aiter__(self):
+                await sent.wait()
+                yield json.dumps({"header": {"rsp_cd": "WSS10015", "tr_cd": "mc", "rsp_msg": "PRIVATE-TOKEN"}})
+                closed.set()
+
+        async def sleep(delay):
+            if delay >= 2:
+                raise asyncio.CancelledError
+
+        with patch.object(realtime.namuh, "token", AsyncMock(return_value="PRIVATE-TOKEN")), \
+             patch.object(realtime.websockets, "connect", return_value=Socket()), \
+             patch.object(realtime.asyncio, "sleep", side_effect=sleep), \
+             self.assertLogs(realtime.logger, level="WARNING") as logs:
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.wait_for(realtime.stream("owner", "cid", ["005930", "000660"], "live"), 2)
+        part = realtime.status("owner")["domestic"]
+        self.assertEqual(part["reason"], "subscription_rejected")
+        self.assertEqual(part["response_code"], "WSS10015")
+        self.assertNotIn("PRIVATE-TOKEN", " ".join(logs.output))
+
     async def test_gold_only_account_starts_background_subscription(self):
         stop = asyncio.Event()
 
@@ -110,6 +149,7 @@ class GoldRealtimeTests(IsolatedAsyncioTestCase):
 
         link = {"google_sub": "owner", "credential_id": "credential", "account_id": "account", "environment": "live", "product": "gold"}
         with patch.object(realtime.brokers, "list_links", AsyncMock(return_value=[link])), \
+             patch.object(realtime.quant_scanner, "settings", AsyncMock(return_value=[])), \
              patch.object(realtime.account_holdings, "list_positions", AsyncMock(return_value=[{"stock_code": "KRX_GOLD"}])), \
              patch.object(realtime, "sync_account", AsyncMock()), \
              patch.object(realtime, "stream", AsyncMock(side_effect=stream)) as stream_mock:
