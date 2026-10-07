@@ -137,6 +137,7 @@ class ScannerTests(TempDbMixin):
         class Socket:
             def __init__(self):
                 self.sent = []
+                self.registered = asyncio.Event()
 
             async def __aenter__(self):
                 return self
@@ -146,8 +147,11 @@ class ScannerTests(TempDbMixin):
 
             async def send(self, value):
                 self.sent.append(json.loads(value))
+                if len(self.sent) == 2:
+                    self.registered.set()
 
             async def recv(self):
+                await self.registered.wait()
                 return json.dumps(messages.pop(0))
 
         socket = Socket()

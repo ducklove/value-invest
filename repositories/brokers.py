@@ -58,6 +58,18 @@ async def save_token(user: str, cid: str, token: str, expires_at: float):
                          (encrypt(token), expires_at, user, cid))
 
 
+async def set_ws_session_management(user: str, cid: str, enabled: bool):
+    """외부와 공유하지 않는 것으로 확인한 NH 키에만 전체 세션 복구를 허용한다."""
+    async with transaction() as db:
+        row = await (await db.execute("SELECT secret_ciphertext FROM broker_credentials WHERE google_sub=? AND credential_id=? AND provider='namuh'", (user, cid))).fetchone()
+        if not row:
+            raise BrokerError("등록된 NH 앱키를 찾을 수 없습니다.")
+        secret = json.loads(decrypt(row["secret_ciphertext"]))
+        secret["ws_session_management"] = bool(enabled)
+        await db.execute("UPDATE broker_credentials SET secret_ciphertext=? WHERE google_sub=? AND credential_id=?",
+                         (encrypt(json.dumps(secret)), user, cid))
+
+
 async def link_account(user: str, aid: str, cid: str, account_no: str, environment: str, include_overseas: bool = True, product: str = "stocks", *, provider: str = "namuh"):
     from repositories.account_holdings import require_account
     definition = BROKERS.get(provider)

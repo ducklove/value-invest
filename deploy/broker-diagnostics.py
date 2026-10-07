@@ -32,6 +32,8 @@ def journal_summary():
         r"NH WebSocket closed: market=(domestic|foreign) code=(\d+|None)",
         r"NH WebSocket subscribed: market=(domestic|foreign) approved=(\d+) requested=(\d+)",
         r"NH WebSocket receiving: market=(domestic|foreign)",
+        r"NH WebSocket stale sessions released",
+        r"NH WebSocket session recovery failed",
         r"NH 계좌 동기화 보류: ([A-Za-z]+)",
         r"NH 연결 목록 재확인 예정: ([A-Za-z]+)",
     ]
@@ -149,7 +151,6 @@ async def refresh_tokens():
 async def main():
     journal_summary()
     connection_summary()
-    await asyncio.gather(probe(7070), probe(7080))
     if os.environ.get("REFRESH_TOKEN") == "true":
         await refresh_tokens()
     if os.environ.get("SUBSCRIPTION_PROBE") == "true" or os.environ.get("RELEASE_STALE") == "true":

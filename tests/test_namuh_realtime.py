@@ -123,8 +123,8 @@ class GoldRealtimeTests(IsolatedAsyncioTestCase):
 
             async def __aiter__(self):
                 await sent.wait()
-                yield json.dumps({"header": {"rsp_cd": "WSS10015", "tr_cd": "mc", "rsp_msg": "PRIVATE-TOKEN"}})
                 closed.set()
+                yield json.dumps({"header": {"rsp_cd": "WSS10015", "tr_cd": "mc", "rsp_msg": "PRIVATE-TOKEN"}})
 
         async def sleep(delay):
             if delay >= 2:
@@ -132,6 +132,7 @@ class GoldRealtimeTests(IsolatedAsyncioTestCase):
 
         with patch.object(realtime.namuh, "token", AsyncMock(return_value="PRIVATE-TOKEN")), \
              patch.object(realtime.websockets, "connect", return_value=Socket()), \
+             patch.object(realtime.namuh_ws, "recover", AsyncMock(return_value=False)), \
              patch.object(realtime.asyncio, "sleep", side_effect=sleep), \
              self.assertLogs(realtime.logger, level="WARNING") as logs:
             with self.assertRaises(asyncio.CancelledError):

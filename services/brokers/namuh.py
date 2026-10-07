@@ -71,6 +71,29 @@ async def token(user: str, cid: str, *, force=False) -> str:
         return data["access_token"]
 
 
+async def close_ws_sessions(user: str, cid: str) -> None:
+    """비정상 종료로 남은 앱키 세션을 공식 복구 API로 해제한다(본문 없음, 1 TPS).
+
+    호출자는 이 서비스가 전용으로 관리하는 키인지 확인하고 로컬 소켓을 먼저 닫는다.
+    https://www.nhplug.com/apiservice?api_id=db25c92a-84c1-45c3-b9ae-c30118c94642
+    """
+    access = await token(user, cid)
+    client = await get_http_client("namuh")
+    async with lock(cid):
+        await asyncio.sleep(max(0, MIN_CALL_INTERVAL - (time.monotonic() - _last_call.get(cid, 0))))
+        _last_call[cid] = time.monotonic()
+        try:
+            response = await client.post(LIVE + "/websocket/close/session", headers={
+                "Authorization": "Bearer " + access, "Content-Type": "application/json;charset=utf-8"})
+            response.raise_for_status()
+            data = response.json()
+        except (httpx.HTTPError, ValueError):
+            raise BrokerError("NH 잔류 세션 해제에 실패했습니다.") from None
+        # 10000은 이미 연결된 세션이 없다는 응답이다(운영에서 확인).
+        if not isinstance(data, dict) or data.get("rsp_cd") not in {"00000", "10000"}:
+            raise BrokerError("NH 잔류 세션 해제가 승인되지 않았습니다.")
+
+
 def continuation(data: dict, headers) -> str | None:
     flag = str(headers.get("cts_flag", "")).strip().upper()
     if flag == "N":

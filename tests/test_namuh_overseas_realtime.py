@@ -45,9 +45,9 @@ def test_official_master_maps_exchange_class_shares_and_original_currency(monkey
     data += master_row("HKG83199", "83199", "HKG", "CNY") + master_row("AUSA200", "A200", "ASX", "AUD")
     parsed = overseas.parse_master(data)
     monkeypatch.setattr(overseas, "_instruments", parsed)
-    assert realtime.subscription("AAPL") == ("RC", "USAAAPL")
-    assert realtime.subscription("BRK-B") == ("RC", "USABRK.B")
-    assert realtime.subscription("0700.HK") == ("RC", "HKG00700")
+    assert realtime.subscription("AAPL") == ("RC", "AAPL")
+    assert realtime.subscription("BRK-B") == ("RC", "BRK.B")
+    assert realtime.subscription("0700.HK") == ("RC", "00700")
     assert overseas.instrument("83199.HK")["currency"] == "CNY"
     assert overseas.instrument("A200") == overseas.instrument("A200.AX")
     assert realtime.select_codes([{"stock_code": c} for c in ("A200", "A200.AX", "AAPL")], 1, foreign=True) == ["A200", "A200.AX"]
@@ -67,8 +67,8 @@ def test_balance_identity_and_vietnam_subscriptions_use_gic_and_currency(monkeyp
     assert overseas.code_for_balance("VNMAAA", "VND") == "AAA.HM"
     assert overseas.code_for_balance("VNMFUEVFVND", "VND") == "FUEVFVND.HM"
     assert overseas.code_for_balance("VNMFUEVFVND", "USD") is None
-    assert realtime.subscription("FUEVFVND.HM") == ("RC", "VNMFUEVFVND")
-    assert realtime.subscription("BVS.HN") == ("RC", "VNMBVS")
+    assert realtime.subscription("FUEVFVND.HM") == ("RC", "FUEVFVND")
+    assert realtime.subscription("BVS.HN") == ("RC", "BVS")
     assert overseas.instrument("FUEVFVND.HM")["zone"] == "Asia/Ho_Chi_Minh"
     overseas._master.clear()
     assert overseas.code_for_balance("VNMFUEVFVND", "VND") is None
@@ -164,7 +164,7 @@ async def test_overseas_socket_uses_7080_and_permission_rejection_is_isolated():
         with pytest.raises(asyncio.CancelledError):
             await realtime.stream("owner", "cid", ["AAPL"], "live", foreign=True)
     assert connect.call_args.args[0] == "wss://api.nhplug.com:7080/websocket"
-    assert sent == [{"tr_cd": "RC", "tr_key": "USAAAPL"}] * 2
+    assert sent == [{"tr_cd": "RC", "tr_key": "AAPL"}] * 2
     assert realtime.quote("owner", "AAPL")["price"] == 280350
     state = realtime.status("owner")
     assert state["foreign"]["state"] == "live" and state["foreign"]["rejected"] == 1

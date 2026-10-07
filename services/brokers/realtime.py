@@ -62,7 +62,7 @@ def subscription(code: str) -> tuple[str, str] | None:
         return "mc", code
     info = overseas_realtime.instrument(code)
     if info:
-        return "RC", info["gic"]
+        return "RC", info["symbol"]
     return None
 
 
@@ -155,12 +155,14 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
     while True:
         reason = "connection_closed"
         response_code = None
+        failed_generation = namuh_ws.generation(cid)
         try:
             _status[state_key] = {"state": "connecting", "subscribed": 0, "requested": len(set(registrations.values()))}
             if notice_channels:
                 notifications._states[(user, cid)] = {"state": "connecting", "approved": set(), "rejected": set()}
             access = await namuh.token(user, cid)
-            async with namuh_ws.slot(cid, "foreign" if foreign else "domestic"), websockets.connect(endpoint, ssl=context, ping_interval=None, open_timeout=15, close_timeout=3, max_size=2**20) as ws, _register(ws, cid, access, registrations, notice_channels, changed):
+            async with namuh_ws.connect(cid, "foreign" if foreign else "domestic", endpoint, ssl=context, ping_interval=None, open_timeout=15, close_timeout=3, max_size=2**20) as ws, _register(ws, cid, access, registrations, notice_channels, changed):
+                failed_generation = namuh_ws.generation(cid)
                 approved = set()
                 rejected = set()
                 receiving = False
@@ -185,6 +187,8 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
                             reason = "subscription_rejected"
                             safe_channel = channel if channel in notice_channels or channel in {p[0] for p in registrations.values()} else "unknown"
                             logger.warning("NH WebSocket subscription rejected: channel=%s code=%s", safe_channel, safe_code)
+                            if safe_code == "WSS10015":
+                                break
                         if channel in notice_channels:
                             state = notifications._states[(user, cid)]
                             if str(head["rsp_cd"]) == "00000":
@@ -203,11 +207,14 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
                                                   "requested": len(set(registrations.values())), "rejected": len(rejected),
                                                   "message": "해외 실시간 시세 권한·구독 한도 확인 필요" if foreign else "NH 시세 구독 권한·한도 확인 필요"}
                             continue
-                        approved.update(pair for pair in registrations.values() if pair[1] in keys and channel in (None, pair[0]))
+                        approved.update(pair for code, pair in registrations.items()
+                                        if channel in (None, pair[0]) and
+                                        (pair[1] in keys or (foreign and infos.get(code) and infos[code]["gic"] in keys)))
                         if approved and len(approved) == len(set(registrations.values())):
                             logger.info("NH WebSocket subscribed: market=%s approved=%s requested=%s",
                                         "foreign" if foreign else "domestic", len(approved), len(set(registrations.values())))
-                        _status[state_key] = {"state": "subscribed" if approved else "connecting", "subscribed": len(approved), "requested": len(set(registrations.values())), "rejected": len(rejected)}
+                        _status[state_key] = {"state": "subscribed" if approved else "connecting", "subscribed": len(approved), "requested": len(set(registrations.values())), "rejected": len(rejected),
+                                              "response_code": response_code, "reason": reason if response_code else None}
                         continue
                     if head.get("tr_cd") in notice_channels:
                         aid = await notifications.account_for_message(user, cid, environment, message)
@@ -236,7 +243,8 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
                                 receiving = True
                             _quotes.set((user, tick["code"]), tick)
                             _status[state_key] = {"state": "live", "subscribed": len(approved), "requested": len(set(registrations.values())),
-                                                  "rejected": len(rejected), "last_tick_at": tick["as_of"]}
+                                                  "rejected": len(rejected), "last_tick_at": tick["as_of"],
+                                                  "response_code": response_code, "reason": reason if response_code else None}
                             delay = 2
                 logger.warning("NH WebSocket closed: market=%s code=%s", "foreign" if foreign else "domestic", getattr(ws, "close_code", None))
         except (BrokerError, OSError, websockets.exceptions.WebSocketException, TimeoutError) as exc:
@@ -253,6 +261,8 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
                               "message": "NH 시세 연결 재시도 중 · 기존 시세 경로 사용"}
         for code in codes:
             _quotes.delete((user, code))
+        if response_code == "WSS10015" and await namuh_ws.recover(user, cid, failed_generation):
+            delay = 2
         await asyncio.sleep(delay + random.random())
         delay = min(delay * 2, 60)
 

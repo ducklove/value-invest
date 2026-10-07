@@ -45,12 +45,15 @@ def parse_master(data: bytes) -> dict[str, dict]:
         if market not in _MARKETS or (currency != "GBp" and currency not in currencies.CURRENCY_TO_FX_CODE):
             continue
         suffix, zone = _MARKETS[market]
+        native_symbol = symbol
         if suffix in {".HK", ".T"} and symbol.isdigit():
             symbol = (symbol.lstrip("0") or "0").zfill(4)
         code = symbol.replace(".", "-") if not suffix else symbol + suffix
         if not re.fullmatch(r"[A-Z0-9.-]{1,24}", code) or not re.fullmatch(r"[A-Za-z0-9.\-/]{1,15}", gic):
             continue
-        info = {"gic": gic, "market": market, "currency": currency, "zone": zone}
+        # 구독 요청은 원래 티커, ACK·시세 응답은 GIC다. SDK 요약의 gicz15와
+        # 달리 포털 RC 요청 명세의 예시는 AAPL, 응답 예시는 USAAAPL이다.
+        info = {"gic": gic, "symbol": native_symbol, "market": market, "currency": currency, "zone": zone}
         if code in result and result[code] != info:
             ambiguous.add(code)
         result[code] = info

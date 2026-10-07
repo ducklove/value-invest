@@ -283,9 +283,11 @@ function pfRenderNhQuoteState(message) {
   const reason = message.reason || message.domestic?.reason || message.foreign?.reason;
   const responseCode = message.response_code || message.domestic?.response_code || message.foreign?.response_code;
   const error = {
-    WSS10015: 'NH 세션 한도 초과 · NH 세션 확인 필요 · 보조 시세 사용',
+    WSS10015: 'NH 세션 한도 초과 · 재연결 중 · 보조 시세 사용',
     WSS10010: 'NH 구독 요청 속도 초과 · 재시도 중',
     WSS10006: 'NH 시세 구독 요청 확인 필요 · 보조 시세 사용',
+    WSS10012: 'NH 구독 종목 코드 확인 필요 · 보조 시세 사용',
+    WSS10013: 'NH 해외 실시간 시세 이용 신청 필요 · 보조 시세 사용',
   }[responseCode] || {
     subscription_rejected: 'NH 시세 구독 제한 · 보조 시세 사용',
     authentication_error: 'NH 시세 인증 확인 필요 · 보조 시세 사용',
@@ -296,7 +298,10 @@ function pfRenderNhQuoteState(message) {
   label.textContent = ({live: 'NH 실시간 시세 우선 사용', subscribed: 'NH 시세 구독 · 체결 대기',
     connecting: 'NH 시세 연결 중', degraded: error, waiting: 'NH 시세 연결 대기'}[message.state] || 'NH 시세 상태 확인 중')
     + (message.domestic?.rejected ? ' · 국내 시세 구독 권한·한도 확인 필요' : '')
-    + (message.foreign?.rejected ? ' · 해외 실시간 권한·구독 한도 확인 필요, 보조 시세 사용' : '');
+    + (message.foreign?.rejected ? message.foreign.response_code === 'WSS10013'
+      ? ' · 해외 실시간 시세 이용 신청 필요 · 보조 시세 사용'
+      : message.foreign.response_code === 'WSS10012' ? ' · 해외 구독 종목 코드 확인 필요 · 보조 시세 사용'
+        : ' · 해외 실시간 권한·구독 한도 확인 필요, 보조 시세 사용' : '');
   if (message.foreign?.reason === 'scanner_reserved') label.textContent += ' · 해외는 조회 시세 사용 · 현선물 감시 실행 중';
   if (message.notifications) label.textContent += ['subscribed', 'received'].includes(message.notifications.state)
     ? ' · 계좌 통보 연결 · 입출금 60초 확인' : message.notifications.state === 'degraded'

@@ -155,12 +155,13 @@ class Watcher:
             self.active_signals.clear()
             self.state = {"state": "connecting", "requested": len(regs), "approved": 0}
             self.public()
+            response_code = None
+            failed_generation = namuh_ws.generation(self.cid)
             try:
                 access = await namuh.token(self.user, self.cid)
                 context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-                async with namuh_ws.slot(self.cid, "scanner"), websockets.connect(endpoint, ssl=context, ping_interval=None, open_timeout=15, close_timeout=3, max_size=2**20) as ws, namuh_ws.registrations(ws, self.cid, access, regs):
-                    for channel, key in sorted(regs):
-                        await namuh_ws.subscribe(ws, self.cid, access, channel, key)
+                async with namuh_ws.connect(self.cid, "scanner", endpoint, ssl=context, ping_interval=None, open_timeout=15, close_timeout=3, max_size=2**20) as ws, namuh_ws.subscribing(ws, self.cid, access, sorted(regs)):
+                    failed_generation = namuh_ws.generation(self.cid)
                     approved, written = set(), {}
                     connected_at = time.monotonic()
                     while True:
@@ -186,6 +187,7 @@ class Watcher:
                             continue
                         if "rsp_cd" in h:
                             if str(h["rsp_cd"]) != "00000":
+                                response_code = str(h["rsp_cd"])
                                 raise BrokerError("실시간 호가 구독 거절")
                             b = msg.get("body", {})
                             keys = b.get("tr_key", h.get("tr_key", [])) if isinstance(b, dict) else []
@@ -244,6 +246,8 @@ class Watcher:
                 self.active_signals.clear()
                 self.state.update(state="degraded", approved=0, message="실시간 연결 보류 · 한도·권한·연결 확인 후 재시도")
                 self.public()
+                if response_code == "WSS10015" and await namuh_ws.recover(self.user, self.cid, failed_generation):
+                    delay = 2
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 60)
 

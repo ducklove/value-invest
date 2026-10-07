@@ -60,6 +60,43 @@ class NamuhTests(TempDbMixin):
         namuh._HideTokenQuery().filter(record)
         self.assertNotIn("PRIVATE", record.getMessage())
 
+    async def test_session_management_is_opt_in_encrypted_and_owner_scoped(self):
+        self.assertNotIn("ws_session_management", await brokers.get_credential("u1", self.cid))
+        with self.assertRaises(BrokerError):
+            await brokers.set_ws_session_management("u2", self.cid, True)
+        await brokers.set_ws_session_management("u1", self.cid, True)
+        self.assertTrue((await brokers.get_credential("u1", self.cid))["ws_session_management"])
+        self.assertEqual(await brokers.store_credential("u1", "test-namuh-app-key", "test-namuh-secret"), self.cid)
+        self.assertTrue((await brokers.get_credential("u1", self.cid))["ws_session_management"])
+        row = await (await (await get_db()).execute("SELECT secret_ciphertext FROM broker_credentials WHERE credential_id=?", (self.cid,))).fetchone()
+        self.assertNotIn("ws_session_management", row["secret_ciphertext"])
+        await brokers.set_ws_session_management("u1", self.cid, False)
+        self.assertFalse((await brokers.get_credential("u1", self.cid))["ws_session_management"])
+
+    async def test_documented_session_close_bodyless_and_strict_success_without_token_renewal(self):
+        requests = []
+
+        def respond(request):
+            requests.append(request)
+            return httpx.Response(200, json={"rsp_cd": "00000"})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            with patch.object(namuh, "token", AsyncMock(return_value="cached-token")) as token, \
+                 patch.object(namuh, "get_http_client", AsyncMock(return_value=client)):
+                await namuh.close_ws_sessions("u1", self.cid)
+        token.assert_awaited_once_with("u1", self.cid)
+        self.assertEqual(requests[0].url.path, "/websocket/close/session")
+        self.assertEqual(requests[0].content, b"")
+        self.assertEqual(requests[0].headers["Authorization"], "Bearer cached-token")
+        self.assertEqual(requests[0].headers["Content-Type"], "application/json;charset=utf-8")
+        self.assertNotIn("/websocket/close/session", namuh.READ_PATHS)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={"rsp_cd": "ERROR", "rsp_msg": "PRIVATE"}))) as client:
+            with patch.object(namuh, "token", AsyncMock(return_value="cached-token")), \
+                 patch.object(namuh, "get_http_client", AsyncMock(return_value=client)):
+                with self.assertRaises(BrokerError) as error:
+                    await namuh.close_ws_sessions("u1", self.cid)
+                self.assertNotIn("PRIVATE", str(error.exception))
+
     async def test_sync_replaces_only_linked_account_and_failure_preserves_snapshot(self):
         await portfolio.save_portfolio_item("u1", "005930", "삼성전자", 10, 100)
         await self.link()
