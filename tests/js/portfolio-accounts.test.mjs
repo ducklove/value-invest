@@ -68,8 +68,13 @@ test('NH 연결 종료 즉시 기존 수신 표시를 지우고 구독 제한은
     assert.match(s.el('pfNhQuoteState').textContent, /실시간 시세 우선 사용/);
     assert.match(s.el('pfNhQuoteState').textContent, /해외 실시간 시세 이용 신청 필요/);
     assert.doesNotMatch(s.el('pfNhQuoteState').textContent, /불안정|구독 한도/);
+    send({state: 'live', domestic: {state: 'live'}, foreign: {state: 'degraded', rejected: 16,
+      response_code: 'WSS10013', response_codes: ['WSS10012', 'WSS10013']}});
+    assert.match(s.el('pfNhQuoteState').textContent, /해외 실시간 시세 이용 신청 필요/);
+    assert.match(s.el('pfNhQuoteState').textContent, /일부 해외 종목 구독 거절/);
+    assert.doesNotMatch(s.el('pfNhQuoteState').textContent, /연결 불안정/);
     send({state: 'degraded', foreign: {reason: 'subscription_rejected', response_code: 'WSS10012'}});
-    assert.match(s.el('pfNhQuoteState').textContent, /종목 코드 확인 필요/);
+    assert.match(s.el('pfNhQuoteState').textContent, /종목 구독 거절/);
     send({state: 'subscribed', foreign: {state: 'waiting', reason: 'scanner_reserved'}});
     assert.match(s.el('pfNhQuoteState').textContent, /해외는 조회 시세 사용 · 현선물 감시 실행 중/);
     assert.doesNotMatch(s.el('pfNhQuoteState').textContent, /불안정/);

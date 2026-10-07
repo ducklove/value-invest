@@ -155,6 +155,7 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
     while True:
         reason = "connection_closed"
         response_code = None
+        response_codes = set()
         failed_generation = namuh_ws.generation(cid)
         try:
             _status[state_key] = {"state": "connecting", "subscribed": 0, "requested": len(set(registrations.values()))}
@@ -184,6 +185,7 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
                             # 응답 원문에는 인증정보가 섞일 수 있어 코드·채널만 기록한다.
                             safe_code = ack_code if re.fullmatch(r"[A-Z0-9]{1,20}", ack_code) else "unknown"
                             response_code = safe_code
+                            response_codes.add(safe_code)
                             reason = "subscription_rejected"
                             safe_channel = channel if channel in notice_channels or channel in {p[0] for p in registrations.values()} else "unknown"
                             logger.warning("NH WebSocket subscription rejected: channel=%s code=%s", safe_channel, safe_code)
@@ -204,6 +206,7 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
                         if str(head["rsp_cd"]) != "00000":
                             rejected.update(keys or [pair[1] for pair in registrations.values() if pair not in approved])
                             _status[state_key] = {"state": "degraded", "reason": reason, "response_code": response_code, "subscribed": len(approved),
+                                                  "response_codes": sorted(response_codes),
                                                   "requested": len(set(registrations.values())), "rejected": len(rejected),
                                                   "message": "해외 실시간 시세 권한·구독 한도 확인 필요" if foreign else "NH 시세 구독 권한·한도 확인 필요"}
                             continue
@@ -214,7 +217,7 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
                             logger.info("NH WebSocket subscribed: market=%s approved=%s requested=%s",
                                         "foreign" if foreign else "domestic", len(approved), len(set(registrations.values())))
                         _status[state_key] = {"state": "subscribed" if approved else "connecting", "subscribed": len(approved), "requested": len(set(registrations.values())), "rejected": len(rejected),
-                                              "response_code": response_code, "reason": reason if response_code else None}
+                                              "response_code": response_code, "response_codes": sorted(response_codes), "reason": reason if response_code else None}
                         continue
                     if head.get("tr_cd") in notice_channels:
                         aid = await notifications.account_for_message(user, cid, environment, message)
@@ -244,7 +247,7 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
                             _quotes.set((user, tick["code"]), tick)
                             _status[state_key] = {"state": "live", "subscribed": len(approved), "requested": len(set(registrations.values())),
                                                   "rejected": len(rejected), "last_tick_at": tick["as_of"],
-                                                  "response_code": response_code, "reason": reason if response_code else None}
+                                                  "response_code": response_code, "response_codes": sorted(response_codes), "reason": reason if response_code else None}
                             delay = 2
                 logger.warning("NH WebSocket closed: market=%s code=%s", "foreign" if foreign else "domestic", getattr(ws, "close_code", None))
         except (BrokerError, OSError, websockets.exceptions.WebSocketException, TimeoutError) as exc:
@@ -257,6 +260,7 @@ async def stream(user: str, cid: str, codes: list[str], environment: str, *, for
             notifications._states[(user, cid)] = {"state": "degraded", "approved": set()}
         _status[state_key] = {"state": "degraded", "reason": reason, "subscribed": 0,
                               "response_code": response_code,
+                              "response_codes": sorted(response_codes),
                               "requested": len(set(registrations.values())),
                               "message": "NH 시세 연결 재시도 중 · 기존 시세 경로 사용"}
         for code in codes:

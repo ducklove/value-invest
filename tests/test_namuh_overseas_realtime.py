@@ -152,7 +152,8 @@ async def test_overseas_socket_uses_7080_and_permission_rejection_is_isolated():
             registered.set()
         async def __aiter__(self):
             await registered.wait()
-            yield json.dumps({"header": {"rsp_cd": "WSS10006"}, "body": {"tr_key": "OTHER"}})
+            yield json.dumps({"header": {"rsp_cd": "WSS10012"}, "body": {"tr_key": "OTHER"}})
+            yield json.dumps({"header": {"rsp_cd": "WSS10013"}, "body": {"tr_key": "OTHER"}})
             yield json.dumps({"header": {"rsp_cd": "00000"}, "body": {"tr_key": "USAAAPL"}})
             yield json.dumps(message(now))
             raise asyncio.CancelledError
@@ -168,6 +169,7 @@ async def test_overseas_socket_uses_7080_and_permission_rejection_is_isolated():
     assert realtime.quote("owner", "AAPL")["price"] == 280350
     state = realtime.status("owner")
     assert state["foreign"]["state"] == "live" and state["foreign"]["rejected"] == 1
+    assert state["foreign"]["response_codes"] == ["WSS10012", "WSS10013"]
     assert state["domestic"]["state"] == "subscribed"
 
 
