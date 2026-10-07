@@ -30,6 +30,7 @@
         '.pf-target-edit-wrap',
         '.pf-stock-tag',
         '.pf-group-chip',
+        '.js-pf-performance-tooltip',
       ].join(','));
     };
     document.addEventListener('pointerdown', (e) => {
@@ -44,6 +45,7 @@
     }, true);
     document.addEventListener('click', (e) => {
       const t = e.target;
+      if (typeof pfClosePerformanceTooltip === 'function' && !t.closest('.js-pf-performance-tooltip')) pfClosePerformanceTooltip();
       if (typeof pfCloseSummaryContributors === 'function' && !t.closest('.js-pf-contributors, #pfContributorPopover')) {
         pfCloseSummaryContributors();
       }
@@ -100,10 +102,9 @@
         e.preventDefault();
         e.stopPropagation();
         pfOpenGroupSummary(el.dataset.group || '');
-      } else if ((el = t.closest('.js-pf-open-pair-summary'))) {
+      } else if ((el = t.closest('.js-pf-performance-tooltip'))) {
         e.preventDefault();
         e.stopPropagation();
-        pfShowPairSummary(el.dataset.longCode || '', e);
       } else if ((el = t.closest('.js-pf-open-insight'))) {
         e.preventDefault();
         const code = codeFromTr(el);
@@ -171,6 +172,7 @@
       }
     });
     document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && typeof pfClosePerformanceTooltip === 'function') pfClosePerformanceTooltip();
       if (e.key === 'Escape' && typeof pfCloseSummaryContributors === 'function') {
         pfCloseSummaryContributors(Boolean(e.target.closest?.('#pfContributorPopover')));
       }
@@ -183,6 +185,7 @@
     });
     for (const type of ['pointerover', 'pointerout', 'focusin', 'focusout']) {
       document.addEventListener(type, event => {
+        if (typeof pfPreviewPerformanceTooltip === 'function') pfPreviewPerformanceTooltip(event, type === 'pointerover' || type === 'focusin');
         if (typeof pfSummaryContributorPreview === 'function') {
           pfSummaryContributorPreview(event, type === 'pointerover' || type === 'focusin');
         }

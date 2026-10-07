@@ -215,6 +215,7 @@ function pfToggleSimpleMode() {
 // 그 선택이 우선 (_pfGetColVisibility 로직 참조).
 const PF_COL_DEFS = [
   { key: 'group',     cls: 'pf-col-group',     label: '그룹' },
+  { key: 'change',    cls: 'pf-col-change',    label: '등락액', defaultVisible: false },
   { key: 'curprice',  cls: 'pf-col-curprice',   label: '현재가' },
   { key: 'benchmark', cls: 'pf-col-benchmark',  label: '벤치마크' },
   { key: 'invested',  cls: 'pf-col-invested',   label: '거래대금',  defaultVisible: false },
@@ -224,6 +225,7 @@ const PF_COL_DEFS = [
   { key: 'qty',       cls: 'pf-col-qty',        label: '수량' },
   { key: 'return',    cls: 'pf-col-return',      label: '수익률' },
   { key: 'mktval',    cls: 'pf-col-mktval',     label: '평가금액' },
+  { key: 'daypnl',    cls: 'pf-col-daypnl',    label: '당일손익', defaultVisible: false },
   { key: 'dividend',  cls: 'pf-col-dividend',   label: '배당액' },
   { key: 'divyield',  cls: 'pf-col-divyield',   label: '배당수익률' },
   { key: 'weight',    cls: 'pf-col-weight',      label: '비중' },

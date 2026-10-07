@@ -295,13 +295,38 @@ function pfKeepPairsTogether(items) {
   return items.flatMap(item => pinned.has(item.stock_code) ? [] : [item, ...(shorts.get(item.stock_code) || [])]);
 }
 
-// 기존 등락률 숫자를 그대로 사용한다. 합산 보기에서는 양쪽 숫자 모두
-// 같은 팝오버를 열며, 열·행·배지는 추가하지 않는다.
-function pfPairChangeCellHtml(item, contents) {
-  if (PfStore.accountId) return contents;
-  const longCode = pfPairAnchorCode(item);
-  if (!pfPairShortsForLong(longCode).length) return contents;
-  return `<button type="button" class="pf-pair-change js-pf-open-pair-summary" data-long-code="${escapeHtml(longCode)}" title="클릭하여 롱·숏 합산 등락률 보기" aria-label="롱·숏 합산 등락률 보기" aria-haspopup="dialog">${contents}</button>`;
+// 모든 보유 행에 같은 툴팁을 적용한다. 롱숏은 합산 성과를 보여준다.
+function pfPerformanceCellHtml(item, contents, metric = 'changePct') {
+  return `<span class="pf-value-hint js-pf-performance-tooltip" data-code="${escapeHtml(item.stock_code)}" data-metric="${metric}" tabindex="0">${contents}</span>`;
+}
+
+function pfPairRowPresentation(item, items) {
+  if (PfStore.accountId) return { attrs: '', marker: '' };
+  const anchor = pfPairAnchorCode(item, items);
+  const shorts = pfPairShortsForLong(anchor, items);
+  if (!shorts.length) return { attrs: '', marker: '' };
+  const isLong = item.stock_code === anchor;
+  const position = isLong ? 'first' : shorts[shorts.length - 1].stock_code === item.stock_code ? 'last' : 'middle';
+  return {
+    attrs: ` data-pair-anchor="${escapeHtml(anchor)}" data-pair-position="${position}"`,
+    marker: `<span class="pf-pair-connector" aria-hidden="true">${isLong ? '┌' : position === 'last' ? '└' : '├'}</span>`,
+  };
+}
+
+function pfHoldingDailyStats(item) {
+  const price = quotePriceOrNull(item.quote || {});
+  const previous = pfPairPreviousClose(item.quote || {}, price);
+  const change = previous === null ? null : Number(price) - previous;
+  return { change, dailyPnl: change === null ? null : (Number(item.quantity) || 0) * change };
+}
+
+function pfFmtSignedPortfolioValue(value) {
+  return value === null ? '-' : `${value > 0 ? '+' : value < 0 ? '-' : ''}${pfFmtPortfolioValue(Math.abs(value))}`;
+}
+
+function pfDailyAmountCellHtml(item, metric) {
+  const value = pfHoldingDailyStats(item)[metric];
+  return pfPerformanceCellHtml(item, `<span class="pf-return ${returnClass(value)}">${pfFmtSignedPortfolioValue(value)}</span>`, metric);
 }
 
 function pfPairPreviousClose(quote, price) {
@@ -431,7 +456,7 @@ function pfToggleGroupFilter(groupName) {
 // '커서 있는 행이 깜빡임' 문제. 영향 받는 셀만 in-place 로 덮어 쓰고
 // flash 클래스를 그 행에만 붙여 갱신된 행만 번쩍이게 한다.
 function updatePortfolioRowQuote(code, shouldFlash = true) {
-  if (typeof pfRefreshPairSummary === 'function') pfRefreshPairSummary();
+  if (typeof pfRefreshPerformanceTooltip === 'function') pfRefreshPerformanceTooltip();
   const tbody = document.getElementById('pfBody');
   if (!tbody) return;
   // Hot path (runs per quote tick): let the browser match the row by attribute
@@ -446,7 +471,7 @@ function updatePortfolioRowQuote(code, shouldFlash = true) {
 
   const q = item.quote || {};
   const price = quotePriceOrNull(q);
-  const change = price !== null ? (q.change ?? 0) : 0;
+  const change = pfHoldingDailyStats(item).change;
   const changePct = price !== null ? (q.change_pct ?? null) : null;
   const qty = item.quantity;
   const avgPrice = pfAvgPriceKrw(item);
@@ -469,12 +494,12 @@ function updatePortfolioRowQuote(code, shouldFlash = true) {
   const setHtml = (sel, html) => {
     const el = tr.querySelector(sel);
     if (!el) return;
-    const button = sel === '.pf-col-changepct' && el.querySelector('.js-pf-open-pair-summary');
+    const button = el.querySelector('.js-pf-performance-tooltip');
     if (button) {
       const next = document.createElement('template');
       next.innerHTML = html;
-      const nextButton = next.content.querySelector('.js-pf-open-pair-summary');
-      if (nextButton?.dataset.longCode === button.dataset.longCode) {
+      const nextButton = next.content.querySelector('.js-pf-performance-tooltip');
+      if (nextButton && nextButton.dataset.metric === button.dataset.metric) {
         // 시세 갱신 중에도 클릭 대상과 키보드 포커스를 유지한다.
         button.innerHTML = nextButton.innerHTML;
         return;
@@ -488,8 +513,10 @@ function updatePortfolioRowQuote(code, shouldFlash = true) {
   const heatRow = { ...item, price, changePct, change };
   setText('.pf-col-curprice', price !== null ? pfFmtPortfolioValue(price) : '-');
   setHtml('.pf-col-changepct', pfChangeCellHtml(heatRow));
+  setHtml('.pf-col-change', pfDailyAmountCellHtml(item, 'change'));
+  setHtml('.pf-col-daypnl', pfDailyAmountCellHtml(item, 'dailyPnl'));
   pfHeatApplyRow(tr, heatRow);
-  setHtml('.pf-col-return', `<span class="pf-return ${returnClass(returnPct)}">${returnPct !== null ? fmtPct(returnPct) : '-'}</span>`);
+  setHtml('.pf-col-return', pfPerformanceCellHtml(item, `<span class="pf-return ${returnClass(returnPct)}">${returnPct !== null ? fmtPct(returnPct) : '-'}</span>`, 'returnPct'));
   setText('.pf-col-mktval', marketValue !== null ? pfFmtPortfolioValue(marketValue) : '-');
   setText('.pf-col-invested', tradingValue !== null ? fmtKrw(tradingValue) : '-');
   setText('.pf-col-divyield', dividendYield !== null ? fmtPct(dividendYield, false) : '-');

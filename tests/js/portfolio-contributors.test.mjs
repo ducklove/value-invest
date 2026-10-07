@@ -17,7 +17,7 @@ function setup(t) {
   w.quotePriceOrNull = q => q?.price ?? null;
   w._pfRenderColToggles = () => {};
   w._renderSummarySparklines = () => {};
-  for (const name of ['portfolio-store', 'portfolio-render', 'portfolio-contributors', 'portfolio-events']) {
+  for (const name of ['portfolio-store', 'portfolio-data', 'portfolio-render', 'portfolio-contributors', 'portfolio-events']) {
     const script = w.document.createElement('script');
     script.textContent = source(name);
     w.document.body.appendChild(script);

@@ -203,7 +203,7 @@ function renderPortfolio(options = {}) {
     const q = item.quote || {};
     const cur = item.currency || 'KRW';
     const price = quotePriceOrNull(q);
-    const change = price !== null ? (q.change ?? 0) : 0;
+    const { change, dailyPnl } = pfHoldingDailyStats(item);
     const changePct = price !== null ? (q.change_pct ?? null) : null;
     const qty = item.quantity;
     const avgPrice = Number(item.avg_price || 0);
@@ -213,7 +213,6 @@ function renderPortfolio(options = {}) {
     const marketValue = price !== null ? qty * price : null;
     const rawReturn = avgPriceKrw > 0 && price !== null ? ((price - avgPriceKrw) / avgPriceKrw * 100) : null;
     const returnPct = rawReturn !== null && qty < 0 ? -rawReturn : rawReturn;
-    const dailyPnl = price !== null ? qty * change : 0;
     // Derived columns added on the client so sorting and live edits use
     // the same values the row cells render:
     //   dividendAmount — trailing dividend per share × quantity.
@@ -326,6 +325,7 @@ function renderPortfolio(options = {}) {
     totalDailyPnl += r.dailyPnl;
     if (r.dividendAmount !== null) totalDividend += r.dividendAmount;
   });
+  const dailyPnlComplete = rows.every(r => r.dailyPnl !== null);
 
   // Sort rows: group sort (primary, if on) + column sort (secondary)
   if (!summaryOnly && (PfStore.sort.groupSort || PfStore.sort.key)) {
@@ -519,7 +519,7 @@ function renderPortfolio(options = {}) {
   // 금일 정산(prevDay.regular_close)은 NAV 좌수(latestSnap)에만 쓰고 Today 값을 바꾸지 않는다.
   // Table footer uses quote-session changes; Today uses the settlement basis.
   const tableDailyBaseValue = totalMarketValue - totalDailyPnl;
-  const dailyReturnPct = tableDailyBaseValue > 0 ? (totalDailyPnl / tableDailyBaseValue * 100) : null;
+  const dailyReturnPct = dailyPnlComplete && tableDailyBaseValue > 0 ? (totalDailyPnl / tableDailyBaseValue * 100) : null;
 
   // --- Monthly return (MTD) ---
   const _mtd = _periodReturn(PfStore.snapshots.monthEnd, 'nav');
@@ -620,6 +620,11 @@ function renderPortfolio(options = {}) {
   if (typeof pfHouseholdPortfolioValueChanged === 'function') {
     pfHouseholdPortfolioValueChanged(grandTotalMarketValue);
   }
+  const dailyPnlHtml = () => `<span class="pf-return ${returnClass(dailyPnlComplete ? totalDailyPnl : null)}">${dailyPnlComplete ? pfFmtSignedPortfolioValue(totalDailyPnl) : '-'}</span>`;
+  if (summaryOnly) {
+    const dailyCell = tfoot?.querySelector('.pf-col-daypnl');
+    if (dailyCell) dailyCell.innerHTML = dailyPnlHtml();
+  }
   if (summaryOnly) return;
 
   // Table body — apply FX conversion to price columns
@@ -681,6 +686,7 @@ function renderPortfolio(options = {}) {
     const editAttrs = isSaving ? ' disabled' : '';
     const saveAttrs = isSaving ? ' disabled aria-busy="true"' : '';
     const rowClass = isSaving ? ' class="pf-row-saving" aria-busy="true"' : '';
+    const pair = pfPairRowPresentation(r, rows);
     const metadataOnly = typeof pfAccountNeedsSelection === 'function' && !!pfAccountNeedsSelection();
     const balanceAttrs = metadataOnly ? ' disabled data-balance-locked title="증권사 잔고 또는 계좌별 잔고에서 관리합니다"' : editAttrs;
     const canEditAvgPriceCurrency = !metadataOnly && pfCanEditAvgPriceCurrency(r.stock_code);
@@ -693,14 +699,14 @@ function renderPortfolio(options = {}) {
     const canDragRow = canManualDrag && (PfStore.accountId || pfPairAnchorCode(r) === r.stock_code);
     const dragHandle = canDragRow
       ? '<button type="button" class="pf-row-drag-handle js-pf-row-drag" draggable="true" title="드래그하여 순서 변경" aria-label="드래그하여 순서 변경">&#x2630;</button>'
-      : '';
+      : (pair.marker || '<span class="pf-row-position" aria-hidden="true"></span>');
     const safeName = escapeHtml(r.stock_name);
     const signalBadgeHtml = typeof pfActionBoardBadgesForCode === 'function'
       ? pfActionBoardBadgesForCode(r.stock_code)
       : '';
     const stockIdentity = `<span class="pf-stock-main"><span class="pf-stock-line"><a href="#" class="pf-stock-link js-pf-open-insight" title="${safeName}"><strong>${safeName}</strong></a><span class="pf-stock-code">${displayCode}</span>${curTag}${liveDotE}${signalBadgeHtml}</span>${tagHtml}</span>`;
     const stockEditIdentity = `<span class="pf-stock-main pf-stock-edit-main"><input class="pf-edit-input pf-stock-name-edit js-pf-edit-name" id="pfEditName" value="${safeName}" type="text" maxlength="80" autocomplete="off"${editAttrs}><span class="pf-stock-line"><span class="pf-stock-code">${displayCode}</span>${curTag}${liveDotE}${signalBadgeHtml}</span>${tagHtml}</span>`;
-    const stockCellClass = canDragRow ? 'pf-stock-cell pf-stock-cell-with-drag js-pf-analyze' : 'pf-stock-cell js-pf-analyze';
+    const stockCellClass = 'pf-stock-cell pf-stock-cell-with-drag js-pf-analyze';
     const heatAttrs = pfHeatRowAttrs(r);
     const changeCell = pfChangeCellHtml(r);
     // 메모 — 기본 숨김 컬럼. 폭이 부족하면 셀 안에서 줄바꿈되도록
@@ -721,19 +727,21 @@ function renderPortfolio(options = {}) {
       groupEditCell += `<select class="pf-pair-select js-pf-pair" title="롱숏 페어 — 묶을 롱 종목 선택"${editAttrs}>${pairOpts}</select>`;
     }
     if (isEditing) {
-      return `<tr data-code="${safeCode}"${rowClass}${heatAttrs}>
-        <td class="pf-stock-cell pf-stock-cell-editing">${stockEditIdentity}</td>
+      return `<tr data-code="${safeCode}"${rowClass}${heatAttrs}${pair.attrs}>
+        <td class="pf-stock-cell pf-stock-cell-with-drag pf-stock-cell-editing">${pair.marker || '<span class="pf-row-position" aria-hidden="true"></span>'}${stockEditIdentity}</td>
         <td class="pf-col-group">${groupEditCell}</td>
         <td class="pf-col-num pf-col-changepct">${changeCell}</td>
+        <td class="pf-col-num pf-col-change">${pfDailyAmountCellHtml(r, 'change')}</td>
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
         <td class="pf-col-num pf-col-benchmark js-pf-bench-picker" title="벤치마크 변경">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
         <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtTradingValueKrw(r.tradingValue) : '-'}</td>
         <td class="pf-col-num pf-col-buyprice"><span class="pf-price-edit-wrap"><input class="pf-edit-input js-pf-edit-price" id="pfEditPrice" value="${r.avgPrice}" type="number" step="any"${balanceAttrs}>${avgPriceCurrencyControl}</span></td>
         <td class="pf-col-num pf-col-target"${targetTitle}><span class="pf-target-edit-wrap"><input class="pf-edit-input js-pf-edit-target" id="pfEditTarget" value="${escapeHtml(targetInputValue)}" type="text" inputmode="decimal" placeholder="자동 또는 BPS*0.4+DPS*10" title="${escapeHtml(targetHelp)}"${editAttrs}><button type="button" class="pf-target-clear js-pf-target-clear" title="목표가 표시 안 함 (- 로 고정)"${editAttrs}>×</button></span></td>
         <td class="pf-col-num pf-col-achiev"${targetTitle}>${r.achievementPct !== null ? fmtPct(r.achievementPct, false) : '-'}</td>
-        <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
+        <td class="pf-col-num pf-col-return">${pfPerformanceCellHtml(r, `<span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span>`, 'returnPct')}</td>
         <td class="pf-col-num pf-col-qty"><input class="pf-edit-input js-pf-edit-qty" id="pfEditQty" value="${r.qty}" type="number" step="${qtyStep}"${balanceAttrs}></td>
         <td class="pf-col-num pf-col-mktval">${r.marketValue !== null ? _fp(r.marketValue) : '-'}</td>
+        <td class="pf-col-num pf-col-daypnl">${pfDailyAmountCellHtml(r, 'dailyPnl')}</td>
         <td class="pf-col-num pf-col-dividend">${r.dividendAmount !== null ? _fp(r.dividendAmount) : '-'}</td>
         <td class="pf-col-num pf-col-divyield">${r.dividendYield !== null ? fmtPct(r.dividendYield, false) : '-'}</td>
         <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
@@ -745,19 +753,21 @@ function renderPortfolio(options = {}) {
       </div></td>
       </tr>`;
     }
-    return `<tr data-code="${safeCode}"${heatAttrs}>
+    return `<tr data-code="${safeCode}"${heatAttrs}${pair.attrs}>
       <td class="${stockCellClass}">${dragHandle}${stockIdentity}</td>
       <td class="pf-col-group">${groupHtml}</td>
       <td class="pf-col-num pf-col-changepct">${changeCell}</td>
+      <td class="pf-col-num pf-col-change">${pfDailyAmountCellHtml(r, 'change')}</td>
       <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
       <td class="pf-col-num pf-col-benchmark" title="수정모드에서 변경">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
       <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtTradingValueKrw(r.tradingValue) : '-'}</td>
       <td class="pf-col-num pf-col-buyprice">${pfFmtAvgPriceCell(r, _fp)}</td>
       <td class="pf-col-num pf-col-target"${targetTitle}>${r.targetPrice !== null ? _fp(r.targetPrice) : '-'}</td>
       <td class="pf-col-num pf-col-achiev"${targetTitle}>${r.achievementPct !== null ? fmtPct(r.achievementPct, false) : '-'}</td>
-      <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span></td>
+      <td class="pf-col-num pf-col-return">${pfPerformanceCellHtml(r, `<span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span>`, 'returnPct')}</td>
       <td class="pf-col-num pf-col-qty">${fmtQty(r.qty)}</td>
       <td class="pf-col-num pf-col-mktval">${r.marketValue !== null ? _fp(r.marketValue) : '-'}</td>
+      <td class="pf-col-num pf-col-daypnl">${pfDailyAmountCellHtml(r, 'dailyPnl')}</td>
       <td class="pf-col-num pf-col-dividend">${r.dividendAmount !== null ? _fp(r.dividendAmount) : '-'}</td>
       <td class="pf-col-num pf-col-divyield">${r.dividendYield !== null ? fmtPct(r.dividendYield, false) : '-'}</td>
       <td class="pf-col-num pf-col-weight">${fmtPct(weight)}</td>
@@ -794,6 +804,7 @@ function renderPortfolio(options = {}) {
     <td>합계</td>
     <td class="pf-col-group"></td>
     <td class="pf-col-num pf-col-changepct">${fmtChangePct(dailyReturnPct, totalDailyPnl)}</td>
+    <td class="pf-col-change"></td>
     <td class="pf-col-curprice"></td>
     <td class="pf-col-benchmark"></td>
     <td class="pf-col-invested"></td>
@@ -803,6 +814,7 @@ function renderPortfolio(options = {}) {
     <td class="pf-col-num pf-col-return"><span class="pf-return ${returnClass(totalReturnPct)}">${fmtPct(totalReturnPct)}</span></td>
     <td class="pf-col-qty"></td>
     <td class="pf-col-num pf-col-mktval">${_fp(totalMarketValue)}</td>
+    <td class="pf-col-num pf-col-daypnl">${dailyPnlHtml()}</td>
     <td class="pf-col-num pf-col-dividend">${totalDividend > 0 ? _fp(totalDividend) : '-'}</td>
     <td class="pf-col-num pf-col-divyield">${totalDividend > 0 && totalMarketValue > 0 ? fmtPct(totalDividend / totalMarketValue * 100, false) : '-'}</td>
     <td class="pf-col-num pf-col-weight">${fmtPct(grandTotalMarketValue > 0 ? totalMarketValue / grandTotalMarketValue * 100 : 0)}</td>
@@ -852,7 +864,7 @@ function renderPortfolio(options = {}) {
     });
   }
   _pfApplyFocus();
-  if (typeof pfRefreshPairSummary === 'function') pfRefreshPairSummary();
+  if (typeof pfRefreshPerformanceTooltip === 'function') pfRefreshPerformanceTooltip();
 }
 
 // --- /portfolio?focus=CODE 딥링크 — 보유 행으로 한 번 스크롤하고 잠시 강조한다 ---

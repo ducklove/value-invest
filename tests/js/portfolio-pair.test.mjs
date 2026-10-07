@@ -103,22 +103,25 @@ test("pfPairStats prefers avg_price_krw over the native avg_price", () => {
   assert.equal(stats.totalPnl, 100000);
 });
 
-test("existing change figures open the pair on both legs without adding badges", () => {
+test("performance figures expose a tooltip trigger on every holding without adding badges", () => {
   const w = loadPairDom();
   w.PfStore.items = [LONG, SHORT, { stock_code: "005930", stock_name: "삼성전자", quantity: 5 }];
 
-  for (const item of [LONG, SHORT]) {
-    const html = w.pfPairChangeCellHtml(item, '<span>+1.23%</span>');
-    assert.match(html, /js-pf-open-pair-summary/);
-    assert.match(html, /data-long-code="006800"/);
+  for (const item of w.PfStore.items) {
+    const html = w.pfPerformanceCellHtml(item, '<span>+1.23%</span>');
+    assert.match(html, /js-pf-performance-tooltip/);
+    assert.ok(html.includes(`data-code="${item.stock_code}"`));
+    assert.match(html, /data-metric="changePct"/);
+    assert.match(html, /tabindex="0"/);
     assert.doesNotMatch(html, /pf-stock-tag|pf-pair-chip/);
+    assert.doesNotMatch(html, /<button/);
     const holder = w.document.createElement('div');
     holder.innerHTML = html;
     assert.equal(holder.textContent, '+1.23%');
   }
-  assert.equal(w.pfPairChangeCellHtml(w.PfStore.items[2], '+1%'), '+1%');
   w.PfStore.accountId = 'manual';
-  assert.equal(w.pfPairChangeCellHtml(SHORT, '+1%'), '+1%');
+  assert.match(w.pfPerformanceCellHtml(SHORT, '+1%'), /js-pf-performance-tooltip/);
+  w.close();
 });
 
 test("pfPairShortsForLong finds every short pointing at the long", () => {
@@ -188,30 +191,55 @@ test('shorts stay below their long and moving or dropping onto a pair preserves 
   w.close();
 });
 
-test('combined percentage popup updates in place with live quotes and supports Escape', () => {
+test('hover previews combined percentage and updates in place with live quotes', () => {
   const w = loadPairDom();
   w.PfStore.items = [{...LONG, quote: {price: 12000, previous_close: 10000}},
     {...SHORT, quantity: -50, quote: {price: 12000, previous_close: 10000}}];
   w.pfFmtPortfolioValue = v => String(v);
   w.returnClass = v => v > 0 ? 'positive' : v < 0 ? 'negative' : '';
   w.fmtPct = v => `${v > 0 ? '+' : ''}${v.toFixed(2)}%`;
-  w._positionPortfolioPopupMenu = () => {};
   appendScript(w, read('static', 'js', 'portfolio-pair.js'));
-  const button = w.document.createElement('button');
-  button.className = 'js-pf-open-pair-summary';
-  w.document.body.appendChild(button);
-  w.pfShowPairSummary('006800', {target: button});
-  const menu = w.document.getElementById('pfPairSummary');
-  assert.equal(menu.querySelector('.pf-pair-value').textContent, '+20.00%');
+  w.document.body.insertAdjacentHTML('beforeend', `<table><tbody id="pfBody"><tr data-code="006800"><td>${w.pfPerformanceCellHtml(LONG, '+20%')}</td></tr></tbody></table>`);
+  const trigger = w.document.querySelector('.js-pf-performance-tooltip');
+  trigger.getClientRects = () => [{left: 0, right: 100, top: 100, bottom: 120}];
+  trigger.getBoundingClientRect = () => trigger.getClientRects()[0];
+  w.pfPreviewPerformanceTooltip({target: trigger, relatedTarget: null}, true);
+  const tooltip = w.document.getElementById('pfPerformanceTooltip');
+  assert.equal(tooltip.getAttribute('role'), 'tooltip');
+  assert.equal(tooltip.querySelector('.pf-tooltip-line strong').textContent, '+20.00%');
+  assert.notEqual(w.document.activeElement, trigger);
   w.PfStore.items[1].quote.price = 13000;
   w.updatePortfolioRowQuote('MIRAE_FUT', false);
-  assert.equal(w.document.getElementById('pfPairSummary'), menu);
-  assert.equal(menu.querySelector('.pf-pair-value').textContent, '+10.00%');
-  w.document.dispatchEvent(new w.KeyboardEvent('keydown', {key: 'Escape'}));
-  assert.equal(w.document.getElementById('pfPairSummary'), null);
-  w.pfShowPairSummary('006800', {target: button});
+  assert.equal(w.document.getElementById('pfPerformanceTooltip'), tooltip);
+  assert.equal(tooltip.querySelector('.pf-tooltip-line strong').textContent, '+10.00%');
   w.PfStore.items[1].pair_long_code = null;
-  w.pfRefreshPairSummary();
-  assert.equal(w.document.getElementById('pfPairSummary'), null);
+  w.pfRefreshPerformanceTooltip();
+  assert.equal(tooltip.querySelector('.pf-tooltip-title').textContent, LONG.stock_name);
+  assert.doesNotMatch(tooltip.textContent, /합산/);
+  w.pfPreviewPerformanceTooltip({target: trigger, relatedTarget: null}, false);
+  assert.equal(w.document.getElementById('pfPerformanceTooltip'), null);
+  assert.equal(trigger.hasAttribute('aria-describedby'), false);
+  w.close();
+});
+
+test('daily change amounts use one-unit price movement and signed quantities; missing prices stay unknown', () => {
+  const w = loadPairDom();
+  const short = {...SHORT, quote: {price: 12000, previous_close: 11000}};
+  assert.equal(w.pfHoldingDailyStats(short).change, 1000);
+  assert.equal(w.pfHoldingDailyStats(short).dailyPnl, -100000);
+  assert.equal(w.pfHoldingDailyStats({...short, quote: {price: 12000}}).dailyPnl, null);
+  assert.equal(w.pfHoldingDailyStats({...short, quote: {price: null, previous_close: 11000}}).change, null);
+  w.close();
+});
+
+test('connected rows reserve a marker column on every pair leg including multiple shorts', () => {
+  const w = loadPairDom();
+  const second = {...SHORT, stock_code: 'SECOND'};
+  const items = [LONG, SHORT, second];
+  assert.match(w.pfPairRowPresentation(LONG, items).attrs, /data-pair-position="first"/);
+  assert.match(w.pfPairRowPresentation(SHORT, items).marker, /├/);
+  assert.match(w.pfPairRowPresentation(second, items).marker, /└/);
+  w.PfStore.accountId = 'manual';
+  assert.equal(w.pfPairRowPresentation(SHORT, items).marker, '');
   w.close();
 });

@@ -314,7 +314,7 @@ def test_portfolio_stock_click_uses_explicit_insight_link_handler():
 
     assert 'const stockIdentity = `<span class="pf-stock-main"><span class="pf-stock-line"><a href="#" class="pf-stock-link js-pf-open-insight"' in render
     assert '${dragHandle}${stockIdentity}' in render
-    assert "const stockCellClass = canDragRow ? 'pf-stock-cell pf-stock-cell-with-drag js-pf-analyze' : 'pf-stock-cell js-pf-analyze';" in render
+    assert "const stockCellClass = 'pf-stock-cell pf-stock-cell-with-drag js-pf-analyze';" in render
     assert '<td class="${stockCellClass}">${dragHandle}${stockIdentity}</td>' in render
     assert ".pf-stock-cell-with-drag" in styles
     assert "grid-template-columns: 16px minmax(0, 1fr);" in styles
@@ -379,27 +379,28 @@ def test_portfolio_long_short_pair_contract():
     assert "function pfPairStats(longItem, shortItems)" in data
     assert "function pfPairShortsForLong(longCode" in data
     assert "function pfKeepPairsTogether(items)" in data
-    assert "function pfPairChangeCellHtml(item, contents)" in data
-    # 렌더: 배지 없이 등락률 클릭으로 합산 성과, 숏은 롱 바로 아래 고정.
+    assert "function pfPerformanceCellHtml(item, contents, metric = 'changePct')" in data
+    assert "function pfPairRowPresentation(item, items)" in data
+    # 렌더: 연결된 묶음 표시와 성과 툴팁, 숏은 롱 바로 아래 고정.
     assert "_renderPortfolioRowPairChip" not in data + render
     assert "rows = pfKeepPairsTogether(rows)" in render
     assert "const dragHandle = canDragRow" in render
     assert "js-pf-pair" in render
     assert "pf-pair-select" in render
-    # 위임 핸들러 — 등락률 클릭(요약 팝오버)과 select 변경(저장).
-    assert "pfShowPairSummary(el.dataset.longCode || '', e)" in events
+    # 위임 핸들러 — 가리키거나 포커스할 때 성과 툴팁과 select 변경(저장).
+    assert "pfPreviewPerformanceTooltip(event, type === 'pointerover' || type === 'focusin')" in events
     assert "pfChangePair(host.dataset.code, el.value || null)" in events
     # 페어 액션 파일: API 계약과 일간 합산 성과.
     assert "async function pfChangePair(stockCode, longCode)" in pair
-    assert "function pfShowPairSummary(longCode, e)" in pair
+    assert "function pfPerformanceTooltipHtml(item, metric)" in pair
     assert "/api/portfolio/${encodeURIComponent(stockCode)}/pair" in pair
-    assert "합산 등락률" in pair
-    assert "function pfRefreshPairSummary()" in pair
+    assert "합산 ${cumulative ? '수익률' : '등락률'}" in pair
+    assert "function pfRefreshPerformanceTooltip()" in pair
     # 스타일 홈: portfolio.css.
     assert ".pf-pair-chip" not in styles
-    assert ".pf-pair-change" in styles
+    assert ".pf-pair-connector" in styles
     assert ".pf-pair-select" in styles
-    assert ".pf-pair-menu" in styles
+    assert ".pf-performance-tooltip" in styles
 
 
 def test_portfolio_insight_modal_renders_valuation_cards():
@@ -911,7 +912,7 @@ def test_color_heat_mode_shares_one_state_source_across_render_and_tick():
     assert "const changeCell = pfChangeCellHtml(r);" in render
     assert "const heatAttrs = pfHeatRowAttrs(r);" in render
     assert '<td class="pf-col-num pf-col-changepct">${changeCell}</td>' in render
-    assert 'return `<tr data-code="${safeCode}"${heatAttrs}>' in render
+    assert 'return `<tr data-code="${safeCode}"${heatAttrs}${pair.attrs}>' in render
     assert "setHtml('.pf-col-changepct', pfChangeCellHtml(heatRow));" in data
     assert "pfHeatApplyRow(tr, heatRow);" in data
 

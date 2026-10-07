@@ -382,8 +382,11 @@ body.pf-mobile-simple .pf-stock-cell {
   white-space: normal;
 }
 body.pf-mobile-simple .pf-stock-cell-with-drag {
-  display: block;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  column-gap: 3px;
 }
+body.pf-mobile-simple .pf-pair-connector, body.pf-mobile-simple .pf-row-position { width: 10px; }
 body.pf-mobile-simple .pf-table tbody td:not(.pf-stock-cell),
 body.pf-mobile-simple .pf-table tfoot td:not(:first-child) {
   white-space: nowrap;
@@ -534,4 +537,17 @@ body.pf-mobile-simple .pf-nav-chart-container.pf-group-composition {
      좁은 폭에서는 셀 안에서 여러 줄로 접히게 두는 편이 낫다. */
   .pf-col-memo { min-width: 88px; max-width: 140px; }
 }
+
+/* 일간 금액 열을 켠 간편 보기: 종목명 폭을 확보하고 가로로 넘겨 본다. */
+body.pf-mobile-simple:has(.js-pf-col-toggle[data-col-key="change"]:checked, .js-pf-col-toggle[data-col-key="daypnl"]:checked) {
+  --pf-simple-daily-width: 560px;
+}
+body.pf-mobile-simple .pf-table { min-width: var(--pf-simple-daily-width, 0); }
+body.pf-mobile-simple .pf-col-change { width: 72px; }
+body.pf-mobile-simple .pf-col-daypnl { width: 88px; }
+body.pf-mobile-simple .pf-table tbody td.pf-stock-cell {
+  position: sticky; left: 0; z-index: 1; background-color: inherit;
+}
+body.pf-mobile-simple .pf-table thead th.pf-col-name,
+body.pf-mobile-simple .pf-table tfoot td:first-child { left: 0; z-index: 4; }
 

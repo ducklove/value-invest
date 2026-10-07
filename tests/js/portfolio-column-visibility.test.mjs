@@ -38,6 +38,7 @@ function loadColumnDom(stored) {
     url: "https://app.example.com/",
   });
   const { window: w } = dom;
+  w.matchMedia = () => ({matches: false, addEventListener() {}});
   if (stored !== undefined) w.localStorage.setItem("pf_col_vis", JSON.stringify(stored));
   appendScript(w, STORE_SRC);
   appendScript(w, UTILS_SRC);
@@ -72,6 +73,27 @@ test("저장된 선택이 없던 신규 컬럼은 defaultVisible 로 떨어지�
   assert.equal(vis.group, false, "저장된 숨김 선택이 유지돼야 한다");
   assert.equal(vis.date, true, "저장된 표시 선택이 defaultVisible:false 를 이겨야 한다");
   assert.equal(vis.memo, false, "저장된 적 없는 새 컬럼은 defaultVisible 을 따른다");
+  assert.equal(vis.change, false);
+  assert.equal(vis.daypnl, false);
+});
+
+test('등락액·당일손익은 기본 숨김이며 켜고 끈 선택을 각각 저장한다', () => {
+  const w = loadColumnDom();
+  w._pfRenderColToggles();
+  for (const [key, label] of [['change', '등락액'], ['daypnl', '당일손익']]) {
+    const checkbox = w.document.querySelector(`.js-pf-col-toggle[data-col-key="${key}"]`);
+    assert.equal(checkbox.checked, false);
+    assert.equal(checkbox.parentElement.textContent.trim(), label);
+    assert.ok(injectedCss(w).includes(`.pf-col-${key} { display: none !important; }`));
+    w.pfToggleCol(key, true);
+    assert.equal(checkbox.checked, true);
+    assert.equal(JSON.parse(w.localStorage.getItem('pf_col_vis'))[key], true);
+    assert.ok(!injectedCss(w).includes(`.pf-col-${key} { display: none`));
+  }
+  w.pfToggleCol('change', false);
+  assert.equal(w._pfGetColVisibility().change, false);
+  assert.equal(w._pfGetColVisibility().daypnl, true);
+  w.close();
 });
 
 test("_pfRenderColToggles 는 기본 숨김 컬럼을 display:none 규칙으로 감춘다", () => {

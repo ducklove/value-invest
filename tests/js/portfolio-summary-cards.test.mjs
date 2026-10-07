@@ -17,6 +17,7 @@ const root = join(__dirname, "..", "..");
 const read = (...parts) => readFileSync(join(root, ...parts), "utf8");
 
 const STORE_SRC = read("static", "js", "portfolio-store.js");
+const DATA_SRC = read("static", "js", "portfolio-data.js");
 const RENDER_SRC = read("static", "js", "portfolio-render.js");
 
 function appendScript(w, source) {
@@ -42,6 +43,7 @@ function loadSummaryDom() {
   w.fmtPct = (n) => (n === null || n === undefined ? "-" : (n > 0 ? "+" : "") + n.toFixed(2) + "%");
   w._pfRenderColToggles = () => {};
   appendScript(w, STORE_SRC);
+  appendScript(w, DATA_SRC);
   appendScript(w, RENDER_SRC);
   w._renderSummarySparklines = () => {};
   return w;
