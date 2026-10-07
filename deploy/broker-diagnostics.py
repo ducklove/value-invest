@@ -1,4 +1,4 @@
-"""Read-only broker diagnostics. Never print journal messages or credentials."""
+"""Sanitized broker diagnostics; explicit optional cached-token recovery."""
 
 import asyncio
 import json
@@ -56,7 +56,14 @@ def connection_summary():
             counts[f"{owner}:{match[1]}"] += 1
     with sqlite3.connect("file:cache.db?mode=ro", uri=True) as db:
         scanners = db.execute("SELECT count(*) FROM quant_scanners WHERE json_extract(config_json,'$.enabled')=1").fetchone()[0]
-    print(json.dumps({"nh_connections": dict(counts), "enabled_scanners": scanners}))
+    processes = 0
+    for process in Path("/proc").glob("[0-9]*"):
+        try:
+            if (process / "cwd").resolve() == Path.cwd() and b"main:app" in (process / "cmdline").read_bytes().split(b"\0"):
+                processes += 1
+        except (OSError, RuntimeError):
+            continue
+    print(json.dumps({"nh_connections": dict(counts), "enabled_scanners": scanners, "app_processes": processes}))
 
 
 async def probe(port):
@@ -112,10 +119,32 @@ async def subscription_probe():
             print(json.dumps(result))
 
 
+async def refresh_tokens():
+    load_dotenv(Path.cwd() / ".env")
+    from core import http
+    from repositories import brokers, db
+    from services.brokers import namuh
+
+    try:
+        await http.init_http_clients()
+        keys = {(link["google_sub"], link["credential_id"]) for link in await brokers.list_links() if link["provider"] == "namuh"}
+        for index, (user, cid) in enumerate(keys):
+            try:
+                await namuh.token(user, cid, force=True)
+                print(json.dumps({"credential_index": index, "token_refreshed": True}))
+            except Exception as exc:
+                print(json.dumps({"credential_index": index, "token_refreshed": False, "error": type(exc).__name__}))
+    finally:
+        await http.close_http_clients()
+        await db.close_db()
+
+
 async def main():
     journal_summary()
     connection_summary()
     await asyncio.gather(probe(7070), probe(7080))
+    if os.environ.get("REFRESH_TOKEN") == "true":
+        await refresh_tokens()
     if os.environ.get("SUBSCRIPTION_PROBE") == "true":
         await subscription_probe()
 

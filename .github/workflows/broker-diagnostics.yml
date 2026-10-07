@@ -7,6 +7,10 @@ on:
         description: Check one quote registration using cached tokens (no token renewal)
         type: boolean
         default: false
+      refresh_token:
+        description: Renew linked NH cached tokens once to recover stale sessions
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -19,6 +23,7 @@ jobs:
       - name: Read sanitized broker errors and check NH TLS
         env:
           SUBSCRIPTION_PROBE: ${{ inputs.subscription_probe }}
+          REFRESH_TOKEN: ${{ inputs.refresh_token }}
         run: |
           cd "${APP_DIR:-/home/cantabile/Works/value_invest}"
           git fetch --quiet origin master
