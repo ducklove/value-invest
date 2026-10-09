@@ -153,3 +153,25 @@ async def test_upstream_normal_close_reports_disconnection_before_retry(monkeypa
     assert conn.state == "reconnecting"
     assert conn.listener.qsize() == 2
     assert (await conn.listener.get())["type"] == "stream_status"
+
+
+async def test_private_socket_relay_does_not_write_legacy_global_cache(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    conn = kis_ws_manager.WsConnection(SimpleNamespace(slot_id=0, get_approval_key=AsyncMock(return_value="test")), shared_cache=False)
+    monkeypatch.setattr(kis_ws_manager, "_quote_cache", {})
+    monkeypatch.setattr(kis_ws_manager, "_parse_h0stcnt0", lambda _: {"code":"005930","price":71000})
+    async def sync():
+        conn._current_subs = {("005930", "H0UNCNT0")}
+    monkeypatch.setattr(conn, "sync_subscriptions", sync)
+    class Socket:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def __aiter__(self):
+            yield "0|H0UNCNT0|001|private-user-tick"
+            conn._stop_event.set()
+    monkeypatch.setattr(kis_ws_manager.websockets, "connect", lambda *args, **kwargs: Socket())
+    await conn._ws_loop()
+    assert kis_ws_manager._quote_cache == {}
+    messages = [await conn.listener.get() for _ in range(conn.listener.qsize())]
+    assert any(message.get("price") == 71000 for message in messages)

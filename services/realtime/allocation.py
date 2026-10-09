@@ -29,11 +29,11 @@ def sanitize(requested: object) -> dict[str, list[str]]:
     return result
 
 
-def fair_codes(demands: dict[str, dict[str, list[str]]]) -> list[str]:
-    """One turn per user in each priority class; tabs cannot multiply a user's quota."""
+def fair_codes(demands: dict[str | None, dict[str, list[str]]]) -> list[str]:
+    """One turn per user; all anonymous clients share a single guest demand bucket."""
     result, seen = [], set()
     for group in PRIORITIES:
-        lists = [demands[user].get(group, []) for user in sorted(demands)]
+        lists = [demands[user].get(group, []) for user in sorted(demands, key=lambda user: user or "")]
         for index in range(max((len(codes) for codes in lists), default=0)):
             for codes in lists:
                 if index < len(codes) and codes[index] not in seen:

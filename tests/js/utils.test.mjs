@@ -31,6 +31,21 @@ function loadUtils() {
   return dom.window;
 }
 
+test('토스 체결은 보완된 기준가로 등락률을 갱신하고 기준가가 없으면 이전 등락을 표시하지 않는다', () => {
+  const w = loadUtils();
+  try {
+    const at = new Date().toISOString();
+    const next = w.mergeQuoteSnapshot({price:70000, previous_close:69000, change:1000, change_pct:1.45},
+      {price:71000, source:'toss_ws', as_of:at});
+    assert.equal(next.change, 2000);
+    assert.equal(next.change_pct, 2000 / 69000 * 100);
+    const unknown = w.mergeQuoteSnapshot({price:70000, change:1000, change_pct:1.45},
+      {price:71000, source:'toss_ws', as_of:at});
+    assert.equal(unknown.change, undefined);
+    assert.equal(unknown.change_pct, undefined);
+  } finally {w.close();}
+});
+
 test("escapeHtml neutralizes HTML metacharacters", () => {
   const w = loadUtils();
   assert.equal(

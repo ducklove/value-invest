@@ -83,14 +83,14 @@ test('공통 시세는 자동 구독하고 토스 체결을 표시하며 NH 때�
   assert.equal(w.document.getElementById('pfWsToggle').hidden, true);
   ws.onmessage({data: JSON.stringify({type:'subscriptions', ws:['005930','AAPL'], rest:[], shared:true})});
   ws.onmessage({data: JSON.stringify({type:'stream_status', stream_state:'connected', subscribed:2, receiving:1, fallback:0,
-    slots_connected:1, slots_active:1, sources:[{provider:'toss', requested:2, subscribed:2, state:'live'}]})});
+    slots_connected:1, slots_active:1, sources:[{provider:'toss', scope:'shared', requested:2, subscribed:2, state:'live'}]})});
   ws.onmessage({data: JSON.stringify({type:'quote', code:'AAPL', price:280000, source:'toss_ws', as_of:new Date().toISOString()})});
   assert.equal(qm.isLive('AAPL'), true);
   qm.setNamuhLinked(true);
   qm._syncNamuhFallback();
   assert.ok(!ws.sent.some(message => ['release','acquire','takeover'].includes(message.action)));
   assert.match(w.document.getElementById('pfWsStatus').textContent, /실시간 2종목/);
-  assert.match(w.document.getElementById('pfWsDetail').textContent, /토스 2\/2/);
+  assert.match(w.document.getElementById('pfWsDetail').textContent, /토스 공용 2\/2/);
   ws.onmessage({data: JSON.stringify({type:'stream_status', stream_state:'connecting', slots_connected:0, disconnected_codes:['AAPL']})});
   assert.equal(qm.isLive('AAPL'), false);
   qm.disconnect();

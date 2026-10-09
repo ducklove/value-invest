@@ -1,4 +1,4 @@
-"""Authenticated browsers subscribe to the server-owned market-data hub."""
+"""Users receive their private broker prices; guests and users share Toss prices."""
 
 from __future__ import annotations
 
@@ -40,14 +40,11 @@ async def ws_quotes(websocket: WebSocket):
     await websocket.accept()
     hub = get_hub()
     user = await get_current_user(websocket)
-    client = hub.attach(user["google_sub"]) if user else None
+    client = hub.attach(user["google_sub"] if user else None)
     send_lock = asyncio.Lock()
 
     def status():
-        if client:
-            return hub.status(client)
-        return {"type": "stream_status", "shared": True, "active": False, "can_takeover": False,
-                "stream_state": "offline", "slots_connected": 0, "sources": [], "disconnected_codes": []}
+        return {**hub.status(client), "guest": client.user is None}
 
     async def send(payload):
         async with send_lock:
@@ -62,17 +59,15 @@ async def ws_quotes(websocket: WebSocket):
 
     task = None
     try:
-        await send({**status(), "type": "ws_status", "active": client is not None,
-                    "forbidden": client is None})
-        if client:
-            task = asyncio.create_task(relay(), name="shared-quote-client")
+        await send({**status(), "type": "ws_status", "active": True, "forbidden": False})
+        task = asyncio.create_task(relay(), name="shared-quote-client")
         while True:
             try:
                 raw = await asyncio.wait_for(websocket.receive_text(), timeout=60)
             except TimeoutError:
                 raw = '{"action":"ping"}'
             current = await get_current_user(websocket)
-            if client and (not current or current["google_sub"] != client.user):
+            if (current["google_sub"] if current else None) != client.user:
                 await websocket.close(code=1008)
                 break
             if len(raw) > 64000:
@@ -89,22 +84,17 @@ async def ws_quotes(websocket: WebSocket):
                 await send({**status(), "type": "pong"})
             elif action == "subscribe":
                 requested = sanitize(message.get("requested"))
-                if client:
-                    hub.subscribe(client, requested)
-                else:
-                    await send({"type": "subscriptions", "ws": [], "rest": [code for codes in requested.values() for code in codes], "shared": True})
+                hub.subscribe(client, requested)
             elif action in {"acquire", "takeover"}:
                 # Cached frontends may still send these; they cannot evict another browser.
-                await send({**status(), "type": "ws_status", "active": client is not None,
-                            "forbidden": client is None})
-            elif action == "release" and client:
+                await send({**status(), "type": "ws_status", "active": True, "forbidden": False})
+            elif action == "release":
                 hub.subscribe(client, {})
                 await send({**status(), "type": "ws_status", "active": True, "released": True})
     except (WebSocketDisconnect, RuntimeError, TimeoutError, OSError):
         pass
     finally:
-        if client:
-            hub.detach(client)
+        hub.detach(client)
         if task:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)

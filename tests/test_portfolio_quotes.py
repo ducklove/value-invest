@@ -11,6 +11,13 @@ from services import stock_quotes
 from services.portfolio import foreign, quote_service, quotes
 
 
+@pytest.fixture(autouse=True)
+def isolated_realtime_cache(monkeypatch):
+    from services.realtime import hub as module
+    hub = module.QuoteHub()
+    monkeypatch.setattr(module, "get_hub", lambda: hub)
+
+
 @pytest.mark.asyncio
 async def test_vietnam_quote_uses_naver_and_vnd_conversion_without_yahoo_symbol_probing():
     raw = {"closePrice": "33,810", "compareToPreviousClosePrice": "100", "fluctuationsRatio": "0.30", "nationType": "VNM", "nationName": "베트남"}
@@ -46,7 +53,31 @@ async def test_authenticated_asset_quotes_prefer_private_nh_without_shared_cache
         with patch.object(portfolio_route, "get_current_user", AsyncMock(return_value=user)), \
              patch.object(brokers, "has_link", AsyncMock(return_value=linked)), \
              patch.object(realtime, "quote", side_effect=lambda user, code: tick if user == "owner" else None):
-            assert await portfolio_route._namuh_quotes_for_request(request, ["AAPL"]) == {}
+            assert await portfolio_route._realtime_quotes_for_request(request, ["AAPL"]) == {}
+
+
+@pytest.mark.asyncio
+async def test_asset_api_keeps_kis_private_and_uses_toss_for_guest_initial_and_fresh_quotes(monkeypatch):
+    from services.realtime import hub as module
+    from services.realtime.toss import normalize
+    from tests.test_realtime_hub import trade
+    hub = module.QuoteHub()
+    monkeypatch.setattr(module, "get_hub", lambda: hub)
+    hub.publish({**normalize(trade(), "005930"), "source": "kis_ws"}, user="owner")
+    request = object()
+    with patch.object(portfolio_route, "get_current_user", AsyncMock(return_value=None)):
+        assert await portfolio_route._realtime_quotes_for_request(request, ["005930"]) == {}
+    # Shared Toss ticks are available to a guest's initial and subsequent API calls.
+    hub.publish(normalize(trade(price="71000"), "005930"))
+    with patch.object(portfolio_route, "get_current_user", AsyncMock(return_value=None)), \
+         patch.object(stock_quotes, "get_bulk_quote_snapshots", AsyncMock()) as bulk, \
+         patch.object(portfolio_route, "_fetch_quote", AsyncMock()) as fetch:
+        for fresh in (False, True):
+            result = await portfolio_route.asset_quotes_batch({"codes": ["005930"], "fresh": fresh}, request)
+            assert result["005930"]["source"] == "toss_ws" and result["005930"]["price"] == 71000
+        assert (await portfolio_route.asset_quote("005930", request))["source"] == "toss_ws"
+        bulk.assert_not_awaited()
+        fetch.assert_not_awaited()
 
 
 def test_quote_from_ws_normalizes_realtime_payload():

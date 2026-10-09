@@ -1,6 +1,52 @@
 import { test, expect } from '@playwright/test';
 
 for (const width of [1440, 390]) {
+test(`게스트는 토스만 자동 구독하고 분석·최근 종목의 가격과 등락률을 갱신한다 (${width}px)`, async ({page}) => {
+  await page.setViewportSize({width, height:1000});
+  const now = new Date().toISOString();
+  await page.addInitScript(at => localStorage.setItem('guest_recent', JSON.stringify([
+    {stock_code:'005930',corp_name:'삼성전자',analyzed_at:at,quote_snapshot:{price:70000,previous_close:69000,change:1000,change_pct:1.45,date:at.slice(0,10)}}
+  ])), now);
+  let quoteSocket;
+  await page.routeWebSocket('**/ws/quotes', socket => {
+    quoteSocket = socket;
+    socket.send(JSON.stringify({type:'ws_status',shared:true,active:true,guest:true,stream_state:'connecting'}));
+    socket.onMessage(raw => {
+      const message = JSON.parse(raw);
+      if (message.action === 'ping') socket.send(JSON.stringify({type:'pong',stream_state:'connected'}));
+      if (message.action === 'subscribe') {
+        const codes = [...new Set(Object.values(message.requested).flat())];
+        socket.send(JSON.stringify({type:'subscriptions',shared:true,ws:codes,rest:[]}));
+        socket.send(JSON.stringify({type:'stream_status',shared:true,stream_state:'connected',slots_connected:1,
+          requested:codes.length,subscribed:codes.length,receiving:0,fallback:0,
+          sources:[{provider:'toss',scope:'shared',requested:codes.length,subscribed:codes.length,state:'subscribed'}]}));
+      }
+    });
+  });
+  await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
+  await page.goto('/analysis');
+  await page.waitForFunction(() => QuoteManager.sharedMode && QuoteManager.wsCodes.has('005930'));
+  await page.evaluate(() => {
+    if (currentUser) throw new Error('Expected guest');
+    activeStockCode = '005930';
+    activeQuoteSnapshot = {price:70000,previous_close:69000,change:1000,change_pct:1.45};
+    document.getElementById('companyInfo').style.display = 'block';
+    renderQuoteSnapshot(activeQuoteSnapshot);
+    _updateQuoteSubscriptions();
+  });
+  const at = new Date().toISOString();
+  quoteSocket.send(JSON.stringify({type:'quote',code:'005930',price:71000,source:'toss_ws',as_of:at,date:at.slice(0,10),currency:'KRW',ts:Date.now()/1000}));
+  await expect(page.locator('#quotePrice')).toHaveText('71,000원');
+  await expect(page.locator('#quoteChange')).toContainText('+2,000원');
+  await expect(page.locator('#quoteDate .ws-live-dot')).toHaveCount(1);
+  await expect(page.locator('#recentList [data-code="005930"] .quote-price')).toHaveText('71,000');
+  quoteSocket.send(JSON.stringify({type:'subscriptions',shared:true,ws:[],rest:['005930']}));
+  quoteSocket.send(JSON.stringify({type:'stream_status',stream_state:'offline',slots_connected:0,subscribed:0,disconnected_codes:['005930']}));
+  await expect(page.locator('#quoteDate .ws-live-dot')).toHaveCount(0);
+});
+}
+
+for (const width of [1440, 390]) {
 test(`공통 실시간 시세는 자동 연결하고 토스 수신·조회 보완을 표시한다 (${width}px)`, async ({ page }, testInfo) => {
   await page.setViewportSize({width, height:1000});
   let quoteSocket;

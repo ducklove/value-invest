@@ -53,13 +53,13 @@ async def stream(user: str, cid: str, env: str, changed):
         try:
             credential = await kis.credential(user, cid, env)
             hts = credential.get("hts_id")
-            if not hts:
-                _states[(user, cid)] = {"state": "polling", "subscribed": 0}
-                return
             if env == "live":
                 from services.realtime.hub import get_hub
                 if await get_hub().watch_kis_account(user, cid, credential, changed):
                     return
+            if not hts:
+                _states[(user, cid)] = {"state": "polling", "subscribed": 0}
+                return
             approval = await kis.approval(user, cid, env)
             channels = ("H0STCNI9",) if env == "mock" else ("H0STCNI0", "H0GSCNI0")
             secrets, approved = {}, set()

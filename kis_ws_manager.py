@@ -1,9 +1,8 @@
 """KIS WebSocket Manager — real-time quote streaming for Korean stocks.
 
 Supports multiple concurrent WebSocket connections, one per KIS API key slot.
-The realtime hub owns one connection per server key with up to 40 subscriptions,
-including account notices when they use that key. Quote data is cached in a shared module-level dict
-so REST fallback and other modules can read the latest prices.
+The realtime hub owns one connection per user's linked key with up to 40 subscriptions,
+including account notices. User sockets disable the legacy shared quote cache.
 
 Public API
 ----------
@@ -290,8 +289,9 @@ class WsConnection:
     reconnect loop.  Quotes are written to the shared ``_quote_cache``.
     """
 
-    def __init__(self, key_slot: Any):
+    def __init__(self, key_slot: Any, *, shared_cache: bool = True):
         self.key_slot = key_slot
+        self.shared_cache = shared_cache
         self._ws: Any = None
         self._task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
@@ -528,12 +528,13 @@ class WsConnection:
                             quote = _parse_h0stcnt0(raw_msg)
                             if quote is not None and any(code == quote["code"] for code, _ in self._current_subs):
                                 self.last_tick_at = quote.get("as_of")
-                                if quote["code"] not in _quote_cache:
+                                if self.shared_cache and quote["code"] not in _quote_cache:
                                     logger.info(
                                         "First quote: %s @ %s",
                                         quote["code"], quote["price"],
                                     )
-                                _quote_cache[quote["code"]] = quote
+                                if self.shared_cache:
+                                    _quote_cache[quote["code"]] = quote
                                 try:
                                     self.listener.put_nowait(quote)
                                 except asyncio.QueueFull:

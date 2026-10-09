@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
@@ -14,8 +14,9 @@ from services.realtime.toss import Token, TossError, TossSource, instrument, nor
 
 
 class Source:
-    def __init__(self, name, capacity, predicate=lambda code: True):
+    def __init__(self, name, capacity, predicate=lambda code: True, *, user=None):
         self.id, self.capacity, self.predicate = name, capacity, predicate
+        self.user = user
         self.approved, self.rejected, self.codes = set(), set(), []
 
     def supports(self, code): return self.predicate(code)
@@ -54,7 +55,7 @@ async def test_clients_share_one_assignment_approval_controls_live_and_disconnec
     hub = QuoteHub()
     hub.running = True
     monkeypatch.setattr(hub, "_nh_coverage", lambda user: set())
-    source = Source("kis:0", 40)
+    source = Source("kis:0", 40, user="a")
     hub.sources = [source]
     first, second = hub.attach("a"), hub.attach("a")
     for client in [first, second]: hub.subscribe(client, {"portfolio": ["005930"]})
@@ -89,6 +90,131 @@ async def test_nh_approved_symbols_do_not_consume_shared_capacity_and_loss_uses_
     nh.clear()
     await hub.reconcile()
     assert set(hub.sources[0].codes) == {"005930", "AAPL"}
+
+
+@pytest.mark.asyncio
+async def test_kis_allocation_approval_and_diagnostics_are_scoped_but_toss_is_shared(monkeypatch):
+    hub = QuoteHub()
+    monkeypatch.setattr(hub, "_nh_coverage", lambda user: set())
+    alice_kis = Source("kis:0", 2, str.isdigit, user="alice")
+    bob_kis = Source("kis:1", 1, str.isdigit, user="bob")
+    toss = Source("toss:0", 100)
+    hub.sources = [alice_kis, bob_kis, toss]
+    alice, bob, unlinked = hub.attach("alice"), hub.attach("bob"), hub.attach("unlinked")
+    hub.subscribe(alice, {"portfolio": ["005930", "000660", "AAPL"]})
+    hub.subscribe(bob, {"portfolio": ["005930", "005380", "AAPL"]})
+    hub.subscribe(unlinked, {"portfolio": ["005930", "AAPL"]})
+    await hub.reconcile()
+    assert alice_kis.codes == ["005930", "000660"]
+    assert bob_kis.codes == ["005930"]
+    assert set(toss.codes) == {"005930", "005380", "AAPL"}
+    # No approval from Alice's connection may count for Bob or an unlinked user.
+    alice_kis.approved = {"005930", "000660"}
+    toss.approved = {"AAPL", "005380"}
+    await hub.reconcile()
+    assert alice.plan["ws"] == ["005930", "000660", "AAPL"]
+    assert bob.plan["ws"] == ["005380", "AAPL"] and bob.plan["rest"] == ["005930"]
+    assert unlinked.plan["ws"] == ["AAPL"] and unlinked.plan["rest"] == ["005930"]
+    assert {row["id"] for row in hub.status(alice)["sources"]} == {"kis:0", "toss:0"}
+    assert {row["id"] for row in hub.status(bob)["sources"]} == {"kis:1", "toss:0"}
+    assert {row["id"] for row in hub.status(unlinked)["sources"]} == {"toss:0"}
+    assert [row["scope"] for row in hub.status(alice)["sources"]] == ["account", "shared"]
+    # A rejected personal subscription falls back to Toss, never to Bob's spare key.
+    alice_kis.rejected.add("000660")
+    await hub.reconcile()
+    assert "000660" in toss.codes and "000660" not in bob_kis.codes
+
+
+@pytest.mark.asyncio
+async def test_kis_ticks_stay_private_and_toss_ticks_reach_both_accounts(monkeypatch):
+    hub = QuoteHub()
+    alice, bob = hub.attach("alice"), hub.attach("bob")
+    for client in (alice, bob):
+        hub.subscribe(client, {"portfolio": ["005930"]})
+    hub.publish({**normalize(trade(), "005930"), "source": "kis_ws"})
+    assert not alice.pending and not bob.pending and not hub.cache
+    from services import stock_quotes
+    remember = Mock()
+    monkeypatch.setattr(stock_quotes, "remember_quote", remember)
+    source = KisSource(SimpleNamespace(slot_id=0), hub.publish, user="alice", credential_id="alice-key")
+    source.conn._confirmed_subs = {("005930", "H0UNCNT0")}
+    relay = asyncio.create_task(source._relay())
+    try:
+        await source.conn.listener.put(normalize(trade(), "005930"))
+        await eventually(lambda: bool(alice.pending))
+        assert (await alice.next())["source"] == "kis_ws"
+        assert not bob.pending and hub.quote("bob", "005930") is None
+        assert hub.quote(None, "005930") is None
+        remember.assert_not_called()
+    finally:
+        relay.cancel()
+        await asyncio.gather(relay, return_exceptions=True)
+    # Use the real synchronous cache boundary for the public quote.
+    monkeypatch.setattr(stock_quotes, "remember_quote", Mock())
+    hub.publish(normalize(trade(price="73000"), "005930"))
+    assert (await bob.next())["source"] == "toss_ws"
+    assert (await alice.next())["source"] == "toss_ws"
+
+
+@pytest.mark.asyncio
+async def test_linked_kis_socket_uses_own_credentials_and_unlink_cleans_up(monkeypatch):
+    from repositories.broker_secrets import BrokerError
+    from services.realtime import hub as module
+    hub = QuoteHub()
+    hub.running = True
+    credential = {"google_sub": "alice", "credential_id": "cid", "provider": "kis", "environment": "live",
+                  "app_key": "PRIVATE-KEY", "app_secret": "PRIVATE-SECRET", "hts_id": "hts"}
+    with pytest.raises(BrokerError):
+        await hub.watch_kis_account("bob", "cid", credential, lambda _: None)
+    assert not hub.sources
+    registered = asyncio.Event()
+    async def watch(source, user, cid, hts, changed):
+        registered.set()
+        await asyncio.Future()
+    monkeypatch.setattr(module.KisSource, "watch_account", watch)
+    monkeypatch.setattr(module.KisSource, "close", AsyncMock())
+    task = asyncio.create_task(hub.watch_kis_account("alice", "cid", credential, lambda _: None))
+    await registered.wait()
+    source = hub.sources[0]
+    assert source.user == "alice" and source.credential_id == "cid"
+    assert source.slot.app_key == "PRIVATE-KEY" and source.conn.shared_cache is False
+    assert "PRIVATE" not in str(source.snapshot()) and "alice" not in str(source.snapshot())
+    hub.publish({**normalize(trade(), "005930"), "source": "kis_ws"}, user="alice")
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    source.close.assert_awaited_once()
+    assert not hub.sources and hub.quote("alice", "005930") is None
+
+
+@pytest.mark.asyncio
+async def test_guests_share_toss_capacity_receive_public_ticks_and_never_borrow_personal_kis(monkeypatch):
+    hub = QuoteHub()
+    monkeypatch.setattr(hub, "_nh_coverage", lambda user: set())
+    kis, toss = Source("kis:0", 40, user="owner"), Source("toss:0", 1)
+    hub.sources = [kis, toss]
+    guest, second, owner = hub.attach(None), hub.attach(None), hub.attach("owner")
+    for client in (guest, second):
+        hub.subscribe(client, {"analysis": ["005930", "000660", "KRX_GOLD"]})
+    hub.subscribe(owner, {"analysis": ["AAPL"]})
+    await hub.reconcile()
+    assert toss.codes == ["005930"]  # Two guests request one upstream registration.
+    assert kis.codes == ["AAPL"]  # Fake supports all symbols, but is exclusive to owner.
+    toss.approved = {"005930"}
+    kis.approved = {"000660"}
+    await hub.reconcile()
+    assert guest.plan["ws"] == second.plan["ws"] == ["005930"]
+    assert guest.plan["rest"] == ["000660", "KRX_GOLD"]
+    for client in (guest, second, owner):
+        client.pending.clear()
+    tick = normalize(trade(), "005930")
+    hub.publish({**tick, "source": "kis_ws"}, user="owner")
+    assert not guest.pending and not second.pending
+    hub.publish(tick)
+    for client in (guest, second):
+        assert (await client.next())["source"] == "toss_ws"
+    hub.detach(guest)
+    await hub.reconcile()
+    assert toss.codes == ["005930"]
 
 
 def test_admin_diagnostics_include_nh_without_exposing_user_identity(monkeypatch):
@@ -209,7 +335,7 @@ async def test_toss_ack_partial_rejection_normal_close_and_secret_safe_error(mon
 @pytest.mark.asyncio
 async def test_kis_notice_reservation_and_ack_are_separate_from_transport(monkeypatch):
     slot = SimpleNamespace(slot_id=0, _approval_key="PRIVATE")
-    source = KisSource(slot, lambda quote: None)
+    source = KisSource(slot, lambda quote: None, user="owner", credential_id="cid")
     source.conn.extra_subscriptions = {("hts", "H0STCNI0"), ("hts", "H0GSCNI0")}
     source.conn._ws = AsyncMock()
     source.conn.state = "connected"
@@ -242,7 +368,7 @@ async def test_process_owner_lock_prevents_duplicate_connections_and_is_released
     from repositories import db
     from services.realtime import hub as module
     monkeypatch.setattr(db, 'DB_PATH', tmp_path / 'cache.db')
-    monkeypatch.setattr(module.kis_key_manager, 'all_slots', lambda: [])
+    monkeypatch.setattr(module.kis_key_manager, 'all_slots', lambda: pytest.fail('Server KIS keys must not become shared sources'))
     monkeypatch.setenv('TOSS_CLIENT_ID', '')
     first, second = QuoteHub(), QuoteHub()
     monkeypatch.setattr(first, '_load_holdings', AsyncMock())

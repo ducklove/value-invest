@@ -2,8 +2,8 @@
 
 Each KIS API key pair can support one WebSocket connection with up to 40
 real-time subscriptions. This manager loads all available key pairs from
-environment variables. The realtime hub owns the connections; browser sessions
-only contribute subscription demand. Legacy acquire/release helpers remain for callers.
+environment variables for legacy callers. The realtime hub does not consume
+this environment pool: it constructs private slots from users' linked credentials.
 
 Public API
 ----------

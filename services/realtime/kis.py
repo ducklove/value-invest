@@ -1,4 +1,4 @@
-"""KIS shared price socket, including account notices for matching server keys."""
+"""One user's KIS price and account notice socket per linked credential."""
 
 from __future__ import annotations
 
@@ -14,11 +14,15 @@ from services.market.quote_policy import trade_timestamp
 class KisSource:
     provider = "kis"
 
-    def __init__(self, slot, publish):
+    def __init__(self, slot, publish, *, user, credential_id):
+        if not user or not credential_id:
+            raise ValueError("KIS connection requires a user and linked credential")
         self.id = f"kis:{slot.slot_id}"
         self.slot = slot
+        self.user = user
+        self.credential_id = credential_id
         self.publish = publish
-        self.conn = kis_ws_manager.WsConnection(slot)
+        self.conn = kis_ws_manager.WsConnection(slot, shared_cache=False)
         self.conn.on_control = self._control
         self.conn.on_frame = self._frame
         self.codes = []
@@ -26,6 +30,8 @@ class KisSource:
         self.secrets = {}
         self._task = None
         self._blocked_until = 0.0
+        self._closed = False
+        self._close_lock = asyncio.Lock()
 
     @property
     def capacity(self):
@@ -33,15 +39,17 @@ class KisSource:
 
     @property
     def approved(self):
-        return {code for code, channel in self.conn._confirmed_subs if channel in kis_ws_manager._ACCEPTED_TR_IDS}
+        return set() if self._closed else {code for code, channel in self.conn._confirmed_subs if channel in kis_ws_manager._ACCEPTED_TR_IDS}
 
     def supports(self, code):
         return kis_ws_manager.is_korean_stock(code)
 
     def available(self, code):
-        return time.monotonic() >= self._blocked_until and not self.conn._integrated_rejected and not any(c == code for c, _ in self.conn._rejected_subs)
+        return not self._closed and time.monotonic() >= self._blocked_until and not self.conn._integrated_rejected and not any(c == code for c, _ in self.conn._rejected_subs)
 
     async def set_codes(self, codes):
+        if self._closed:
+            return
         self.codes = list(codes)
         self.conn.update_subscriptions({"portfolio": self.codes})
         await self._sync()
@@ -53,8 +61,10 @@ class KisSource:
         await self.conn.sync_subscriptions()
 
     async def watch_account(self, user, cid, hts, changed):
+        if (user, cid) != (self.user, self.credential_id):
+            raise ValueError("KIS connection owner mismatch")
         self.bindings[(user, cid)] = (hts, changed)
-        self.conn.extra_subscriptions = {(hts_id, channel) for hts_id, _ in self.bindings.values()
+        self.conn.extra_subscriptions = {(hts_id, channel) for hts_id, _ in self.bindings.values() if hts_id
                                          for channel in ("H0STCNI0", "H0GSCNI0")}
         try:
             await self._sync()
@@ -62,7 +72,7 @@ class KisSource:
             await asyncio.Future()
         finally:
             self.bindings.pop((user, cid), None)
-            self.conn.extra_subscriptions = {(hts_id, channel) for hts_id, _ in self.bindings.values()
+            self.conn.extra_subscriptions = {(hts_id, channel) for hts_id, _ in self.bindings.values() if hts_id
                                              for channel in ("H0STCNI0", "H0GSCNI0")}
             kis_realtime._states.pop((user, cid), None)
 
@@ -108,16 +118,20 @@ class KisSource:
                         changed(None)
             elif message.get("type") == "quote" or message.get("price") is not None:
                 if message.get("code") in self.approved:
-                    self.publish({**message, "source": "kis_ws", "currency": "KRW"})
+                    self.publish({**message, "source": "kis_ws", "currency": "KRW"}, user=self.user)
 
     async def close(self):
-        await self.conn.stop()
-        if self._task:
-            self._task.cancel()
-            await asyncio.gather(self._task, return_exceptions=True)
-        self._task = None
-        self.secrets.clear()
-        self._notice_status()
+        async with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+            await self.conn.stop()
+            if self._task:
+                self._task.cancel()
+                await asyncio.gather(self._task, return_exceptions=True)
+            self._task = None
+            self.secrets.clear()
+            self._notice_status()
 
     def snapshot(self):
         state = "idle" if self._task is None and self.conn._ws is None else self.conn.state

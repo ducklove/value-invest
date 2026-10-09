@@ -1,7 +1,7 @@
 """Single-process market-data owner: demand, allocation, cache and browser delivery.
 
-Account workers remain responsible for credentials and account synchronization.
-NH prices/notices keep their existing shared socket; accepted prices are published here.
+NH/KIS account workers own user credentials and private price/notice sockets.
+Only Toss connections and prices are shared across users.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ FRESH_SECONDS = 90
 
 @dataclass(eq=False)
 class Client:
-    user: str
+    user: str | None
     requested: dict = field(default_factory=dict)
     wanted: set[str] = field(default_factory=set)
     pending: dict = field(default_factory=dict)
@@ -60,12 +60,14 @@ class QuoteHub:
         self.clients: set[Client] = set()
         self.holdings = {}
         self.assignments = {}
+        self.account_assignments = {}
         self.cache = {}
         self.running = False
         self.reason = "starting"
         self._lock_file = None
         self._wake = asyncio.Event()
         self._logged_states = {}
+        self._next_kis_id = 0
 
     def attach(self, user):
         client = Client(user)
@@ -100,6 +102,8 @@ class QuoteHub:
         return dict(current) if current else None
 
     def publish(self, quote, user=None):
+        if user is None and quote.get("source") != "toss_ws":
+            return  # Personal providers can never enter the public cache, even if a caller omits its owner.
         code = quote.get("code")
         at = trade_timestamp(quote.get("as_of"))
         try:
@@ -142,18 +146,34 @@ class QuoteHub:
 
     @staticmethod
     def _nh_coverage(user):
+        if user is None:
+            return set()
         from services.brokers import realtime
         return realtime.approved_codes(user)
+
+    def _sources_for(self, user):
+        return [source for source in self.sources if getattr(source, "user", None) in (None, user)]
+
+    def _approved_for(self, user):
+        return self._nh_coverage(user) | {code for source in self._sources_for(user) for code in source.approved}
 
     async def reconcile(self):
         demands = self._demands()
         shared = {}
+        account_assignments = {}
         for user, requested in demands.items():
             covered = self._nh_coverage(user)
-            shared[user] = {group: [code for code in codes if code not in covered] for group, codes in requested.items()}
-        self.assignments = allocate(fair_codes(shared), self.sources, self.assignments)
-        for source in self.sources:
-            codes = [code for code, owner in self.assignments.items() if owner == source.id]
+            private = [source for source in self.sources if user is not None and getattr(source, "user", None) == user]
+            remaining = {group: [code for code in codes if code not in covered] for group, codes in requested.items()}
+            account_assignments[user] = allocate(fair_codes({user: remaining}), private, self.account_assignments.get(user, {}))
+            shared[user] = {group: [code for code in codes if code not in account_assignments[user]]
+                            for group, codes in remaining.items()}
+        self.account_assignments = account_assignments
+        public = [source for source in self.sources if getattr(source, "user", None) is None]
+        self.assignments = allocate(fair_codes(shared), public, self.assignments)
+        for source in list(self.sources):
+            assignments = self.account_assignments.get(source.user, {}) if getattr(source, "user", None) is not None else self.assignments
+            codes = [code for code, owner in assignments.items() if owner == source.id]
             try:
                 await source.set_codes(codes)
             except (OSError, TimeoutError, ValueError) as exc:
@@ -164,13 +184,13 @@ class QuoteHub:
                 self._logged_states[source.id] = signature
                 logger.info("Realtime source: id=%s state=%s requested=%s subscribed=%s rejected=%s reason=%s",
                             source.id, *signature)
-        approved = {code for source in self.sources for code in source.approved}
         for client in self.clients:
             wanted = list(dict.fromkeys(code for group in PRIORITIES for code in client.requested.get(group, [])))
-            live = approved | self._nh_coverage(client.user)
+            live = self._approved_for(client.user)
+            assigned = set(self.assignments) | set(self.account_assignments.get(client.user, {}))
             plan = {"type": "subscriptions", "ws": [code for code in wanted if code in live],
                     "rest": [code for code in wanted if code not in live],
-                    "pending": [code for code in wanted if code in self.assignments and code not in live], "shared": True}
+                    "pending": [code for code in wanted if code in assigned and code not in live], "shared": True}
             if plan != client.plan:
                 client.plan = plan
                 client.put(plan)
@@ -183,20 +203,22 @@ class QuoteHub:
                 self.cache.pop(key)
 
     def status(self, client=None):
-        sources = [source.snapshot() for source in self.sources]
+        visible = self.sources if client is None else self._sources_for(client.user)
+        sources = [{**source.snapshot(), "scope": "account" if getattr(source, "user", None) is not None else "shared"}
+                   for source in visible]
         from services.brokers import realtime
         demands = self._demands() if client is None else {client.user: client.requested}
-        for index, user in enumerate(sorted(demands)):
+        for index, user in enumerate(sorted(demands, key=lambda user: user or "")):
+            if user is None:
+                continue
             nh = realtime.status(user)
             for name in ("domestic", "foreign"):
                 if name in nh:
-                    sources.append({"id": f"namuh:{index}:{name}", "provider": "namuh", **nh[name]})
+                    sources.append({"id": f"namuh:{index}:{name}", "provider": "namuh", "scope": "account", **nh[name]})
         active = [row for row in sources if row.get("requested") or row.get("reserved")]
         connected = sum(row["state"] in {"connected", "subscribed", "live"} for row in active)
         wanted = list(dict.fromkeys(code for request in demands.values() for codes in request.values() for code in codes))
-        approved = set(client.plan.get("ws", [])) if client else {code for source in self.sources for code in source.approved}
-        if client is None:
-            approved |= set().union(*(self._nh_coverage(user) for user in demands))
+        approved = self._approved_for(client.user) if client else set().union(*(self._approved_for(user) for user in demands))
         if client:
             fresh = sum(self.quote(client.user, code) is not None for code in wanted)
         else:
@@ -237,7 +259,8 @@ class QuoteHub:
             self._lock_file = None
             logger.error("Realtime connections already owned by another process")
             return
-        self.sources = [KisSource(slot, self.publish) for slot in kis_key_manager.all_slots()]
+        # Server KIS environment keys are never offered as a public price pool.
+        self.sources = []
         if os.environ.get("TOSS_CLIENT_ID") and os.environ.get("TOSS_CLIENT_SECRET"):
             token = Token()
             self.sources += [TossSource(index, token, self.publish) for index in range(2)]
@@ -262,6 +285,7 @@ class QuoteHub:
             await asyncio.gather(*(source.close() for source in self.sources), return_exceptions=True)
             self.sources.clear()
             self.assignments.clear()
+            self.account_assignments.clear()
             self.cache.clear()
             self._lock_file.close()
             self._lock_file = None
@@ -269,11 +293,33 @@ class QuoteHub:
     async def watch_kis_account(self, user, cid, credential, changed):
         if not self.running:
             return False
-        for source in self.sources:
-            if source.provider == "kis" and source.slot.app_key == credential["app_key"]:
-                await source.watch_account(user, cid, credential["hts_id"], changed)
-                return True
-        return False
+        from repositories.broker_secrets import BrokerError
+        from services.brokers.kis import BASE
+        if credential.get("google_sub") != user or credential.get("credential_id") != cid or credential.get("provider") != "kis":
+            raise BrokerError("로그인 사용자와 한국투자증권 앱키가 일치하지 않습니다.")
+        if credential.get("environment") != "live":
+            return False
+        if any(getattr(source, "credential_id", None) == cid for source in self.sources):
+            raise BrokerError("한국투자증권 연결은 이미 관리 중입니다.")
+        slot = kis_key_manager.KeySlot(self._next_kis_id, credential["app_key"], credential["app_secret"], BASE["live"])
+        self._next_kis_id += 1
+        source = KisSource(slot, self.publish, user=user, credential_id=cid)
+        self.sources.append(source)
+        self._wake.set()
+        try:
+            await source.watch_account(user, cid, credential.get("hts_id", ""), changed)
+            return True
+        finally:
+            if source in self.sources:
+                self.sources.remove(source)
+            self._logged_states.pop(source.id, None)
+            assignments = self.account_assignments.get(user, {})
+            self.account_assignments[user] = {code: owner for code, owner in assignments.items() if owner != source.id}
+            for key, tick in list(self.cache.items()):
+                if key[0] == user and tick.get("source") == "kis_ws":
+                    self.cache.pop(key)
+            self._wake.set()
+            await source.close()
 
 
 _hub = QuoteHub()

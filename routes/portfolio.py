@@ -427,7 +427,8 @@ async def stream_portfolio_quotes(request: Request):
         async def _one_quote(code: str) -> tuple[str, dict]:
             try:
                 from services.brokers.realtime import quote as namuh_quote
-                quote = namuh_quote(user["google_sub"], code) or await _fetch_quote(code)
+                from services.realtime.hub import get_hub
+                quote = get_hub().quote(user["google_sub"], code) or namuh_quote(user["google_sub"], code) or await _fetch_quote(code)
                 enriched = await futures_quotes.enrich_quotes({code: quote}, user["google_sub"])
                 return code, enriched[code]
             except Exception:
@@ -486,7 +487,7 @@ async def stream_portfolio_quotes(request: Request):
 async def asset_quote(stock_code: str, request: Request = None):
     """Fetch quote for any asset type (Korean stock, cash, gold, crypto, foreign)."""
     try:
-        nh = await _namuh_quotes_for_request(request, [stock_code])
+        nh = await _realtime_quotes_for_request(request, [stock_code])
         q = nh.get(stock_code) or await _fetch_quote(stock_code)
         if not q:
             raise HTTPException(status_code=404, detail="시세를 가져올 수 없습니다.")
@@ -503,17 +504,25 @@ _ASSET_QUOTES_ITEM_TIMEOUT = 30.0
 _ASSET_QUOTES_CONCURRENCY = 2
 
 
-async def _namuh_quotes_for_request(request: Request | None, codes: list[str]) -> dict[str, dict]:
+async def _realtime_quotes_for_request(request: Request | None, codes: list[str]) -> dict[str, dict]:
     if request is None:
         return {}
     user = await get_current_user(request)
+    from services.realtime.hub import get_hub
+    owner = user["google_sub"] if user else None
+    result = {code: tick for code in codes if (tick := get_hub().quote(owner, code))}
     if not user:
-        return {}
+        return result
     from repositories import brokers
     from services.brokers.realtime import quote as namuh_quote
     if not await brokers.has_link(user["google_sub"]):
-        return {}
-    return {code: tick for code in codes if (tick := namuh_quote(user["google_sub"], code))}
+        return result
+    from services.portfolio.quotes import should_accept_quote_snapshot
+    for code in codes:
+        tick = namuh_quote(user["google_sub"], code)
+        if tick and should_accept_quote_snapshot(result.get(code), tick):
+            result[code] = tick
+    return result
 
 
 async def _futures_quotes_for_request(request: Request | None, quotes: dict[str, dict]) -> dict[str, dict]:
@@ -538,7 +547,7 @@ async def asset_quotes_batch(payload: dict = Body(...), request: Request = None)
         seen_codes.add(code)
         codes.append(code)
     fresh = bool(payload.get("fresh", True))
-    nh = await _namuh_quotes_for_request(request, codes)
+    nh = await _realtime_quotes_for_request(request, codes)
     if not fresh:
         return await _futures_quotes_for_request(request, {code: nh.get(code) or _cached_quote_for_code(code) for code in codes})
 
@@ -719,8 +728,9 @@ async def get_portfolio(request: Request):
     enriched = await _enrich_with_cached_quotes(items)
     from services.brokers.realtime import quote as namuh_quote
     from services.portfolio.quotes import should_accept_quote_snapshot
+    from services.realtime.hub import get_hub
     for item in enriched:
-        nh_quote = namuh_quote(user["google_sub"], item["stock_code"])
+        nh_quote = get_hub().quote(user["google_sub"], item["stock_code"]) or namuh_quote(user["google_sub"], item["stock_code"])
         if nh_quote and should_accept_quote_snapshot(item.get("quote"), nh_quote):
             item["quote"] = nh_quote
     await _fill_snapshot_quotes(user["google_sub"], enriched)

@@ -494,7 +494,7 @@ const QuoteManager = {
       const names = {kis: 'KIS', toss: '토스', namuh: 'NH'};
       const states = {idle: '대기', connecting: '연결 중', connected: '구독 확인 중', subscribed: '체결 대기', live: '수신 중', reconnecting: '재연결 중', degraded: '일부 제한', waiting: '대기', offline: '미연결'};
       const sources = (this.lastSlotMeta?.sources || []).filter(source => source.requested || source.reserved);
-      return sources.map(source => `${names[source.provider] || source.provider} ${source.subscribed || 0}/${source.requested || 0} · ${states[source.state] || '상태 확인 중'}`).join(' | ') || '서버에서 연결을 자동 관리합니다';
+      return sources.map(source => `${names[source.provider] || source.provider}${source.scope === 'account' ? ' 내 계정' : source.scope === 'shared' ? ' 공용' : ''} ${source.subscribed || 0}/${source.requested || 0} · ${states[source.state] || '상태 확인 중'}`).join(' | ') || '서버에서 연결을 자동 관리합니다';
     }
     if (!this.wsActive || this.streamState !== 'connected') return '조회 시세로 갱신 중';
     const latest = Math.max(0, ...[...this.wsCodes].filter(code => this._hasKisQuote(code)).map(code => this.lastWsQuoteAt[code]));

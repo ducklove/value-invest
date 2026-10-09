@@ -184,6 +184,19 @@ function mergeQuoteSnapshot(current, incoming) {
     }
   }
   if (!incoming || incoming._stale !== true) delete next._stale;
+  // Trade-only streams (Toss) carry a new price without daily change fields.
+  // Recalculate against the retained base instead of retaining an older change.
+  if (incoming?.source === 'toss_ws') {
+    const price = Number(next.price);
+    const base = Number(next.previous_close);
+    if (Number.isFinite(price) && Number.isFinite(base) && base > 0) {
+      if (!quoteValuePresent(incoming.change)) next.change = price - base;
+      if (!quoteValuePresent(incoming.change_pct)) next.change_pct = (price - base) / base * 100;
+    } else {
+      if (!quoteValuePresent(incoming.change)) delete next.change;
+      if (!quoteValuePresent(incoming.change_pct)) delete next.change_pct;
+    }
+  }
   return next;
 }
 

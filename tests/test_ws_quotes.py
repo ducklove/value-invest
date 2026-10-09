@@ -68,18 +68,38 @@ def test_multiple_browsers_automatically_share_without_takeover_or_slot_acquisit
         assert len(hub.clients) == 0
 
 
-def test_anonymous_client_cannot_consume_live_resources(monkeypatch):
+def test_guest_automatically_uses_only_shared_toss_without_private_holdings_or_connections(monkeypatch):
     app, hub = setup_app(monkeypatch, None)
     hub.holdings = {'private-owner': {'portfolio':['PRIVATE-HOLDING']}}
+    hub.sources = [SimpleNamespace(id='toss:0', user=None, approved={'005930'}, capacity=100,
+                                  supports=lambda code: code == '005930', available=lambda code: True,
+                                  set_codes=AsyncMock(), snapshot=lambda: {'id':'toss:0','provider':'toss','state':'live','requested':1,'subscribed':1}),
+                   SimpleNamespace(id='kis:0', user='private-owner', approved={'005930'}, capacity=40,
+                                   supports=lambda code: True, available=lambda code: True,
+                                   set_codes=AsyncMock(), snapshot=lambda: {'id':'kis:0','provider':'kis','state':'live','requested':1,'subscribed':1})]
     with TestClient(app) as client, client.websocket_connect('/ws/quotes') as socket:
         initial = socket.receive_json()
-        assert not initial['active'] and not initial['sources']
+        assert initial['active'] and initial['guest']
+        assert [row['provider'] for row in initial['sources']] == ['toss']
         assert 'PRIVATE-HOLDING' not in str(initial)
         socket.send_json({'action':'ping'})
         assert 'PRIVATE-HOLDING' not in str(socket.receive_json())
-        socket.send_json({'action': 'subscribe', 'requested': {'portfolio': ['005930']}})
-        assert socket.receive_json()['rest'] == ['005930']
-        assert not hub.clients
+        socket.send_json({'action': 'subscribe', 'requested': {'analysis': ['005930','KRX_GOLD']}})
+        plan = receive_type(socket, 'subscriptions', lambda message: bool(message['ws']))
+        assert plan['ws'] == ['005930'] and plan['rest'] == ['KRX_GOLD']
+        assert len(hub.clients) == 1
+    assert not hub.clients
+
+
+def test_guest_login_reconnects_socket_to_the_authenticated_scope(monkeypatch):
+    app, _ = setup_app(monkeypatch, None)
+    monkeypatch.setattr(ws_quotes, 'get_current_user', AsyncMock(side_effect=[None, {'google_sub':'owner'}]))
+    with TestClient(app) as client, client.websocket_connect('/ws/quotes') as socket:
+        assert socket.receive_json()['guest']
+        socket.send_json({'action':'ping'})
+        with pytest.raises(WebSocketDisconnect) as closed:
+            receive_type(socket, 'pong')
+        assert closed.value.code == 1008
 
 
 def test_expired_authentication_closes_socket(monkeypatch):

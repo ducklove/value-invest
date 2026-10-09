@@ -119,7 +119,7 @@ async def test_batch_asset_quote_uses_same_underlying_percentage_for_future(fres
 async def test_single_asset_quote_uses_authenticated_underlying_tick():
     with patch.object(futures.futures_underlyings, "underlying_codes", AsyncMock(return_value=MAPPING)), \
          patch.object(futures, "namuh_quote", return_value={"price": 40000, "change_pct": 2.5}) as nh, \
-         patch.object(portfolio, "_namuh_quotes_for_request", AsyncMock(return_value={})), \
+         patch.object(portfolio, "_realtime_quotes_for_request", AsyncMock(return_value={})), \
          patch.object(portfolio, "get_current_user", AsyncMock(return_value={"google_sub": "owner"})), \
          patch.object(portfolio, "_fetch_quote", AsyncMock(return_value=FUTURE_QUOTE)):
         result = await portfolio.asset_quote(CODE, object())
