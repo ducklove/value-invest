@@ -10,7 +10,7 @@ from fastapi import APIRouter, Body, HTTPException, Query, Request, WebSocket, W
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from deps import require_user_id as user_id
-from repositories import account_holdings, broker_activity, brokers
+from repositories import account_holdings, broker_activity, broker_cash_reviews, brokers
 from repositories.broker_secrets import BrokerError, decrypt, encrypt
 from services.brokers import realtime
 from services.brokers.registry import catalog, get_adapter
@@ -86,6 +86,23 @@ class ActivityNote(BaseModel):
     kind: Literal["dividend", "interest", "other_income", "transfer", "internal", "trade", "fee", "review"]
     fx_rate: Annotated[float, Field(gt=0, le=1e7, allow_inf_nan=False, strict=True)] | None = None
     income_amount: Annotated[float, Field(ge=-1e15, le=1e15, allow_inf_nan=False, strict=True)] | None = None
+
+
+class CashReviewNote(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    revision: Annotated[int, Field(ge=1, strict=True)]
+    category: Annotated[str, Field(max_length=40)]
+    reason: Annotated[str, Field(max_length=500)] = ""
+
+
+@router.get("/api/portfolio/cash-reviews")
+async def cash_review_history(request: Request, pending: bool = True, offset: Annotated[int, Query(ge=0)] = 0):
+    return await broker_cash_reviews.history(await user_id(request), pending=pending, offset=offset)
+
+
+@router.patch("/api/portfolio/cash-reviews/{review_id}")
+async def cash_review_note(review_id: int, request: Request, payload: CashReviewNote):
+    return await broker_cash_reviews.annotate(await user_id(request), review_id, **payload.model_dump())
 
 
 @router.get("/api/portfolio/accounts/{account_id}/activity")

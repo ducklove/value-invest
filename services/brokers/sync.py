@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 from domain.broker_assets import is_futures_value
 from domain.portfolio_order import initial_order_key
 from repositories import account_holdings as holdings
-from repositories import broker_activity, brokers, portfolio_order
+from repositories import broker_activity, broker_cash_reviews, brokers, portfolio_order
 from repositories.broker_secrets import BrokerError
 from repositories.db import transaction
 from services.brokers import activity
@@ -101,6 +101,7 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                     if not row["stock_code"].startswith("CASH_") and not is_futures_value(row["stock_code"]) and any(r["stock_code"] == row["stock_code"] and r["quantity"] * row["quantity"] < 0 for r in other):
                         raise BrokerError("다른 계좌의 공매도 잔고와 충돌하여 동기화를 보류했습니다.")
                 now = datetime.now(timezone.utc).isoformat()
+                await broker_cash_reviews.observe(db, user, current, rows, previous)
                 created = {r["stock_code"]: r["created_at"] for r in previous}
                 await db.execute("DELETE FROM account_holdings WHERE google_sub=? AND account_id=?", (user, aid))
                 for row in rows:

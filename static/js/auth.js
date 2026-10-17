@@ -462,6 +462,8 @@ function renderAuthState() {
 
   renderGoogleButton();
 
+  if (currentUser && typeof pfCheckCashReviews === 'function') pfCheckCashReviews();
+
   updateMobileAuthChrome();
   if (typeof _setFilingReviewAdminAction === 'function') {
     _setFilingReviewAdminAction(activeStockCode || '', {});

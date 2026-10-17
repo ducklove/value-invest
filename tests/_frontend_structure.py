@@ -32,6 +32,7 @@ def _all_css() -> str:
     return "\n".join((CSS / name).read_text(encoding="utf-8") for name in CSS_SPLIT_FILES)
 
 PORTFOLIO_SPLIT_FILES = [
+    "portfolio-cash-reviews.js",
     "portfolio-shell.js",
     "portfolio-data.js",
     "portfolio-order.js",

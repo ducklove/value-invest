@@ -10,7 +10,7 @@ test('NH 수입·입출금 가져오기와 사유 보존, 서버 변경 통보 �
   const base='/api/portfolio/accounts/'+account.account_id;
   expect((await page.request.post(base+'/namuh',{data:{selection:key.accounts[0].selection},headers})).ok()).toBe(true);
   await page.goto('/portfolio');
-  await expect(page.locator('#pfBody [data-code="005930"]')).toBeVisible();
+  await expect(page.locator('#pfBody tr[data-code="005930"]')).toBeVisible();
   await page.locator('#pfAccountsOpen').click();
   await page.locator(`[data-account="${account.account_id}"] [data-account-action="activity"]`).click();
   await expect(page.locator('#pfActivityRows form')).toHaveCount(3);

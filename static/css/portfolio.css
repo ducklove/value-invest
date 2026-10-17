@@ -3837,3 +3837,14 @@ body.pf-compact-rows .pf-pair-connector, body.pf-compact-rows .pf-row-position {
 
 .pf-summary-card.js-pf-contributors:disabled { cursor: default; opacity: 1; }
 .pf-summary-info[hidden] { display: none; }
+
+/* 접속 시 미확인 예수금 사유와 계좌별 관측 이력. */
+.pf-cash-review-dialog { width: min(680px, calc(100vw - 32px)); max-height: 85dvh; overflow: auto; box-sizing: border-box; }
+.pf-cash-review-help, .pf-cash-review-row p { color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.pf-cash-review-row { border-top: 1px solid var(--border); padding: 14px 0; }
+.pf-cash-review-row h3 { font-size: 15px; overflow-wrap: anywhere; }
+.pf-cash-review-row fieldset { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 10px; }
+.pf-cash-review-row label { display: grid; gap: 5px; }
+.pf-cash-review-row select, .pf-cash-review-row textarea { width: 100%; min-width: 0; box-sizing: border-box; padding: 8px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font: inherit; }
+.pf-cash-review-notice { position: fixed; right: 16px; bottom: calc(20px + env(safe-area-inset-bottom)); z-index: 1100; padding: 12px 16px; border: 1px solid var(--border); border-radius: 24px; background: var(--primary); color: var(--surface); box-shadow: 0 3px 12px rgba(0,0,0,.15); cursor: pointer; }
+.pf-cash-review-notice[hidden] { display: none; }

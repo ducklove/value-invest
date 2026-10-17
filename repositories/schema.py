@@ -883,6 +883,42 @@ CREATE TABLE IF NOT EXISTS broker_activity_state (
     error TEXT
 );
 
+-- 거래번호가 없는 잔고 차이는 거래 원장과 분리하여 관측 구간으로 보존한다.
+CREATE TABLE IF NOT EXISTS broker_cash_review_state (
+    account_id TEXT PRIMARY KEY REFERENCES portfolio_accounts(account_id) ON DELETE CASCADE,
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    fingerprint TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    last_at TEXT NOT NULL,
+    cash_json TEXT NOT NULL,
+    baseline_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS broker_cash_reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    account_id TEXT NOT NULL REFERENCES portfolio_accounts(account_id) ON DELETE CASCADE,
+    fingerprint TEXT NOT NULL,
+    from_at TEXT NOT NULL,
+    to_at TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    amount REAL NOT NULL,
+    unexplained REAL NOT NULL,
+    positions_changed INTEGER NOT NULL DEFAULT 0,
+    category TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    revision INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_broker_cash_reviews_user ON broker_cash_reviews(google_sub, account_id, id);
+CREATE TABLE IF NOT EXISTS broker_cash_review_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    review_id INTEGER NOT NULL REFERENCES broker_cash_reviews(id) ON DELETE CASCADE,
+    amount REAL NOT NULL,
+    category TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    changed_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS household_assets (
     asset_id TEXT PRIMARY KEY,
     google_sub TEXT NOT NULL,

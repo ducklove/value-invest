@@ -29,6 +29,7 @@ async function pfLoadAccounts(force = false) {
   if (state) state.textContent = account?.broker ? `${pfBrokerName(account.broker)} 조회 연동 · ${account.connection?.last_sync_at ? '최근 동기화 ' + new Date(account.connection.last_sync_at).toLocaleString('ko-KR') : '첫 동기화 대기'}${account.connection?.sync_error ? ' · 동기화 확인 필요' : ''}` : account ? '이 계좌의 종목과 현금을 표시합니다.' : '모든 계좌의 동일 종목과 현금을 합산합니다.';
   if (state && account) state.textContent += ' NAV·기간 실적은 전체 계좌에서 확인하세요.';
   pfConnectNamuhQuotes();
+  if (typeof pfCheckCashReviews === 'function') pfCheckCashReviews();
   return rows;
 }
 
@@ -57,6 +58,7 @@ async function pfSelectAccount(id) {
 }
 
 function pfResetAccounts() {
+  if (typeof pfResetCashReviews === 'function') pfResetCashReviews();
   if (typeof pfResetActivity === 'function') pfResetActivity();
   clearTimeout(PfAccounts.refreshTimer); PfAccounts.refreshTimer = null;
   PfAccounts.generation = (PfAccounts.generation || 0) + 1;
