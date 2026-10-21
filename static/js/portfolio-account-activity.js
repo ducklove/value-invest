@@ -3,7 +3,7 @@ const PfActivity = { account: null, items: [], offset: 0, busy: false, generatio
 const _pfActivityKinds = { dividend: '배당·분배금', interest: '이자', other_income: '기타 수입', transfer: '원금 입출금', internal: '계좌 내 자금 이동', trade: '매매·입출고', fee: '수수료·세금', review: '확인 필요' };
 const _pfActivityEl = id => document.getElementById(id);
 const _pfActivityMoney = value => value == null ? '확인 필요' : Number(value).toLocaleString('ko-KR', { maximumFractionDigits: 6 });
-const _pfActivityAutoHelp = '배당·분배금은 NH 거래내역에서 자동으로 가져옵니다(국내 종합거래내역, 해외 일별거래내역). 이자·입출금 등은 거래 식별자 확인 전까지 자동 반영을 보류합니다. 수입 기록은 현금에 다시 더하지 않습니다.';
+const _pfActivityAutoHelp = '배당·분배금은 NH 거래내역에서 자동으로 가져옵니다(국내 종합거래내역, 해외 일별거래내역). 이자·대여료는 예수금 사유 대조용 일별 합계로 자동 확인합니다. 거래번호가 없는 이자·입출금의 수입·입출금 원장 반영은 보류하며, 수입 기록은 현금에 다시 더하지 않습니다.';
 
 // NH 배당 행의 확인 상태. 환율·세금 검산이 안 되거나 증권사 정정이 있으면 '확인 필요'.
 function _pfActivityTag(row) {

@@ -11,7 +11,7 @@ function pfCashReviewDialog() {
   dialog.setAttribute('aria-labelledby', 'pfCashReviewTitle');
   dialog.innerHTML = `<h2 id="pfCashReviewTitle">예수금 변동 사유</h2>
     <p>자동 연동 계좌에서 아직 설명되지 않은 예수금 변동입니다. 사유를 선택해 기록해 주세요.</p>
-    <p class="pf-cash-review-help">조회 사이의 순변동이므로 여러 거래가 합쳐질 수 있습니다. 확인된 수입·매매·계좌 내 이동은 대조해 제외합니다. 사유 저장은 잔고·NAV·좌수를 변경하지 않습니다.</p>
+    <p class="pf-cash-review-help">확인된 수입과 소액 변동은 자동 처리합니다. 소액 기준은 하루 합계 1,000원이며 예수금 규모에 따라 최대 10,000원까지 적용합니다. 조회 사이의 순변동이므로 여러 거래가 합쳐질 수 있습니다.</p>
     <div class="pf-account-actions"><button type="button" id="pfCashReviewMode">전체 이력 보기</button><button type="button" id="pfCashReviewReload">새로 조회</button><button type="button" id="pfCashReviewClose">나중에 입력</button></div>
     <p id="pfCashReviewStatus" role="status" aria-live="polite"></p><div id="pfCashReviewRows"></div>
     <div class="pf-account-actions"><button type="button" id="pfCashReviewPrev">이전</button><button type="button" id="pfCashReviewNext">다음</button></div>`;
@@ -61,16 +61,18 @@ function pfRenderCashReviews(data) {
   _pfCashReviewEl('pfCashReviewRows').innerHTML = data.items.map(row => {
     const amount = Number(row.unexplained);
     const automatic = amount === 0;
+    const minor = row.auto_resolution === 'minor';
     const label = data.categories.find(item => item.id === row.category)?.label;
     const options = data.categories.filter(item => !item.direction || item.direction * amount > 0 || item.id === row.category);
     return `<form class="pf-cash-review-row" data-review="${Number(row.id)}">
-      <h3>${escapeHtml(row.account_name)} · ${automatic ? '자동 확인' : amount > 0 ? '입금' : '출금'} ${_pfCashReviewMoney(Math.abs(amount))} ${escapeHtml(row.currency)}</h3>
+      <h3>${escapeHtml(row.account_name)} · ${automatic ? '자동 확인' : minor ? '소액 자동처리' : amount > 0 ? '입금' : '출금'} ${_pfCashReviewMoney(Math.abs(amount))} ${escapeHtml(row.currency)}</h3>
       <p>${escapeHtml(row.from_at.replace('T', ' ').slice(0, 19))} ~ ${escapeHtml(row.to_at.replace('T', ' ').slice(0, 19))} (한국시간)</p>
       <p>예수금 순변동 ${_pfCashReviewMoney(row.amount)} ${escapeHtml(row.currency)}${Number(row.amount) !== amount ? ` · 확인된 금액 제외 후 ${_pfCashReviewMoney(amount)} ${escapeHtml(row.currency)}` : ''}</p>
       ${row.positions_changed ? '<p>보유 잔고도 변경됐습니다. 매매 결제·입출고·CMA 이동 여부를 함께 확인해 주세요.</p>' : ''}
+      ${minor ? `<p>사유 입력이 필요하지 않습니다. 같은 날 미확인 변동의 절대금액 합계가 소액 기준(${_pfCashReviewMoney(row.minor_limit)} ${escapeHtml(row.currency)}) 이하입니다. 이자로 확정한 기록은 아닙니다.</p><details><summary>직접 사유 기록 (선택)</summary>` : ''}
       ${automatic ? '<p>수집된 거래내역으로 설명된 변동입니다.</p>' : `<fieldset><label>사유 선택 <select name="category" required><option value="">선택해 주세요</option>${options.map(item => `<option value="${escapeHtml(item.id)}" ${row.category === item.id ? 'selected' : ''}>${escapeHtml(item.label)}</option>`).join('')}</select></label>
       <label>상세 사유 <textarea name="reason" maxlength="500" rows="2" ${['other', 'transfer'].includes(row.category) ? 'required' : ''} placeholder="여러 사유가 섞였다면 금액과 내용을 함께 적어 주세요">${escapeHtml(row.reason || '')}</textarea></label>
-      <button type="submit">${label ? '사유 수정' : '사유 저장'}</button></fieldset>`}</form>`;
+      <button type="submit">${label ? '사유 수정' : '사유 저장'}</button></fieldset>`}${minor ? '</details>' : ''}</form>`;
   }).join('') || `<p>${PfCashReviews.pending ? '사유를 입력할 예수금 변동이 없습니다.' : '기록된 예수금 변동이 없습니다.'}</p>`;
   _pfCashReviewEl('pfCashReviewPrev').disabled = !PfCashReviews.offset;
   _pfCashReviewEl('pfCashReviewNext').disabled = !data.has_more;

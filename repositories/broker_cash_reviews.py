@@ -1,9 +1,11 @@
 """연동 잔고의 설명되지 않은 현금 변동. 실제 거래 원장이나 NAV를 변경하지 않는다."""
 
 import json
+from collections import defaultdict
 from decimal import Decimal
 
 from domain.broker_activity import stamp
+from domain.cash_review import minor_limit
 from repositories.broker_secrets import BrokerError
 from repositories.db import read_snapshot, transaction
 
@@ -34,12 +36,27 @@ def _decimal(value) -> Decimal:
     return Decimal(str(value or 0)).quantize(Decimal("0.000001"))
 
 
-async def _evidence(db, user: str, aid: str) -> dict:
+def _fingerprint(link: dict) -> str:
+    return ":".join(str(link.get(k, "")) for k in ("provider", "account_fingerprint", "environment", "product", "include_overseas"))
+
+
+async def store_evidence(db, user: str, link: dict, batch):
+    """조회가 끝난 기간을 통째로 교체한다. 거래번호를 만들거나 수입·현금을 가산하지 않는다."""
+    fp = _fingerprint(link)
+    await db.execute("DELETE FROM broker_cash_review_evidence WHERE google_sub=? AND account_id=? AND fingerprint=? AND booked_date BETWEEN ? AND ?",
+                     (user, link["account_id"], fp, batch.start, batch.end))
+    for row in batch.cash_summaries:
+        await db.execute("INSERT INTO broker_cash_review_evidence VALUES (?,?,?,?,?,?,?,?)",
+                         (user, link["account_id"], fp, row["booked_date"], row["date"], row["currency"], row["kind"], row["amount"]))
+
+
+async def _evidence(db, user: str, aid: str, fp: str) -> dict:
     """확정 원장만 사용. 외부 이체와 미확인·정정 거래는 사유를 추측하지 않는다."""
     rows = await (await db.execute(
         "SELECT id,kind,reason,data_json FROM broker_transactions WHERE google_sub=? AND account_id=?",
         (user, aid))).fetchall()
     result = {}
+    ledger_groups = set()
     for row in rows:
         data = json.loads(row["data_json"])
         kind, label = row["kind"], data.get("description", "")
@@ -51,6 +68,15 @@ async def _evidence(db, user: str, aid: str) -> dict:
         if effects and data["currency"] != "KRW" and data.get("domestic_tax_krw"):
             effects["KRW"] = -data["domestic_tax_krw"]
         result[str(row["id"])] = {"date": data["date"], "effects": effects}
+        if effects:
+            ledger_groups.add((data["date"], data["currency"], kind))
+    summaries = await (await db.execute("SELECT * FROM broker_cash_review_evidence WHERE google_sub=? AND account_id=? AND fingerprint=?",
+                                       (user, aid, fp))).fetchall()
+    for row in summaries:
+        if (row["date"], row["currency"], row["kind"]) in ledger_groups:
+            continue  # 같은 수입이 기존 확정 원장에도 있으면 합계로 다시 설명하지 않는다.
+        key = ":".join(("summary", row["booked_date"], row["date"], row["currency"], row["kind"]))
+        result[key] = {"date": row["date"], "effects": {row["currency"]: row["amount"]}, "summary": True}
     return result
 
 
@@ -59,17 +85,20 @@ async def _reconcile(db, user: str, aid: str, state: dict, evidence: dict, now: 
     baseline = json.loads(state["baseline_json"])
     pools = {}
     for key, new in evidence.items():
-        if key in baseline:
+        if key in baseline and not new.get("summary"):
             continue
         day = new.get("date")
         if not day or day < state["started_at"][:10]:
             continue
         for currency, amount in new["effects"].items():
+            if new.get("summary"):
+                # 같은 날 기준 잔고 이후 합계가 늘어난 부분만 사용한다.
+                amount = max(0, _decimal(amount) - _decimal(baseline.get(key, {}).get("effects", {}).get(currency)))
             pools[day, currency, key] = _decimal(amount)
     rows = await (await db.execute(
         "SELECT * FROM broker_cash_reviews WHERE google_sub=? AND account_id=? AND fingerprint=? ORDER BY id",
         (user, aid, state["fingerprint"]))).fetchall()
-    for row in rows:
+    for index, row in enumerate(rows):
         remaining = _decimal(row["amount"])
         candidates = [key for key, amount in pools.items() if amount and key[1] == row["currency"]
                       and row["from_at"][:10] <= key[0] <= row["to_at"][:10]]
@@ -87,6 +116,17 @@ async def _reconcile(db, user: str, aid: str, state: dict, evidence: dict, now: 
                 if available * remaining > 0 and abs(available) <= abs(remaining):
                     remaining -= available
                     pools[key] = Decimal(0)
+                elif remaining > 0 and available > remaining and key[2].startswith("summary:"):
+                    # 일별 합계가 여러 잔고 조회에 나눠 반영된 경우만 나눠 대조한다.
+                    # 관측된 입금 총액보다 확인 수입이 크면 상쇄 출금이 섞였을 수 있어 보류한다.
+                    future_capacity = remaining + sum((_decimal(later["amount"]) for later in rows[index + 1:]
+                        if later["currency"] == key[1] and later["amount"] > 0
+                        and later["from_at"][:10] <= key[0] <= later["to_at"][:10]), Decimal(0))
+                    known_total = sum((value for other, value in pools.items()
+                                       if other[:2] == key[:2] and value > 0), Decimal(0))
+                    if future_capacity >= known_total:
+                        pools[key] -= remaining
+                        remaining = Decimal(0)
         if remaining != _decimal(row["unexplained"]):
             # 지연 수집으로 설명 대상액이 바뀌면 이전 답변은 이력에 남기고 재확인한다.
             await db.execute(
@@ -94,15 +134,15 @@ async def _reconcile(db, user: str, aid: str, state: dict, evidence: dict, now: 
                 (float(remaining), now, row["id"]))
 
 
-async def observe(db, user: str, link: dict, positions: list[dict], previous: list[dict]):
+async def observe(db, user: str, link: dict, positions: list[dict], previous: list[dict], *, fx_rates: dict | None = None):
     """완전한 잔고와 같은 트랜잭션에서 관측한다. 최초·재연결은 기준 잔고만 저장한다."""
     if link["environment"] != "live" or link.get("product", "stocks") in {"krfuture", "gbfuture"}:
         return  # 선물 CASH 행은 평가액을 나타내는 합성 값이다.
     aid, now = link["account_id"], stamp()
-    fingerprint = ":".join(str(link.get(k, "")) for k in ("provider", "account_fingerprint", "environment", "product", "include_overseas"))
+    fingerprint = _fingerprint(link)
     cash = {r["currency"]: float(r["quantity"]) for r in positions if r["stock_code"].startswith("CASH_")}
     state = await (await db.execute("SELECT * FROM broker_cash_review_state WHERE google_sub=? AND account_id=?", (user, aid))).fetchone()
-    evidence = await _evidence(db, user, aid)
+    evidence = await _evidence(db, user, aid, fingerprint)
     if not state or state["fingerprint"] != fingerprint or not link["last_sync_at"]:
         await db.execute(
             "INSERT INTO broker_cash_review_state VALUES (?,?,?,?,?,?,?) ON CONFLICT(account_id) DO UPDATE SET "
@@ -117,28 +157,50 @@ async def observe(db, user: str, link: dict, positions: list[dict], previous: li
     for currency in old_cash.keys() | cash.keys():
         amount = _decimal(cash.get(currency)) - _decimal(old_cash.get(currency))
         if amount:
+            basis = max(abs(old_cash.get(currency, 0)), abs(cash.get(currency, 0)))
+            limit = minor_limit(currency, basis, (fx_rates or {}).get(currency))
             await db.execute(
-                "INSERT INTO broker_cash_reviews (google_sub,account_id,fingerprint,from_at,to_at,currency,amount,unexplained,positions_changed,updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (user, aid, fingerprint, state["last_at"], now, currency, float(amount), float(amount), int(changed), now))
+                "INSERT INTO broker_cash_reviews (google_sub,account_id,fingerprint,from_at,to_at,currency,amount,unexplained,positions_changed,updated_at,cash_basis,minor_limit_native) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (user, aid, fingerprint, state["last_at"], now, currency, float(amount), float(amount), int(changed), now,
+                 basis, float(limit) if limit else None))
     await _reconcile(db, user, aid, state, evidence, now)
     await db.execute("UPDATE broker_cash_review_state SET cash_json=?,last_at=? WHERE google_sub=? AND account_id=?", (json.dumps(cash), now, user, aid))
 
 
-async def history(user: str, *, pending: bool = True, offset: int = 0) -> dict:
+async def history(user: str, *, pending: bool = True, offset: int = 0, fx_rates: dict | None = None) -> dict:
     async with read_snapshot() as db:
-        # 연결 해제한 계좌의 과거 기록은 자동 표시에서 제외하고 이력에서 보존한다.
-        scope = ("AND r.unexplained!=0 AND r.category='' AND l.account_id IS NOT NULL AND l.last_sync_at IS NOT NULL "
-                 "AND l.environment='live' AND l.product NOT IN ('krfuture','gbfuture') "
-                 "AND r.fingerprint=s.fingerprint") if pending else ""
-        query = ("FROM broker_cash_reviews r JOIN portfolio_accounts a ON a.account_id=r.account_id "
+        query = ("SELECT r.*,a.name AS account_name, (l.account_id IS NOT NULL AND l.last_sync_at IS NOT NULL "
+                 "AND l.environment='live' AND l.product NOT IN ('krfuture','gbfuture') AND r.fingerprint=s.fingerprint) AS is_current "
+                 "FROM broker_cash_reviews r JOIN portfolio_accounts a ON a.account_id=r.account_id "
                  "LEFT JOIN broker_account_links l ON l.account_id=r.account_id AND l.google_sub=r.google_sub "
                  "LEFT JOIN broker_cash_review_state s ON s.account_id=r.account_id AND s.google_sub=r.google_sub "
-                 "WHERE r.google_sub=? " + scope)
-        count = (await (await db.execute("SELECT COUNT(*) " + query, (user,))).fetchone())[0]
-        rows = await (await db.execute("SELECT r.*,a.name AS account_name " + query + " ORDER BY r.id DESC LIMIT 100 OFFSET ?", (user, offset))).fetchall()
-        items = [{k: row[k] for k in row.keys() if k not in {"google_sub", "fingerprint"}} for row in rows]
-        return {"items": items, "total": count, "has_more": offset + len(items) < count,
+                 "WHERE r.google_sub=? ORDER BY r.id DESC")
+        rows = [dict(row) for row in await (await db.execute(query, (user,))).fetchall()]
+        totals = defaultdict(Decimal)
+        limits = {}
+        for row in rows:
+            if row["category"] or not row["unexplained"]:
+                continue
+            key = (row["account_id"], row["fingerprint"], row["currency"], row["to_at"][:10])
+            limit = (_decimal(row["minor_limit_native"]) if row["minor_limit_native"] is not None else
+                     minor_limit(row["currency"], row["cash_basis"], (fx_rates or {}).get(row["currency"])))
+            totals[key] += abs(_decimal(row["unexplained"]))
+            limits[key] = min(limits.get(key, limit), limit)
+        items = []
+        for row in rows:
+            key = (row["account_id"], row["fingerprint"], row["currency"], row["to_at"][:10])
+            automatic = "confirmed" if not row["unexplained"] else None
+            if not row["category"] and row["unexplained"] and totals[key] <= limits[key]:
+                automatic = "minor"
+            required = bool(row["unexplained"] and not row["category"] and not automatic)
+            if pending and (not row["is_current"] or not required):
+                continue
+            item = {k: value for k, value in row.items() if k not in {"google_sub", "fingerprint", "is_current"}}
+            items.append({**item, "auto_resolution": automatic, "review_required": required,
+                          "minor_limit": float(limits.get(key, 0))})
+        count = len(items)
+        return {"items": items[offset:offset + 100], "total": count, "has_more": offset + 100 < count,
                 "categories": [{"id": key, "label": label, "direction": direction} for key, (label, direction) in CATEGORIES.items()]}
 
 

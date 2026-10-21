@@ -86,7 +86,8 @@ test('NH 배당은 확인 태그와 해외 세전·현지세·국내세·원화 
     s.w.apiFetchJson=async()=>({items:[dividend,review,refund,domestic],totals:[{kind:'dividend',currency:'USD',amount:8.5,amount_krw:11904,adjustment_krw:-55}],has_more:false,auto_import:'dividends',state:{last_import_at:'2026-10-01T10:00:00'}});
     await s.w.pfOpenAccountActivity({account_id:'a',name:'NH',broker:'namuh'});
     assert.match(s.el('pfActivityPollingHelp').textContent,/배당·분배금은 NH 거래내역에서 자동/);
-    assert.match(s.el('pfActivityPollingHelp').textContent,/이자·입출금 등은 .*보류/);
+    assert.match(s.el('pfActivityPollingHelp').textContent,/이자·대여료는 예수금 사유 대조용 일별 합계로 자동 확인/);
+    assert.match(s.el('pfActivityPollingHelp').textContent,/이자·입출금의 수입·입출금 원장 반영은 보류/);
     const forms=[...s.el('pfActivityRows').querySelectorAll('form')];
     assert.equal(forms[0].querySelector('.pf-activity-tag.nh').textContent,'NH 확인');
     assert.match(forms[0].textContent,/세전 10 USD · 현지세 1\.5 USD · 국내세 0원 · 원화 세후 11,904원/);

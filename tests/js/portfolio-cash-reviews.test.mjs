@@ -133,3 +133,22 @@ test('전체 이력에서 자동 확인과 저장된 사유를 조회하고 출�
     assert.equal(form.querySelector('button').textContent,'사유 수정');
   } finally {s.dom.window.close();}
 });
+
+test('소액만 있으면 자동 창·알림을 띄우지 않고 이력에서 자동처리와 선택적 수정을 제공한다', async () => {
+  const s=setup();
+  try {
+    const minor={...row,amount:500,unexplained:500,auto_resolution:'minor',minor_limit:1000,review_required:false};
+    s.w.apiFetchJson=async path=>path.includes('pending=false')?result([minor]):result([]);
+    await s.w.pfLoadCashReviews({auto:true});
+    assert.equal(s.el('pfCashReviewDialog'),null);
+    assert.equal(s.el('pfCashReviewNotice'),null);
+    await s.w.pfOpenCashReviews();
+    s.el('pfCashReviewMode').click(); await tick();
+    const form=s.el('pfCashReviewRows').querySelector('form');
+    assert.match(form.querySelector('h3').textContent,/소액 자동처리 500 KRW/);
+    assert.match(form.textContent,/사유 입력이 필요하지 않습니다/);
+    assert.match(form.textContent,/이자로 확정한 기록은 아닙니다/);
+    assert.equal(form.querySelector('details').open,false);
+    assert.match(form.querySelector('summary').textContent,/선택/);
+  } finally {s.dom.window.close();}
+});

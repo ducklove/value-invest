@@ -97,7 +97,11 @@ class CashReviewNote(BaseModel):
 
 @router.get("/api/portfolio/cash-reviews")
 async def cash_review_history(request: Request, pending: bool = True, offset: Annotated[int, Query(ge=0)] = 0):
-    return await broker_cash_reviews.history(await user_id(request), pending=pending, offset=offset)
+    from services.portfolio.currencies import CURRENCY_TO_FX_CODE
+    from services.portfolio.fx import cached_rate_for_currency
+    user = await user_id(request)
+    rates = {currency: cached_rate_for_currency(currency) for currency in CURRENCY_TO_FX_CODE}
+    return await broker_cash_reviews.history(user, pending=pending, offset=offset, fx_rates=rates)
 
 
 @router.patch("/api/portfolio/cash-reviews/{review_id}")

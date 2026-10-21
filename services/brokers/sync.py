@@ -82,6 +82,10 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                     # 일부만 저장하지 않고, 독립적으로 검증한 잔고 조회는 계속한다.
                     activity_error = str(exc)
             rows, balances = await fetch_snapshot(user, link)
+            from services.portfolio.currencies import CURRENCY_TO_FX_CODE
+            from services.portfolio.fx import cached_rate_for_currency
+            # 추가 환율 요청 없이 신선한 캐시만 사용한다. 사유 중요도 판단용이며 성과 환산은 하지 않는다.
+            review_fx = {currency: cached_rate_for_currency(currency) for currency in CURRENCY_TO_FX_CODE}
             async with transaction() as db:
                 current = await brokers.get_link(user, aid)
                 if any(current.get(key) != link.get(key) for key in ("credential_id", "account_fingerprint", "product", "provider", "environment")):
@@ -89,6 +93,8 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                 await holdings.initialize(db, user)
                 if entries is not None:
                     await broker_activity.store(user, link, entries)
+                    if isinstance(entries, activity.ActivityBatch):
+                        await broker_cash_reviews.store_evidence(db, user, link, entries)
                 elif activity_error:
                     await broker_activity.set_error(user, aid, activity_error)
                 previous = await holdings.list_positions(user, aid)
@@ -101,7 +107,7 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                     if not row["stock_code"].startswith("CASH_") and not is_futures_value(row["stock_code"]) and any(r["stock_code"] == row["stock_code"] and r["quantity"] * row["quantity"] < 0 for r in other):
                         raise BrokerError("다른 계좌의 공매도 잔고와 충돌하여 동기화를 보류했습니다.")
                 now = datetime.now(timezone.utc).isoformat()
-                await broker_cash_reviews.observe(db, user, current, rows, previous)
+                await broker_cash_reviews.observe(db, user, current, rows, previous, fx_rates=review_fx)
                 created = {r["stock_code"]: r["created_at"] for r in previous}
                 await db.execute("DELETE FROM account_holdings WHERE google_sub=? AND account_id=?", (user, aid))
                 for row in rows:

@@ -918,6 +918,18 @@ CREATE TABLE IF NOT EXISTS broker_cash_review_notes (
     reason TEXT NOT NULL,
     changed_at TEXT NOT NULL
 );
+-- 거래번호 없는 NH 수입은 사유 대조용 일별 합계로만 저장한다. 수익·입출금 원장이 아니다.
+CREATE TABLE IF NOT EXISTS broker_cash_review_evidence (
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    account_id TEXT NOT NULL REFERENCES portfolio_accounts(account_id) ON DELETE CASCADE,
+    fingerprint TEXT NOT NULL,
+    booked_date TEXT NOT NULL,
+    date TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    amount REAL NOT NULL,
+    PRIMARY KEY (google_sub,account_id,fingerprint,booked_date,date,currency,kind)
+);
 
 CREATE TABLE IF NOT EXISTS household_assets (
     asset_id TEXT PRIMARY KEY,
@@ -1114,6 +1126,8 @@ CREATE INDEX IF NOT EXISTS idx_distributions_user_date ON portfolio_distribution
 # the list here makes init_db's migration surface explicit while the larger
 # table-creation script is still being split out of cache.py.
 CORE_COLUMN_MIGRATIONS: tuple[ColumnSpec, ...] = (
+    ("broker_cash_reviews", "cash_basis", "REAL"),
+    ("broker_cash_reviews", "minor_limit_native", "REAL"),
     ("broker_credentials", "provider", "TEXT NOT NULL DEFAULT 'namuh'"),
     ("broker_account_links", "provider", "TEXT NOT NULL DEFAULT 'namuh'"),
     ("broker_account_links", "product", "TEXT NOT NULL DEFAULT 'stocks'"),

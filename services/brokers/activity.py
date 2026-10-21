@@ -130,6 +130,51 @@ DOMESTIC_WINDOW_DAYS = 365
 VOLATILE_FIELDS = frozenset({"balance_check", "stock_code"})
 
 
+class ActivityBatch(list):
+    """확정 배당 원장 + 거래번호를 만들지 않는 수입 일별 합계."""
+
+    def __init__(self, entries, cash_summaries, start, end):
+        super().__init__(entries)
+        self.cash_summaries = cash_summaries
+        self.start = start.isoformat()
+        self.end = end.isoformat()
+
+
+def cash_income_summary(row: dict, link: dict, previous: dict | None) -> dict | None:
+    """명시적인 원화 이자·대여료만 검산한다. RP 상환 등 원금 혼합은 제외한다."""
+    label = _compact(row.get("sps_cd_krl_anm"))
+    labels = {
+        "예탁금이용료": "interest", "예수금이자": "interest", "예탁금이자": "interest",
+        "이자입금": "interest", "이자지급": "interest",
+        "대여수수료": "other_income", "대여수수료입금": "other_income",
+        "대여료입금": "other_income", "대여료수입": "other_income",
+    }
+    kind = labels.get(label)
+    currency = str(row.get("cur_cd") or "").strip().upper() or "KRW"
+    if not kind or currency != "KRW":
+        return None
+    if row.get("act_no") not in (None, "", link["account_no"]):
+        raise BrokerError("NH 거래내역의 계좌를 확인할 수 없습니다.")
+    booked = _ymd(row, "trd_dt")
+    if not booked:
+        raise BrokerError("NH 수입 내역의 날짜를 확인할 수 없습니다.")
+    actual = _ymd(row, "ral_trd_dt")
+    day = actual if actual and actual <= booked else booked
+    gross, tax, fee, interest = (_lenient(row, key) for key in ("trd_amt", "tax_sum", "trd_orn_fee", "int_amt"))
+    valid = gross is not None and tax is not None and fee is not None and gross > 0 and tax >= 0 and fee >= 0
+    net = gross - tax - fee if valid else None
+    if net is not None and (net <= 0 or (interest is not None and interest > 0 and interest != gross)):
+        net = None
+    before = _lenient(previous, "trd_af_dca") if previous else None
+    after = _lenient(row, "trd_af_dca")
+    # 바로 앞 행이 다른 통화라면 원화 잔고 전후 검산에 사용하지 않는다.
+    previous_currency = str((previous or {}).get("cur_cd") or "").strip().upper() or "KRW"
+    if before is not None and after is not None and previous_currency == "KRW" and net is not None and after - before != net:
+        net = None
+    return {"booked_date": booked, "date": day, "currency": currency, "kind": kind,
+            "amount": float(net) if net is not None else None}
+
+
 def _compact(value) -> str:
     return re.sub(r"\s+", "", str(value or ""))
 
@@ -302,7 +347,7 @@ def _put(collected: dict, data: dict):
     collected[data["source_key"]] = data
 
 
-async def _domestic_dividends(user: str, link: dict, start: date, end: date, collected: dict):
+async def _domestic_dividends(user: str, link: dict, start: date, end: date, collected: dict, cash_summaries: dict | None = None):
     ordinals: dict[tuple, int] = {}
     while start <= end:
         # 운영에서 365일 한 번 조회(연속 조회 포함)를 확인했다. 빈 구간 호출 수를 줄인다.
@@ -325,6 +370,15 @@ async def _domestic_dividends(user: str, link: dict, start: date, end: date, col
             for row in rows:
                 if not isinstance(row, dict):
                     raise BrokerError("NH 거래내역 형식이 올바르지 않습니다.")
+                if cash_summaries is not None:
+                    income = cash_income_summary(row, link, previous)
+                    if income:
+                        if not start.isoformat() <= income["booked_date"] <= until.isoformat():
+                            raise BrokerError("NH 조회 기간 밖의 수입이 반환되었습니다.")
+                        key = tuple(income[field] for field in ("booked_date", "date", "currency", "kind"))
+                        old = cash_summaries.get(key, 0)
+                        # 같은 일자·분류 중 검산 실패가 하나라도 있으면 부분 합계를 확정하지 않는다.
+                        cash_summaries[key] = None if old is None or income["amount"] is None else old + Decimal(str(income["amount"]))
                 if is_domestic_dividend_label(row.get("sps_cd_krl_anm")):
                     group = (str(row.get("trd_dt")), _compact(row.get("sps_cd_krl_anm")), str(row.get("iem_cd") or "").strip())
                     ordinals[group] = ordinals.get(group, 0) + 1
@@ -367,13 +421,16 @@ async def _overseas_dividends(user: str, link: dict, start: date, end: date, col
 
 
 async def fetch(user: str, link: dict, start: date, end: date) -> list[dict]:
-    """배당 전용 가져오기. 일반 수입·입출금은 거래 식별자 검증 전까지 보류한다."""
+    """확정 배당과 사유 대조용 일별 수입 합계. 일반 거래 원장은 계속 보류한다."""
     if link["environment"] != "live":
         raise BrokerError("NH 종합거래내역은 실계좌에서만 제공됩니다.")
     if start > end or end > datetime.now(KST).date() or (end - start).days > 366:
         raise BrokerError("거래내역 조회 기간은 오늘까지 최대 1년으로 지정해 주세요.")
     collected: dict[str, dict] = {}
-    await _domestic_dividends(user, link, start, end, collected)
+    cash_summaries = {}
+    await _domestic_dividends(user, link, start, end, collected, cash_summaries)
     if link.get("product", "stocks") == "stocks":
         await _overseas_dividends(user, link, start, end, collected)
-    return list(collected.values())
+    summaries = [dict(zip(("booked_date", "date", "currency", "kind"), key), amount=float(amount))
+                 for key, amount in cash_summaries.items() if amount is not None]
+    return ActivityBatch(collected.values(), summaries, start, end)
