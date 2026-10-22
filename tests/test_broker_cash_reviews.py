@@ -312,3 +312,72 @@ class CashReviewTests(TempDbMixin):
         db = await get_db()
         self.assertEqual((await (await db.execute("SELECT COUNT(*) FROM broker_cash_review_evidence")).fetchone())[0], 0)
         self.assertEqual(await self.pending(), [])
+
+    async def test_legacy_rows_recover_their_balance_instead_of_lowering_new_daily_limit(self):
+        await self.sync(cash(80000000))
+        await self.sync(cash(80006200))
+        await self.sync(cash(80005100))
+        await self.sync(cash(80005250))
+        async with transaction() as db:
+            await db.execute("UPDATE broker_cash_reviews SET cash_basis=NULL,minor_limit_native=NULL")
+        await self.sync(cash(80005350))
+        self.assertEqual(await self.pending(), [])
+        rows = (await broker_cash_reviews.history("u1", pending=False))["items"]
+        self.assertEqual(len(rows), 4)
+        self.assertTrue(all(row["auto_resolution"] == "minor" and row["minor_limit"] > 8000 for row in rows))
+        self.assertEqual(rows[-1]["cash_basis"], 80006200)
+        db = await get_db()
+        self.assertEqual((await (await db.execute("SELECT COUNT(*) FROM broker_cash_reviews WHERE cash_basis IS NULL")).fetchone())[0], 3)
+
+    async def test_recovered_old_limit_uses_original_amount_not_current_cash_or_unexplained(self):
+        await self.sync(cash(10000))
+        await self.sync(cash(15000), entries=[self.event("div", 3000)])
+        async with transaction() as db:
+            await db.execute("UPDATE broker_cash_reviews SET cash_basis=NULL,minor_limit_native=NULL")
+        await self.sync(cash(100015000))
+        newest = (await self.pending())[0]
+        await broker_cash_reviews.annotate("u1", newest["id"], revision=newest["revision"], category="external_deposit")
+        old = (await self.pending())[0]
+        self.assertEqual((old["cash_basis"], old["minor_limit"], old["unexplained"]), (15000, 1000, 2000))
+
+    async def test_inconsistent_anchor_does_not_invent_historical_large_balances(self):
+        await self.sync(cash(10000))
+        await self.sync(cash(12000))
+        async with transaction() as db:
+            await db.execute("UPDATE broker_cash_reviews SET cash_basis=NULL,minor_limit_native=NULL")
+        await self.sync(cash(13000))
+        async with transaction() as db:
+            await db.execute("UPDATE broker_cash_reviews SET cash_basis=99999999 WHERE id=(SELECT MAX(id) FROM broker_cash_reviews)")
+        rows = (await broker_cash_reviews.history("u1", pending=False))["items"]
+        self.assertIsNone(rows[-1]["cash_basis"])
+        self.assertTrue(rows[-1]["review_required"])
+
+    async def test_exact_later_lending_receipt_is_not_subtracted_from_earlier_interest(self):
+        await self.sync(cash(80000000))
+        await self.sync(cash(80006200))
+        await self.sync(cash(80006350), entries=self.income_batch(150, kind="other_income"))
+        rows = (await broker_cash_reviews.history("u1", pending=False))["items"]
+        self.assertEqual([row["unexplained"] for row in rows], [0, 6200])
+
+    async def test_mmw_valuation_interest_and_later_deductions_and_lending_are_fully_explained(self):
+        today = date.fromisoformat(stamp()[:10])
+        await self.sync(cash(80000000))
+        await self.sync(cash(80006200))
+        await self.sync(cash(80005100))
+        batch = activity.ActivityBatch([], [
+            {"date": str(today), "booked_date": str(today), "currency": "KRW", "kind": "mmw_interest", "amount": 6200},
+            {"date": str(today), "booked_date": str(today), "currency": "KRW", "kind": "mmw_charges", "amount": -1100},
+            {"date": str(today), "booked_date": str(today), "currency": "KRW", "kind": "other_income", "amount": 150},
+        ], today, today)
+        await self.sync(cash(80005250), entries=batch)
+        await self.sync(cash(80005250), entries=batch)
+        rows = (await broker_cash_reviews.history("u1", pending=False))["items"]
+        self.assertTrue(all(row["unexplained"] == 0 and row["auto_resolution"] == "confirmed" for row in rows))
+        self.assertEqual(await snapshots.get_cashflows("u1"), [])
+
+    async def test_negative_summary_already_in_baseline_is_not_reused(self):
+        today = date.fromisoformat(stamp()[:10])
+        batch = activity.ActivityBatch([], [{"date": str(today), "booked_date": str(today), "currency": "KRW", "kind": "mmw_charges", "amount": -2000}], today, today)
+        await self.sync(cash(10000), entries=batch)
+        await self.sync(cash(8000), entries=batch)
+        self.assertEqual((await self.pending())[0]["unexplained"], -2000)

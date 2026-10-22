@@ -73,3 +73,37 @@ def test_minor_limits_have_absolute_floor_ratio_and_hard_cap():
     assert minor_limit("KRW", 100000000000) == 10000
     assert minor_limit("JPY", 10000, 10) == 100
     assert minor_limit("USD", 100, None) == 0
+
+
+def mmw(**extra):
+    # 합성 원금·이자 관계: 운영 응답에서 확인한 필드 관계만 재현한다.
+    return {"trd_dt": "20261021", "cur_cd": "", "sps_cd_krl_anm": "MMW매도", "iem_cd": "MMW1003",
+            "trd_qty": 50000000, "trd_amt": 50005000, "int_amt": 5000, "tax_sum": 750,
+            "trd_orn_fee": 250, "trd_af_bnc_qty": 0, "trd_af_dca": 50004000, **extra}
+
+
+def test_mmw_summaries_separate_valuation_interest_and_deductions_without_principal():
+    rows = activity.mmw_cash_summaries(mmw(), LINK, {"trd_af_dca": 0})
+    assert [(r["kind"], r["amount"]) for r in rows] == [("mmw_interest", 5000), ("mmw_charges", -1000)]
+    assert sum(r["amount"] for r in rows) == 4000
+    assert activity.mmw_cash_summaries(mmw(cur_cd="KRW"), LINK, {"cur_cd": "KRW", "trd_af_dca": 0}) == rows
+
+
+@pytest.mark.parametrize("change", [{"int_amt": 4900}, {"tax_sum": -1}, {"trd_orn_fee": None}, {"trd_qty": 0},
+                                      {"trd_af_bnc_qty": 1}, {"tax_sum": 5001}, {"trd_af_dca": 60000000}])
+def test_invalid_mmw_principal_tax_and_balance_relationships_are_not_automatically_confirmed(change):
+    rows = activity.mmw_cash_summaries(mmw(**change), LINK, {"trd_af_dca": 0})
+    assert all(row["amount"] is None for row in rows)
+
+
+@pytest.mark.parametrize("change", [{"sps_cd_krl_anm": "MMW매수"}, {"sps_cd_krl_anm": "MMW매도취소"}, {"iem_cd": "another-product"}, {"cur_cd": "USD"}])
+def test_mmw_rules_only_apply_to_verified_mmw_product_and_currency(change):
+    assert activity.mmw_cash_summaries(mmw(**change), LINK, None) == []
+
+
+async def test_mmw_income_and_charges_flow_through_existing_activity_query():
+    pages = [{"Output_0": [mmw()]}]
+    with patch.object(activity.namuh, "pages", AsyncMock(return_value=pages)):
+        batch = await activity.fetch("user", LINK, date(2026, 10, 21), date(2026, 10, 21))
+    assert list(batch) == []
+    assert {row["kind"]: row["amount"] for row in batch.cash_summaries} == {"mmw_interest": 5000, "mmw_charges": -1000}

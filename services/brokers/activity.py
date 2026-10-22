@@ -175,6 +175,34 @@ def cash_income_summary(row: dict, link: dict, previous: dict | None) -> dict | 
             "amount": float(net) if net is not None else None}
 
 
+def mmw_cash_summaries(row: dict, link: dict, previous: dict | None) -> list[dict]:
+    """현금 합산 대상 MMW의 평가이자와 매도 시 공제만 대조한다. 원금은 제외한다."""
+    if _compact(row.get("sps_cd_krl_anm")) != "MMW매도" or row.get("iem_cd") != "MMW1003":
+        return []
+    if (str(row.get("cur_cd") or "").strip().upper() or "KRW") != "KRW":
+        return []
+    if row.get("act_no") not in (None, "", link["account_no"]):
+        raise BrokerError("NH 거래내역의 계좌를 확인할 수 없습니다.")
+    booked = _ymd(row, "trd_dt")
+    if not booked:
+        raise BrokerError("NH MMW 내역의 날짜를 확인할 수 없습니다.")
+    actual = _ymd(row, "ral_trd_dt")
+    gross, principal, interest, tax, fee, balance = (_lenient(row, key) for key in
+        ("trd_amt", "trd_qty", "int_amt", "tax_sum", "trd_orn_fee", "trd_af_bnc_qty"))
+    valid = all(value is not None for value in (gross, principal, interest, tax, fee, balance))
+    valid = valid and principal > 0 and interest >= 0 and tax >= 0 and fee >= 0 and balance == 0
+    # 운영 원화 MMW: 거래수량=원금(원), 거래금액=원금+이자. 다른 상품에는 적용하지 않는다.
+    valid = valid and gross - principal == interest and tax + fee <= interest
+    before = _lenient(previous, "trd_af_dca") if previous else None
+    after = _lenient(row, "trd_af_dca")
+    previous_currency = str((previous or {}).get("cur_cd") or "").strip().upper() or "KRW"
+    if valid and before is not None and after is not None and previous_currency == "KRW":
+        valid = after - before == gross - tax - fee
+    context = {"booked_date": booked, "date": actual if actual and actual <= booked else booked, "currency": "KRW"}
+    return [{**context, "kind": "mmw_interest", "amount": float(interest) if valid else None},
+            {**context, "kind": "mmw_charges", "amount": -float(tax + fee) if valid else None}]
+
+
 def _compact(value) -> str:
     return re.sub(r"\s+", "", str(value or ""))
 
@@ -371,8 +399,8 @@ async def _domestic_dividends(user: str, link: dict, start: date, end: date, col
                 if not isinstance(row, dict):
                     raise BrokerError("NH 거래내역 형식이 올바르지 않습니다.")
                 if cash_summaries is not None:
-                    income = cash_income_summary(row, link, previous)
-                    if income:
+                    incomes = [cash_income_summary(row, link, previous), *mmw_cash_summaries(row, link, previous)]
+                    for income in filter(None, incomes):
                         if not start.isoformat() <= income["booked_date"] <= until.isoformat():
                             raise BrokerError("NH 조회 기간 밖의 수입이 반환되었습니다.")
                         key = tuple(income[field] for field in ("booked_date", "date", "currency", "kind"))

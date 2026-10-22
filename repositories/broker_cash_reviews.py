@@ -93,7 +93,8 @@ async def _reconcile(db, user: str, aid: str, state: dict, evidence: dict, now: 
         for currency, amount in new["effects"].items():
             if new.get("summary"):
                 # 같은 날 기준 잔고 이후 합계가 늘어난 부분만 사용한다.
-                amount = max(0, _decimal(amount) - _decimal(baseline.get(key, {}).get("effects", {}).get(currency)))
+                difference = _decimal(amount) - _decimal(baseline.get(key, {}).get("effects", {}).get(currency))
+                amount = max(0, difference) if amount >= 0 else min(0, difference)
             pools[day, currency, key] = _decimal(amount)
     rows = await (await db.execute(
         "SELECT * FROM broker_cash_reviews WHERE google_sub=? AND account_id=? AND fingerprint=? ORDER BY id",
@@ -102,6 +103,11 @@ async def _reconcile(db, user: str, aid: str, state: dict, evidence: dict, now: 
         remaining = _decimal(row["amount"])
         candidates = [key for key, amount in pools.items() if amount and key[1] == row["currency"]
                       and row["from_at"][:10] <= key[0] <= row["to_at"][:10]]
+        # 금액이 정확히 맞는 다음 관측을 우선한다. 오후 대여료를 새벽 MMW 이자에서 먼저 빼지 않는다.
+        if sum((pools[key] for key in candidates), Decimal(0)) != remaining:
+            candidates = [key for key in candidates if pools[key] == remaining or not any(
+                _decimal(later["amount"]) == pools[key] and later["currency"] == key[1]
+                and later["from_at"][:10] <= key[0] <= later["to_at"][:10] for later in rows[index + 1:])]
         total = sum((pools[key] for key in candidates), Decimal(0))
         if total * remaining > 0 and abs(total) <= abs(remaining):
             # 한 구간에 여러 수입·세금·결제가 함께 반영된 경우 순액으로 대조한다.
@@ -168,6 +174,34 @@ async def observe(db, user: str, link: dict, positions: list[dict], previous: li
     await db.execute("UPDATE broker_cash_review_state SET cash_json=?,last_at=? WHERE google_sub=? AND account_id=?", (json.dumps(cash), now, user, aid))
 
 
+def _recover_cash_bases(rows: list[dict], states: dict) -> dict[int, float]:
+    """마지막 현금에서 원래 순변동을 역산한다. 현재 잔고를 과거 잔고로 대체하지 않는다."""
+    recovered = {}
+    running = {}
+    invalid = set()
+    for row in rows:  # id 내림차순. 잔고와 관측은 같은 트랜잭션에서 기록된다.
+        state = states.get(row["account_id"])
+        if not state or row["fingerprint"] != state["fingerprint"] or row["from_at"] < state["started_at"]:
+            continue
+        key = (row["account_id"], row["fingerprint"], row["currency"])
+        if key in invalid:
+            continue
+        if not row["from_at"] <= row["to_at"] <= state["last_at"]:
+            invalid.add(key)
+            continue
+        if key not in running:
+            running[key] = _decimal(json.loads(state["cash_json"]).get(row["currency"], 0))
+        after = running[key]
+        before = after - _decimal(row["amount"])
+        basis = max(abs(before), abs(after))
+        if row["cash_basis"] is not None and abs(basis - _decimal(row["cash_basis"])) > Decimal("0.000001"):
+            invalid.add(key)  # 저장된 기준과 다르면 누락·변경된 이력을 억지로 복원하지 않는다.
+            continue
+        recovered[row["id"]] = float(basis)
+        running[key] = before
+    return recovered
+
+
 async def history(user: str, *, pending: bool = True, offset: int = 0, fx_rates: dict | None = None) -> dict:
     async with read_snapshot() as db:
         query = ("SELECT r.*,a.name AS account_name, (l.account_id IS NOT NULL AND l.last_sync_at IS NOT NULL "
@@ -177,6 +211,12 @@ async def history(user: str, *, pending: bool = True, offset: int = 0, fx_rates:
                  "LEFT JOIN broker_cash_review_state s ON s.account_id=r.account_id AND s.google_sub=r.google_sub "
                  "WHERE r.google_sub=? ORDER BY r.id DESC")
         rows = [dict(row) for row in await (await db.execute(query, (user,))).fetchall()]
+        states = {row["account_id"]: dict(row) for row in await (await db.execute(
+            "SELECT * FROM broker_cash_review_state WHERE google_sub=?", (user,))).fetchall()}
+        recovered = _recover_cash_bases(rows, states)
+        for row in rows:
+            if row["cash_basis"] is None:
+                row["cash_basis"] = recovered.get(row["id"])
         totals = defaultdict(Decimal)
         limits = {}
         for row in rows:
