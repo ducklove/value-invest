@@ -329,16 +329,45 @@ function _mbIndicatorHasValue(data) {
 }
 
 function _mbMergeDataMap(dataMap) {
-  const merged = { ...mbLastDataMap };
-  for (const [code, data] of Object.entries(dataMap || {})) {
-    if (_mbIndicatorHasValue(data)) {
-      merged[code] = data;
-    } else {
-      merged[code] = { ...(merged[code] || data), _stale: true };
+  mbLastDataMap = mergeMarketIndicatorMap(mbLastDataMap, dataMap);
+  return mbLastDataMap;
+}
+
+function _mbApplyIndicators(dataMap) {
+  const merged = _mbMergeDataMap(dataMap);
+  const bar = document.getElementById('marketBar');
+  if (!bar) return;
+  mbCodes.forEach((code, idx) => {
+    if (!dataMap?.[code]) return;
+    const row = merged[code];
+    const value = bar.querySelector(`.mi-val[data-idx="${idx}"]`);
+    const change = bar.querySelector(`.mi-chg[data-idx="${idx}"]`);
+    const label = bar.querySelector(`.mi-label[data-idx="${idx}"]`);
+    if (value) value.textContent = row.value || '-';
+    if (change) {
+      const sign = row.direction === 'down' ? '-' : row.direction === 'up' ? '+' : '';
+      const cls = row.direction === 'down' ? 'mi-down' : row.direction === 'up' ? 'mi-up' : 'mi-flat';
+      const pct = String(row.change_pct || '').replace(/[-+%]/g, '');
+      const text = [row.change ? sign + row.change : '', pct ? `(${sign}${pct}%)` : ''].filter(Boolean).join(' ');
+      change.innerHTML = `<span class="${cls}">${escapeHtml(text || '-')}</span>`;
     }
-  }
-  mbLastDataMap = merged;
-  return merged;
+    if (label) {
+      label.querySelectorAll('.mi-stale').forEach(badge => badge.remove());
+      if (row._stale) {
+        const badge = document.createElement('span'); badge.className = 'mi-stale'; badge.textContent = '지연';
+        label.appendChild(badge);
+      }
+      label.title = _mbIndicatorTitle(row);
+      if (value) value.title = label.title;
+    }
+  });
+}
+
+function _mbIndicatorTitle(d) {
+  const at = d?.as_of ? new Date(d.as_of) : null;
+  return [d?._stale ? '갱신 지연 · 이전 값 표시 중' : '',
+    d?.update_mode === 'polling' ? `${d.refresh_seconds}초 갱신` : '',
+    at && Number.isFinite(at.getTime()) ? `시세 기준: ${at.toLocaleString('ko-KR', {timeZone:'Asia/Seoul'})} KST` : ''].filter(Boolean).join(' · ');
 }
 
 function _mbRenderBar(dataMap) {
@@ -356,7 +385,8 @@ function _mbRenderBar(dataMap) {
       ? parsedStamp.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) + ' KST' : '';
     const details = [d?._stale ? '갱신 지연 · 이전 값 표시 중' : d?._degraded ? '주 공급원 장애 · Yahoo 대체 시세 사용' : '',
       timeLabel ? `${d?.as_of ? '시세 기준' : '마지막 수집'}: ${timeLabel}` : '',
-      Number(d?.delay_minutes) > 0 ? `제공 시세 ${Number(d.delay_minutes)}분 지연` : ''].filter(Boolean).join(' · ');
+      Number(d?.delay_minutes) > 0 ? `제공 시세 ${Number(d.delay_minutes)}분 지연` : '',
+      d?.update_mode === 'polling' ? `${d.refresh_seconds}초 갱신` : ''].filter(Boolean).join(' · ');
     const title = details ? ` title="${escapeHtml(details)}"` : '';
     const staleBadge = d?._stale ? ' <span class="mi-stale" aria-label="갱신 지연">지연</span>'
       : d?._degraded ? ' <span class="mi-stale" aria-label="대체 시세">대체</span>' : '';
@@ -575,7 +605,8 @@ async function loadMarketSummary() {
       const dataMap = await apiFetchJson(`/api/market-summary?codes=${mbCodes.join(',')}`, { cache: 'no-store', fallback: null });
       // 누락된 항목이나 네트워크 실패도 이전 값을 정상 시세로 보이지 않게 한다.
       const complete = Object.fromEntries(mbCodes.map(code => [code, dataMap?.[code] || null]));
-      _mbRenderBar(_mbMergeDataMap(complete));
+      _mbMergeDataMap(complete);
+      _mbRenderBar(_mbMergeDataMap(typeof QuoteManager !== 'undefined' ? QuoteManager.marketIndicators : {}));
     } catch (e) { console.warn(e); }
   })().finally(() => { mbRefreshPromise = null; });
   return mbRefreshPromise;

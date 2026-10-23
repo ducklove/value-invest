@@ -42,6 +42,18 @@ const CATALOG = {
   WEIRD: { label: "기타지표", category: "신규카테고리" },
 };
 
+test('지수 갱신은 eKOSPI 차트를 다시 로드하지 않고 실제 지수 값과 기준 시각을 바꾼다', () => {
+  const w = load();
+  try {
+    w._mdRenderDashboard(CATALOG, {KOSPI:{value:'2,800.00'}});
+    const frame = w.document.querySelector('iframe[data-md-frame-index="ekospi"]');
+    w._mdApplyIndicators({KOSPI:{value:'2,900.00',change:'200.00',change_pct:'7.41%',direction:'up',as_of:'2026-10-23T10:00:05+09:00',update_mode:'polling',refresh_seconds:5}});
+    assert.equal(w.document.querySelector('.md-index-value').textContent, '2,900.00');
+    assert.match(w.document.querySelector('.md-index-quote').textContent, /5초 갱신/);
+    assert.equal(w.document.querySelector('iframe[data-md-frame-index="ekospi"]'), frame);
+  } finally {w.close();}
+});
+
 test("_mdGroupByCategory orders known categories first, unknown last", () => {
   const w = load();
   const groups = w._mdGroupByCategory(CATALOG);

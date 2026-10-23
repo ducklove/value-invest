@@ -71,6 +71,20 @@ const flush = async () => {
   await new Promise((r) => setImmediate(r));
 };
 
+test('지수는 별도 메시지로 전달하고 연결 종료 시 지연으로 표시한다', () => {
+  const {qm,MockWebSocket} = createHarness();
+  const snapshots = [];
+  qm.onIndicators = data => snapshots.push(data);
+  qm.connect();
+  const ws = MockWebSocket.instances[0]; ws.onopen();
+  ws.onmessage({data:JSON.stringify({type:'market_indicators',data:{KOSPI:{value:'2,900.00',as_of:new Date().toISOString(),update_mode:'polling',refresh_seconds:5}}})});
+  assert.equal(snapshots.at(-1).KOSPI.value, '2,900.00');
+  assert.equal(qm.wsCodes.size, 0);
+  ws.onclose({code:1006});
+  assert.equal(snapshots.at(-1).KOSPI._stale, true);
+  qm.disconnect();
+});
+
 test('공통 시세는 자동 구독하고 토스 체결을 표시하며 NH 때문에 연결을 해제하지 않는다', async () => {
   const {qm, MockWebSocket, w} = createHarness();
   w.document.body.insertAdjacentHTML('beforeend', '<button id="pfWsToggle"></button><span id="pfWsStatus"></span><span id="pfWsDetail"></span>');

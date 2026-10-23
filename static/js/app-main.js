@@ -139,6 +139,22 @@ QuoteManager.onQuote = function(code, q) {
   }
 };
 
+QuoteManager.onIndicators = function(data) {
+  if (typeof _mbApplyIndicators === 'function') _mbApplyIndicators(data);
+  if (typeof _mdApplyIndicators === 'function') _mdApplyIndicators(data);
+  for (const [code, row] of Object.entries(data || {})) {
+    if (row._stale || !['KOSPI', 'KOSDAQ'].includes(code) || !row.change_pct) continue;
+    const benchmark = `IDX_${code}`;
+    const magnitude = Number(String(row.change_pct).replace(/[%+,]/g, ''));
+    if (!Number.isFinite(magnitude)) continue;
+    PfStore.benchmarkQuotes[benchmark] = {change_pct: (row.direction === 'down' ? -1 : 1) * Math.abs(magnitude), as_of:row.as_of};
+    if (PfStore.items.some(item => item.benchmark_code === benchmark)) {
+      _pfBenchmarkQueuedCodes.add(benchmark);
+      _queuePortfolioQuotePaint();
+    }
+  }
+};
+
 // Init
 async function initApp() {
   // 브라우저의 스크롤 위치 복원을 끈다 — 모바일에서 새로고침/재방문 시 이전 스크롤

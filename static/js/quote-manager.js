@@ -30,6 +30,8 @@ const QuoteManager = {
   lastStatus: 'offline',
   lastSlotMeta: null,
   onQuote: null,
+  onIndicators: null,
+  marketIndicators: {},
   inflightCodes: new Set(),
   _pingTimer: null,
   connectionPollTimer: null,
@@ -188,6 +190,9 @@ const QuoteManager = {
           this._markWsQuoteFresh(msg.code, msg);
           if (this.onQuote) this.onQuote(msg.code, msg);
           this._syncControlUi();
+        } else if (msg.type === 'market_indicators') {
+          this.marketIndicators = mergeMarketIndicatorMap(this.marketIndicators, msg.data);
+          this.onIndicators?.(this.marketIndicators);
         } else if (msg.type === 'subscriptions') {
           this.wsCodes = new Set(msg.ws || []);
           this.overflowCodes = msg.rest || [];
@@ -460,6 +465,10 @@ const QuoteManager = {
   },
 
   _deactivateWsSlot() {
+    if (Object.keys(this.marketIndicators).length) {
+      this.marketIndicators = Object.fromEntries(Object.entries(this.marketIndicators).map(([code, row]) => [code, {...row, _stale:true}]));
+      this.onIndicators?.(this.marketIndicators);
+    }
     this.wsActive = false;
     this.streamState = 'offline';
     this.wsCodes = new Set();

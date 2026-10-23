@@ -609,8 +609,7 @@ def test_market_bar_and_benchmark_polling_do_not_clear_good_values_on_empty_refr
     assert "incoming._stale !== true || !currentHasChange" in shell
     assert "let mbLastDataMap = {}" in groups
     assert "function _mbMergeDataMap(dataMap)" in groups
-    assert "_mbRenderBar(_mbMergeDataMap(complete));" in groups
-    assert "...(merged[code] || data), _stale: true" in groups
+    # Empty refresh and newer pushed indices are exercised in tests/js/market-bar.test.mjs.
     assert "for (const [k, v] of Object.entries(fresh)) pfMergeBenchmarkQuote(k, v);" in groups
     assert "for (const [k, v] of Object.entries(fresh)) pfMergeBenchmarkQuote(k, v);" in data
     assert "pfMergeBenchmarkQuote(data.effective_benchmark" in actions

@@ -205,6 +205,22 @@ function quoteSnapshotDisplayChanged(before, after) {
   return fields.some(field => (before || {})[field] !== (after || {})[field]);
 }
 
+function mergeMarketIndicatorMap(current, incoming) {
+  const merged = {...(current || {})};
+  for (const [code, row] of Object.entries(incoming || {})) {
+    const old = merged[code];
+    if (!row || row.value == null || String(row.value).trim() === '') {
+      merged[code] = {...(old || row), _stale:true};
+      continue;
+    }
+    const at = Date.parse(row.as_of || '') || 0;
+    const before = Date.parse(old?.as_of || '') || 0;
+    if (old && (at < before || (at === before && old.update_mode === 'polling' && row.update_mode !== 'polling'))) continue;
+    merged[code] = {...row};
+  }
+  return merged;
+}
+
 function flashEl(el) {
   if (!el) return;
   el.classList.remove('flash-update');

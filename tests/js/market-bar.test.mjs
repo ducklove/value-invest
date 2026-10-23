@@ -38,6 +38,27 @@ function render(w, catalog, codes, dataMap) {
   w.eval("mbCatalog = JSON.parse(__cat); mbCodes = JSON.parse(__codes); _mbRenderBar(JSON.parse(__data));");
 }
 
+test('서버 지수 갱신은 숫자만 바꾸고 항목 선택창과 새 시세를 보존한다', () => {
+  const w = load();
+  try {
+    render(w, {KOSPI:{label:'KOSPI'}}, ['KOSPI'], {});
+    const label = w.document.querySelector('.mi-label');
+    const picker = w.document.createElement('div'); picker.id = 'mbPicker';
+    w.document.getElementById('marketBar').appendChild(picker);
+    const fresh = {value:'2,900.00',change:'200.00',change_pct:'7.41%',direction:'up',as_of:'2026-10-23T10:00:05+09:00',update_mode:'polling',refresh_seconds:5};
+    w._mbApplyIndicators({KOSPI:fresh});
+    assert.equal(w.document.querySelector('.mi-val').textContent, '2,900.00');
+    assert.match(w.document.querySelector('.mi-chg').textContent, /\+7.41%/);
+    assert.match(label.title, /5초 갱신.*시세 기준/);
+    assert.equal(w.document.querySelector('.mi-label'), label);
+    assert.equal(w.document.getElementById('mbPicker'), picker);
+    w._mbApplyIndicators({KOSPI:{...fresh,value:'2,800.00',as_of:'2026-10-23T10:00:00+09:00'}});
+    assert.equal(w.document.querySelector('.mi-val').textContent, '2,900.00');
+    w._mbApplyIndicators({KOSPI:{...fresh,_stale:true}});
+    assert.equal(w.document.querySelector('.mi-stale').textContent, '지연');
+  } finally {w.close();}
+});
+
 test("market bar shows '-' when 전일대비 is missing (값만 있고 변동 없음)", () => {
   const w = load();
   render(

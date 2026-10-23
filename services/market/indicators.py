@@ -1169,13 +1169,22 @@ async def fetch_indicators(codes: list[str]) -> dict[str, dict]:
     if not codes:
         return {}
     requested_codes = list(dict.fromkeys(codes))
-    key = tuple(sorted(requested_codes))
-    return await cached_fetch(
+    from services.realtime.hub import get_hub
+    live = get_hub().index_quotes(requested_codes)
+    remaining = [code for code in requested_codes if code not in live]
+    if not remaining:
+        return live
+    key = tuple(sorted(remaining))
+    cached = await cached_fetch(
         _indicators_cache,
         key,
-        lambda: _load_indicators(requested_codes),
-        ttl=lambda _value: _batch_ttl(requested_codes),
+        lambda: _load_indicators(remaining),
+        ttl=lambda _value: _batch_ttl(remaining),
     )
+    # Re-read after slow sources finish so a minute-old request cannot roll back a pushed index.
+    current = get_hub().index_quotes(requested_codes)
+    expired = {code: {**row, "_stale": True} for code, row in live.items() if code not in current}
+    return {**cached, **expired, **current}
 
 
 async def _load_indicators(requested_codes: list[str]) -> dict[str, dict]:

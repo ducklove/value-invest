@@ -22,6 +22,7 @@ from repositories.db import get_db
 from services.market.quote_policy import trade_timestamp
 from services.portfolio.quotes import should_accept_quote_snapshot
 from services.realtime.allocation import PRIORITIES, allocate, fair_codes, sanitize
+from services.realtime.indices import IndexStream
 from services.realtime.kis import KisSource
 from services.realtime.toss import Token, TossSource
 
@@ -68,11 +69,21 @@ class QuoteHub:
         self._wake = asyncio.Event()
         self._logged_states = {}
         self._next_kis_id = 0
+        self.indices = None
 
     def attach(self, user):
         client = Client(user)
         self.clients.add(client)
+        if self.indices and (data := self.indices.quotes(("KOSPI", "KOSDAQ"))):
+            client.put({"type": "market_indicators", "data": data})
         return client
+
+    def publish_indices(self, data):
+        for client in self.clients:
+            client.put({"type": "market_indicators", "data": data})
+
+    def index_quotes(self, codes):
+        return self.indices.quotes(codes) if self.indices else {}
 
     def detach(self, client):
         self.clients.discard(client)
@@ -231,7 +242,7 @@ class QuoteHub:
                 "requested": len(wanted), "subscribed": len(set(wanted) & approved), "receiving": fresh,
                 "fallback": len(set(wanted) - approved), "sources": sources,
                 "disconnected_codes": [code for code in wanted if code not in approved],
-                "reason": self.reason}
+                "reason": self.reason, "indices": self.indices.snapshot() if self.indices else None}
 
     async def _load_holdings(self):
         db = await get_db()
@@ -261,10 +272,13 @@ class QuoteHub:
             return
         # Server KIS environment keys are never offered as a public price pool.
         self.sources = []
+        token = None
         if os.environ.get("TOSS_CLIENT_ID") and os.environ.get("TOSS_CLIENT_SECRET"):
             token = Token()
             self.sources += [TossSource(index, token, self.publish) for index in range(2)]
         self.running, self.reason = True, None
+        self.indices = IndexStream(token, self.publish_indices)
+        index_task = asyncio.create_task(self.indices.run(stop, lambda: bool(self.clients)), name="realtime-indices")
         last_holdings = 0.0
         try:
             while not stop.is_set():
@@ -282,6 +296,9 @@ class QuoteHub:
                     pass
         finally:
             self.running = False
+            index_task.cancel()
+            await asyncio.gather(index_task, return_exceptions=True)
+            self.indices = None
             await asyncio.gather(*(source.close() for source in self.sources), return_exceptions=True)
             self.sources.clear()
             self.assignments.clear()

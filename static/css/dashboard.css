@@ -58,6 +58,9 @@
 .md-hero-card { position: relative; padding: 4px 2px 6px; }
 .md-hero-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
 .md-hero-val { font-size: 22px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.md-index-quote { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 12px; font-variant-numeric: tabular-nums; }
+.md-index-value { font-size: 17px; }
+.md-index-quote small { margin-left: auto; color: var(--text-secondary); font-size: 10px; }
 .md-hero-card .md-chg { display: inline-block; margin-top: 4px; font-size: 12px; font-weight: 600; }
 .md-index-frame-wrap {
   width: 100%;

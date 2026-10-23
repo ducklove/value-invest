@@ -33,6 +33,8 @@ WS = "wss://openapi-ws.tossinvest.com/ws/v1"
 
 
 def instrument(code: str) -> tuple[str, str] | None:
+    if code in {"KOSPI", "KOSDAQ"}:
+        return None  # Index points use the separate shared REST stream, never US stock topics.
     if is_korean_stock(code):
         return "kr", code
     alias = static_foreign_ticker(code)

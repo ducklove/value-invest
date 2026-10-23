@@ -152,6 +152,7 @@ function _mdCardHtml(code, catalog, dataMap, variant) {
     const frameHtml = _mdIndexFrameHtml(code, MD_INDEX_DISPLAY_LABELS[code] || label);
     if (frameHtml) {
       return `<div class="md-hero-card md-index-card">`
+        + `<div class="md-index-quote" data-index-code="${escapeHtml(code)}">${_mdIndexQuoteHtml(code, d)}</div>`
         + frameHtml + flowSlot + `</div>`;
     }
     return `<div class="md-hero-card">`
@@ -162,6 +163,25 @@ function _mdCardHtml(code, catalog, dataMap, variant) {
   return `<div class="md-row">`
     + `<span class="md-row-label">${escapeHtml(label)}</span>`
     + `<span class="md-row-val">${valHtml}</span>${rowChgHtml}</div>`;
+}
+
+function _mdIndexQuoteHtml(code, data) {
+  const row = data || {};
+  const change = _mdChange(row);
+  const at = row.as_of ? new Date(row.as_of) : null;
+  const title = at && Number.isFinite(at.getTime()) ? `시세 기준: ${at.toLocaleString('ko-KR', {timeZone:'Asia/Seoul'})} KST` : '';
+  const status = row._stale ? '갱신 지연' : row.update_mode === 'polling' ? `${row.refresh_seconds}초 갱신` : '조회 시세';
+  return `<span>${escapeHtml(code)}</span><strong class="md-index-value">${escapeHtml(String(row.value || '-'))}</strong>`
+    + `<span class="md-chg ${change.cls}">${escapeHtml(change.text || '-')}</span>`
+    + `<small title="${escapeHtml(title)}">${escapeHtml(status)}</small>`;
+}
+
+function _mdApplyIndicators(data) {
+  _mdLastDataMap = mergeMarketIndicatorMap(_mdLastDataMap, data);
+  document.querySelectorAll('.md-index-quote[data-index-code]').forEach(el => {
+    const code = el.dataset.indexCode;
+    if (data?.[code]) el.innerHTML = _mdIndexQuoteHtml(code, _mdLastDataMap[code]);
+  });
 }
 
 // 최근 투자자별 일간 매매동향(개인/외국인/기관). 각 국내 지수 카드(코스피/코스닥)
@@ -861,6 +881,7 @@ if (typeof MutationObserver === 'function' && typeof document !== 'undefined' &&
 }
 
 function _mdRenderDashboard(catalog, dataMap) {
+  dataMap = mergeMarketIndicatorMap(dataMap, typeof QuoteManager !== 'undefined' ? QuoteManager.marketIndicators : {});
   // The two-column shell is stable HTML in index.html; we only fill the
   // indicator slots so sibling widgets (movers, 수급, 뉴스) aren't disturbed.
   const mainEl = document.getElementById('mdIndMain');
