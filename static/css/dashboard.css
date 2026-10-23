@@ -94,6 +94,7 @@
 .md-row-label { flex: 1; min-width: 0; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 값·변동을 고정폭 우측정렬 컬럼으로 둬 행마다 세로로 정렬되게 한다. */
 .md-row-val { flex: 0 0 auto; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.md-row.is-stale .md-row-val::after { content: ' 지연'; font-size: 10px; color: var(--text-secondary); }
 .md-row .md-chg { flex: 0 0 auto; text-align: right; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* 메인 컬럼(해외 지수)은 값이 크고 변동이 길다(예: 닛케이225 +1,636.38). */
 .md-main .md-row-val { min-width: 92px; }

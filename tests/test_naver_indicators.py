@@ -126,6 +126,29 @@ async def test_fx_indicator_reuses_shared_payload_for_60_seconds_with_original_f
 
 
 @pytest.mark.asyncio
+async def test_fx_stream_refreshes_at_five_seconds_and_updates_conversion_cache(monkeypatch):
+    clock = [5000.0]
+    monkeypatch.setattr(fx.time, "monotonic", lambda: clock[0])
+    prices = iter(["848.16", "850.00"])
+    calls = []
+
+    def respond(request):
+        calls.append(request.url.path)
+        return httpx.Response(200, json={"exchangeInfo": {
+            "reutersCode": "FX_JPYKRW", "unit": "KRW", "closePrice": next(prices), "fluctuations": "2.00",
+            "fluctuationsRatio": "0.24", "localTradedAt": "2026-10-23T10:00:00+09:00"}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        first = await ni.fetch_indicators(client, ["JPY_KRW"])
+        clock[0] += 5
+        second = await ni.fetch_indicators(client, ["JPY_KRW"], fx_max_age=1)
+        assert first["JPY_KRW"]["value"] == "848.16" and second["JPY_KRW"]["value"] == "850.00"
+        assert first["JPY_KRW"]["as_of"] == second["JPY_KRW"]["as_of"]
+        assert await fx.fx_rate_for_currency("JPY") == 8.5
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
 async def test_yahoo_fallback_uses_previous_close_not_chart_previous_close():
     def respond(request):
         if request.url.host != "query1.finance.yahoo.com":

@@ -221,6 +221,13 @@ function mergeMarketIndicatorMap(current, incoming) {
   return merged;
 }
 
+function marketIndicatorTitle(row) {
+  const at = row?.as_of ? new Date(row.as_of) : null;
+  return [row?._stale ? '갱신 지연 · 이전 값 표시 중' : '',
+    row?.update_mode === 'polling' ? `${row.refresh_seconds}초 갱신` : '',
+    at && Number.isFinite(at.getTime()) ? `시세 기준: ${at.toLocaleString('ko-KR', {timeZone:'Asia/Seoul'})} KST` : ''].filter(Boolean).join(' · ');
+}
+
 function flashEl(el) {
   if (!el) return;
   el.classList.remove('flash-update');

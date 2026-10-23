@@ -57,7 +57,7 @@ def _quote(row: dict) -> dict:
     }
 
 
-async def fetch_indicators(client: httpx.AsyncClient, codes: list[str]) -> dict[str, dict]:
+async def fetch_indicators(client: httpx.AsyncClient, codes: list[str], *, fx_max_age: float = FX_MAX_AGE_SECONDS) -> dict[str, dict]:
     """국내 지수는 한 번에 조회하고 해외 지수·환율은 항목별 실패를 격리한다."""
     results = {}
     semaphore = asyncio.Semaphore(4)
@@ -69,7 +69,7 @@ async def fetch_indicators(client: httpx.AsyncClient, codes: list[str]) -> dict[
 
     async def get_fx(symbol: str) -> tuple[object, float | None]:
         # 환율 응답은 포트폴리오 환산(services.portfolio.fx)과 한 소스를 공유한다.
-        return await fx.fetch_exchange_payload(symbol, max_age=FX_MAX_AGE_SECONDS, client=client)
+        return await fx.fetch_exchange_payload(symbol, max_age=fx_max_age, client=client)
 
     async def fetch(load: Callable[[], Awaitable[tuple[object, float | None]]], wanted: dict[str, str], kind: str):
         try:

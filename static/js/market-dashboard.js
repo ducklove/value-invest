@@ -160,7 +160,7 @@ function _mdCardHtml(code, catalog, dataMap, variant) {
       + `<div class="md-hero-val">${valHtml}</div>${chgHtml}`
       + flowSlot + `</div>`;
   }
-  return `<div class="md-row">`
+  return `<div class="md-row${d?._stale ? ' is-stale' : ''}" data-indicator-code="${escapeHtml(code)}" title="${escapeHtml(marketIndicatorTitle(d))}">`
     + `<span class="md-row-label">${escapeHtml(label)}</span>`
     + `<span class="md-row-val">${valHtml}</span>${rowChgHtml}</div>`;
 }
@@ -182,6 +182,22 @@ function _mdApplyIndicators(data) {
     const code = el.dataset.indexCode;
     if (data?.[code]) el.innerHTML = _mdIndexQuoteHtml(code, _mdLastDataMap[code]);
   });
+  document.querySelectorAll('.md-row[data-indicator-code]').forEach(el => {
+    const code = el.dataset.indicatorCode;
+    if (!data?.[code]) return;
+    const row = _mdLastDataMap[code];
+    const value = el.querySelector('.md-row-val');
+    if (value) value.textContent = row.value || '-';
+    const change = el.querySelector('.md-chg');
+    const parts = _mdChange(row);
+    if (change) {
+      change.className = `md-chg ${parts.cls}`;
+      change.innerHTML = parts.text ? `<span class="md-chg-abs">${escapeHtml(parts.abs)} </span><span class="md-chg-pct">${escapeHtml(parts.pct)}</span>` : '-';
+    }
+    el.title = marketIndicatorTitle(row);
+    el.classList.toggle('is-stale', !!row._stale);
+  });
+  if (data?.USD_KRW) _hlRenderRows();
 }
 
 // 최근 투자자별 일간 매매동향(개인/외국인/기관). 각 국내 지수 카드(코스피/코스닥)

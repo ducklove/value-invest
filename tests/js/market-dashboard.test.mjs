@@ -54,6 +54,27 @@ test('지수 갱신은 eKOSPI 차트를 다시 로드하지 않고 실제 지수
   } finally {w.close();}
 });
 
+test('환율 부분 갱신은 행·차트를 보존하고 등락과 지연 상태를 갱신한다', () => {
+  const w = load();
+  try {
+    w._mdRenderDashboard(CATALOG, {USD_KRW:{value:'1,390.00'}});
+    const row = w.document.querySelector('[data-indicator-code="USD_KRW"]');
+    const frame = w.document.querySelector('iframe[data-md-frame-index="ekospi"]');
+    const tick = {value:'1,391.50',change:'2.50',change_pct:'0.18%',direction:'up',as_of:'2026-10-23T10:00:00+09:00',update_mode:'polling',refresh_seconds:5};
+    w._mdApplyIndicators({USD_KRW:tick});
+    assert.equal(row.querySelector('.md-row-val').textContent, '1,391.50');
+    assert.equal(row.querySelector('.md-chg-pct').textContent, '(+0.18%)');
+    assert.match(row.title, /5초 갱신.*시세 기준.*10:00.*KST/);
+    w._mdApplyIndicators({USD_KRW:{...tick,_stale:true}});
+    assert.ok(row.classList.contains('is-stale'));
+    w._mdApplyIndicators({KOSPI:{value:'2,900.00'}});
+    assert.equal(w.document.querySelector('[data-indicator-code="USD_KRW"]'), row);
+    assert.equal(w.document.querySelector('iframe[data-md-frame-index="ekospi"]'), frame);
+    w._mdApplyIndicators({USD_KRW:tick});
+    assert.ok(!row.classList.contains('is-stale'));
+  } finally {w.close();}
+});
+
 test("_mdGroupByCategory orders known categories first, unknown last", () => {
   const w = load();
   const groups = w._mdGroupByCategory(CATALOG);

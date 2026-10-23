@@ -142,15 +142,27 @@ QuoteManager.onQuote = function(code, q) {
 QuoteManager.onIndicators = function(data) {
   if (typeof _mbApplyIndicators === 'function') _mbApplyIndicators(data);
   if (typeof _mdApplyIndicators === 'function') _mdApplyIndicators(data);
+  const benchmarks = {KOSPI:'IDX_KOSPI',KOSDAQ:'IDX_KOSDAQ',USD_KRW:'FX_USDKRW',EUR_KRW:'FX_EURKRW',JPY_KRW:'FX_JPYKRW',CNY_KRW:'FX_CNYKRW'};
   for (const [code, row] of Object.entries(data || {})) {
-    if (row._stale || !['KOSPI', 'KOSDAQ'].includes(code) || !row.change_pct) continue;
-    const benchmark = `IDX_${code}`;
-    const magnitude = Number(String(row.change_pct).replace(/[%+,]/g, ''));
-    if (!Number.isFinite(magnitude)) continue;
-    PfStore.benchmarkQuotes[benchmark] = {change_pct: (row.direction === 'down' ? -1 : 1) * Math.abs(magnitude), as_of:row.as_of};
-    if (PfStore.items.some(item => item.benchmark_code === benchmark)) {
-      _pfBenchmarkQueuedCodes.add(benchmark);
-      _queuePortfolioQuotePaint();
+    if (row._stale) continue;
+    const benchmark = benchmarks[code];
+    const magnitude = row.change_pct ? Number(String(row.change_pct).replace(/[%+,]/g, '')) : NaN;
+    if (benchmark && Number.isFinite(magnitude)) {
+      PfStore.benchmarkQuotes[benchmark] = {...(PfStore.benchmarkQuotes[benchmark] || {}), change_pct:(row.direction === 'down' ? -1 : 1) * Math.abs(magnitude), as_of:row.as_of, _stale:false};
+      if (PfStore.items.some(item => item.benchmark_code === benchmark)) {
+        _pfBenchmarkQueuedCodes.add(benchmark);
+        _queuePortfolioQuotePaint();
+      }
+    }
+    if (/^(USD|EUR|JPY|CNY|AUD|VND)_KRW$/.test(code)) {
+      const currency = code.slice(0,3);
+      const unit = ['JPY','VND'].includes(currency) ? 100 : 1;
+      const price = Number(String(row.value || '').replace(/,/g,'')) / unit;
+      if (!Number.isFinite(price) || price <= 0) continue;
+      if (currency === 'USD') PfStore.currency.fxRate = price;
+      const change = row.change ? Number(String(row.change).replace(/,/g,'')) / unit * (row.direction === 'down' ? -1 : row.direction === 'up' ? 1 : 0) : undefined;
+      QuoteManager.onQuote?.(`CASH_${currency}`, {price,change,change_pct:Number.isFinite(magnitude) ? (row.direction === 'down' ? -1 : 1) * Math.abs(magnitude) : undefined,
+        previous_close:Number.isFinite(change) ? price-change : undefined, as_of:row.as_of, source:'fx_quote', date:row.as_of?.slice(0,10)});
     }
   }
 };

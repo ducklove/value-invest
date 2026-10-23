@@ -21,6 +21,20 @@ def payload(code, price="206.88", change="-0.73", ratio="-0.35"):
 
 
 @pytest.mark.asyncio
+async def test_aggregate_rates_overlay_fresh_stream_without_extending_other_currencies(monkeypatch):
+    clock = [5000.0]
+    monkeypatch.setattr(fx.time, "monotonic", lambda: clock[0])
+    fx._fx_cache.set("rates", {"FX_JPYKRW": 848.16, "FX_USDKRW": 1390.0}, ttl_seconds=300)
+    clock[0] += 290
+    fx._fx_daily_cache.set("FX_JPYKRW", {"price": 850.0})
+    rates = await fx.get_fx_rates()
+    assert rates == {"FX_JPYKRW": 850.0, "FX_USDKRW": 1390.0}
+    assert await fx.fx_rate_for_currency("JPY") == 8.5
+    clock[0] += 11
+    assert fx._fx_cache.get("rates") is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(("currency", "price", "rate"), [("CNY", "206.88", 206.88), ("JPY", "886.58", 8.8658), ("VND", "5.36", .0536)])
 async def test_json_rate_preserves_units_for_cash_and_purchase_cost(currency, price, rate):
     calls = []

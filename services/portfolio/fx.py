@@ -48,7 +48,14 @@ class FXUnavailableError(ExternalServiceError):
 async def get_fx_rates() -> dict[str, float]:
     cached = _fx_cache.get("rates")
     if cached is not None:
-        return cached
+        rates = dict(cached)
+        # The shared realtime worker may have refreshed an individual currency
+        # since this aggregate was built. Do not extend the other rates' TTL.
+        for code in currencies.CURRENCY_TO_FX_CODE.values():
+            latest = _fx_daily_cache.get(code)
+            if latest and latest.get("price") and not latest.get("_stale"):
+                rates[code] = latest["price"]
+        return rates
     semaphore = asyncio.Semaphore(4)
 
     async def fetch(code):

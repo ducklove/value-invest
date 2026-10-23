@@ -1,11 +1,14 @@
 import { test, expect } from '@playwright/test';
 
 for (const width of [1440,390]) {
-test(`게스트 지수는 서버 갱신으로 사이드바·투자정보에 반영되고 차트를 유지한다 (${width}px)`, async ({page},testInfo) => {
+test(`게스트 지수·환율은 사이드바·투자정보에 반영되고 차트를 유지한다 (${width}px)`, async ({page},testInfo) => {
   await page.setViewportSize({width,height:1000});
   await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
-  const catalog = {KOSPI:{label:'KOSPI',category:'국내 지수'},KOSDAQ:{label:'KOSDAQ',category:'국내 지수'}};
+  const catalog = {KOSPI:{label:'KOSPI',category:'국내 지수'},KOSDAQ:{label:'KOSDAQ',category:'국내 지수'},
+    USD_KRW:{label:'달러/원',category:'환율'},JPY_KRW:{label:'엔/원',category:'환율'}};
+  await page.addInitScript(codes => localStorage.setItem('market_bar_codes',JSON.stringify(codes)),Object.keys(catalog));
   await page.route('**/api/market-indicators', route => route.fulfill({json:catalog}));
+  await page.route('**/api/settings/market-bar', route => route.fulfill({json:{codes:Object.keys(catalog)}}));
   const old = {value:'2,800.00',as_of:new Date(Date.now()-10000).toISOString()};
   await page.route('**/api/market-summary?*', route => route.fulfill({json:{KOSPI:old,KOSDAQ:{...old,value:'840.00'}}}));
   let socket;
@@ -24,8 +27,32 @@ test(`게스트 지수는 서버 갱신으로 사이드바·투자정보에 반�
   await expect(page.locator('#marketBar .mi-val').first()).toHaveText('2,900.00');
   await expect(page.locator('[data-index-code="KOSPI"] .md-index-value')).toHaveText('2,900.00');
   await expect(page.locator('[data-index-code="KOSPI"] small')).toHaveText('5초 갱신');
+  await expect(page.locator('[data-index-code="KOSDAQ"] .md-index-value')).toHaveText('850.00');
+  await expect(page.locator('#marketBar .mi-val[data-idx="1"]')).toHaveText('850.00');
+  // FX arrives independently of indices and keeps the provider's actual time.
+  const fxTick = {...tick,value:'1,391.50',change:'2.50',change_pct:'0.18%',as_of:new Date(Date.now()-300000).toISOString()};
+  await page.evaluate(() => {
+    window.cashTicks = {};
+    const original = QuoteManager.onQuote;
+    QuoteManager.onQuote = (code,q) => {window.cashTicks[code] = q; original(code,q);};
+  });
+  push({USD_KRW:fxTick,JPY_KRW:{...fxTick,value:'848.16',change:'2.00'}});
+  await expect(page.locator('.md-row[data-indicator-code="USD_KRW"] .md-row-val')).toHaveText('1,391.50');
+  await expect(page.locator('.md-row[data-indicator-code="JPY_KRW"] .md-row-val')).toHaveText('848.16');
+  await expect(page.locator('#marketBar .mi-val[data-idx="3"]')).toHaveText('848.16');
+  await expect(page.locator('.md-row[data-indicator-code="USD_KRW"]')).toHaveAttribute('title',/5초 갱신.*시세 기준.*KST/);
+  expect(await page.evaluate(() => PfStore.currency.fxRate)).toBe(1391.5);
+  const yen = await page.evaluate(() => window.cashTicks.CASH_JPY);
+  expect(yen.price).toBe(8.4816);
+  expect(yen.change).toBe(.02);
+  expect(yen.as_of).toBe(fxTick.as_of);
+  push({USD_KRW:{...fxTick,_stale:true}});
+  await expect(page.locator('.md-row[data-indicator-code="USD_KRW"]')).toHaveClass(/is-stale/);
+  push({USD_KRW:fxTick});
+  await expect(page.locator('.md-row[data-indicator-code="USD_KRW"]')).not.toHaveClass(/is-stale/);
   await page.evaluate(() => loadMarketSummary());
   await expect(page.locator('#marketBar .mi-val').first()).toHaveText('2,900.00');
+  await expect(page.locator('.md-row[data-indicator-code="USD_KRW"] .md-row-val')).toHaveText('1,391.50');
   expect(await page.evaluate(() => window.indexFrameBefore === document.querySelector('iframe[data-md-frame-index="ekospi"]'))).toBe(true);
   await page.locator('[data-index-code="KOSPI"]').screenshot({path:testInfo.outputPath('index-refresh.png')});
   push({KOSPI:{...tick,_stale:true}});

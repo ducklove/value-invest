@@ -364,10 +364,7 @@ function _mbApplyIndicators(dataMap) {
 }
 
 function _mbIndicatorTitle(d) {
-  const at = d?.as_of ? new Date(d.as_of) : null;
-  return [d?._stale ? '갱신 지연 · 이전 값 표시 중' : '',
-    d?.update_mode === 'polling' ? `${d.refresh_seconds}초 갱신` : '',
-    at && Number.isFinite(at.getTime()) ? `시세 기준: ${at.toLocaleString('ko-KR', {timeZone:'Asia/Seoul'})} KST` : ''].filter(Boolean).join(' · ');
+  return marketIndicatorTitle(d);
 }
 
 function _mbRenderBar(dataMap) {

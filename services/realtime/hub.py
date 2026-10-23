@@ -22,6 +22,8 @@ from repositories.db import get_db
 from services.market.quote_policy import trade_timestamp
 from services.portfolio.quotes import should_accept_quote_snapshot
 from services.realtime.allocation import PRIORITIES, allocate, fair_codes, sanitize
+from services.realtime.fx import CODES as FX_CODES
+from services.realtime.fx import FxStream
 from services.realtime.indices import IndexStream
 from services.realtime.kis import KisSource
 from services.realtime.toss import Token, TossSource
@@ -42,6 +44,8 @@ class Client:
     def put(self, message):
         # Prices coalesce per symbol. A slow browser never blocks the upstream socket.
         key = ("quote", message["code"]) if message.get("type") == "quote" else message["type"]
+        if key == "market_indicators" and key in self.pending:
+            message = {**message, "data": {**self.pending[key]["data"], **message["data"]}}
         self.pending[key] = message
         if len(self.pending) > 1004:
             self.pending.pop(next(iter(self.pending)))
@@ -70,11 +74,12 @@ class QuoteHub:
         self._logged_states = {}
         self._next_kis_id = 0
         self.indices = None
+        self.fx = None
 
     def attach(self, user):
         client = Client(user)
         self.clients.add(client)
-        if self.indices and (data := self.indices.quotes(("KOSPI", "KOSDAQ"))):
+        if data := self.index_quotes(("KOSPI", "KOSDAQ", *FX_CODES)):
             client.put({"type": "market_indicators", "data": data})
         return client
 
@@ -83,7 +88,7 @@ class QuoteHub:
             client.put({"type": "market_indicators", "data": data})
 
     def index_quotes(self, codes):
-        return self.indices.quotes(codes) if self.indices else {}
+        return {**(self.indices.quotes(codes) if self.indices else {}), **(self.fx.quotes(codes) if self.fx else {})}
 
     def detach(self, client):
         self.clients.discard(client)
@@ -242,7 +247,8 @@ class QuoteHub:
                 "requested": len(wanted), "subscribed": len(set(wanted) & approved), "receiving": fresh,
                 "fallback": len(set(wanted) - approved), "sources": sources,
                 "disconnected_codes": [code for code in wanted if code not in approved],
-                "reason": self.reason, "indices": self.indices.snapshot() if self.indices else None}
+                "reason": self.reason, "indices": self.indices.snapshot() if self.indices else None,
+                "fx": self.fx.snapshot() if self.fx else None}
 
     async def _load_holdings(self):
         db = await get_db()
@@ -279,6 +285,8 @@ class QuoteHub:
         self.running, self.reason = True, None
         self.indices = IndexStream(token, self.publish_indices)
         index_task = asyncio.create_task(self.indices.run(stop, lambda: bool(self.clients)), name="realtime-indices")
+        self.fx = FxStream(self.publish_indices)
+        fx_task = asyncio.create_task(self.fx.run(stop, lambda: bool(self.clients)), name="realtime-fx")
         last_holdings = 0.0
         try:
             while not stop.is_set():
@@ -297,8 +305,10 @@ class QuoteHub:
         finally:
             self.running = False
             index_task.cancel()
-            await asyncio.gather(index_task, return_exceptions=True)
+            fx_task.cancel()
+            await asyncio.gather(index_task, fx_task, return_exceptions=True)
             self.indices = None
+            self.fx = None
             await asyncio.gather(*(source.close() for source in self.sources), return_exceptions=True)
             self.sources.clear()
             self.assignments.clear()
