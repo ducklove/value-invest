@@ -1,8 +1,10 @@
+from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 
+from domain.timeutil import now_kst
 from services.portfolio import fx, quote_service
 
 
@@ -135,6 +137,31 @@ async def test_invalid_indicator_payload_does_not_seed_portfolio_rate():
         await naver_indicators.fetch_indicators(client, ["USD_KRW"])
     assert fx._fx_daily_cache.get("FX_USDKRW") is None
     assert fx.cached_rate_for_currency("USD") is None
+
+
+@pytest.mark.asyncio
+async def test_out_of_order_provider_snapshot_cannot_regress_indicators_or_conversion_cache(monkeypatch):
+    from services.market import naver_indicators
+
+    clock = [1000.0]
+    monkeypatch.setattr(fx.time, "monotonic", lambda: clock[0])
+    now = now_kst() - timedelta(minutes=2)
+    def body(at, price):
+        return {"exchangeInfo": {**payload("FX_JPYKRW", price)["exchangeInfo"], "localTradedAt": at}}
+    rows = iter([body(now.isoformat(), "850.00"),
+                 body((now-timedelta(minutes=1)).isoformat(), "848.16"),
+                 body((now+timedelta(minutes=1)).isoformat(), "851.00")])
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200, json=next(rows)))) as client:
+        first = await naver_indicators.fetch_indicators(client, ["JPY_KRW"], fx_max_age=1)
+        clock[0] += 5
+        old = await naver_indicators.fetch_indicators(client, ["JPY_KRW"], fx_max_age=1)
+        assert old == first  # Includes the actual publication AND original fetch time.
+        assert await fx.fx_rate_for_currency("JPY") == 8.5
+        assert fx._fx_daily_cache.get("payload:FX_JPYKRW")["mono"] == 1000.0
+        clock[0] += 5
+        fresh = await naver_indicators.fetch_indicators(client, ["JPY_KRW"], fx_max_age=1)
+        assert fresh["JPY_KRW"]["value"] == "851.00"
+        assert await fx.fx_rate_for_currency("JPY") == 8.51
 
 
 @pytest.mark.asyncio

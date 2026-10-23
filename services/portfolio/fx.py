@@ -19,6 +19,7 @@ import httpx
 from cache_layer import MemoryTTLCache
 from core.errors import ExternalServiceError
 from core.http import get_http_client
+from services.market.quote_policy import trade_timestamp
 from services.portfolio import currencies
 
 logger = logging.getLogger(__name__)
@@ -92,6 +93,21 @@ def _parse_fx_payload(fx_code: str, payload: dict) -> dict:
             "source": "naver_json", "as_of": row.get("localTradedAt")}
 
 
+def _exchange_time(symbol: str, payload: dict) -> float | None:
+    row = payload.get("exchangeInfo", payload)
+    if not isinstance(row, dict) or row.get("reutersCode") != symbol:
+        return None
+    try:
+        if symbol in _SUPPORTED_FX_CODES:
+            _parse_fx_payload(symbol, payload)
+        elif _fx_number(row.get("closePrice")) <= 0:
+            return None
+        at = trade_timestamp(row.get("localTradedAt"))
+        return at if at is not None and at <= time.time() else None
+    except (ValueError, TypeError):
+        return None
+
+
 async def fetch_exchange_payload(
     symbol: str,
     *,
@@ -126,6 +142,15 @@ async def fetch_exchange_payload(
     payload = resp.json()
     if not isinstance(payload, dict):
         raise ValueError("환율 응답 형식 변경")
+    # Provider replicas sometimes return an older snapshot after a newer one.
+    # Keep both market indicators and conversion rates on the newest known
+    # publication. Do not renew its TTL or pretend it was just published.
+    previous = _fx_daily_cache.get(key)
+    if previous:
+        at, prior_at = _exchange_time(symbol, payload), _exchange_time(symbol, previous["payload"])
+        if at is not None and prior_at is not None and at < prior_at:
+            logger.debug("FX ignored older provider snapshot (%s)", symbol)
+            return copy.deepcopy(previous["payload"]), previous["fetched_at"]
     fetched_at = time.time()
     _fx_daily_cache.set(key, {"payload": payload, "mono": time.monotonic(), "fetched_at": fetched_at})
     if symbol in _SUPPORTED_FX_CODES:

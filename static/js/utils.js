@@ -222,10 +222,12 @@ function mergeMarketIndicatorMap(current, incoming) {
 }
 
 function marketIndicatorTitle(row) {
-  const at = row?.as_of ? new Date(row.as_of) : null;
-  return [row?._stale ? '갱신 지연 · 이전 값 표시 중' : '',
+  const at = row?.as_of || row?.fetched_at;
+  const parsed = at ? new Date(at) : null;
+  return [row?._stale ? '갱신 지연 · 이전 값 표시 중' : row?._degraded ? '주 공급원 장애 · Yahoo 대체 시세 사용' : '',
     row?.update_mode === 'polling' ? `${row.refresh_seconds}초 갱신` : '',
-    at && Number.isFinite(at.getTime()) ? `시세 기준: ${at.toLocaleString('ko-KR', {timeZone:'Asia/Seoul'})} KST` : ''].filter(Boolean).join(' · ');
+    parsed && Number.isFinite(parsed.getTime()) ? `${row?.as_of ? '시세 기준' : '마지막 수집'}: ${parsed.toLocaleString('ko-KR', {timeZone:'Asia/Seoul'})} KST` : '',
+    Number(row?.delay_minutes) > 0 ? `제공 시세 ${Number(row.delay_minutes)}분 지연` : ''].filter(Boolean).join(' · ');
 }
 
 function flashEl(el) {

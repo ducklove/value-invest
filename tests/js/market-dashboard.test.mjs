@@ -65,6 +65,8 @@ test('환율 부분 갱신은 행·차트를 보존하고 등락과 지연 상�
     assert.equal(row.querySelector('.md-row-val').textContent, '1,391.50');
     assert.equal(row.querySelector('.md-chg-pct').textContent, '(+0.18%)');
     assert.match(row.title, /5초 갱신.*시세 기준.*10:00.*KST/);
+    w._mdApplyIndicators({USD_KRW:{...tick,delay_minutes:10}});
+    assert.match(row.title, /제공 시세 10분 지연/);
     w._mdApplyIndicators({USD_KRW:{...tick,_stale:true}});
     assert.ok(row.classList.contains('is-stale'));
     w._mdApplyIndicators({KOSPI:{value:'2,900.00'}});
