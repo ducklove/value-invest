@@ -201,7 +201,7 @@ function mergeQuoteSnapshot(current, incoming) {
 }
 
 function quoteSnapshotDisplayChanged(before, after) {
-  const fields = ['date', 'price', 'previous_close', 'change', 'change_pct', 'trade_value', '_stale'];
+  const fields = ['date', 'price', 'previous_close', 'change', 'change_pct', 'trade_value', '_stale', 'reference_session', 'reference_date'];
   return fields.some(field => (before || {})[field] !== (after || {})[field]);
 }
 

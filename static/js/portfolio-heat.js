@@ -248,7 +248,11 @@ function pfPlainChangeCell(row) {
 // 등락률 셀의 단일 진입점 — 컬러 모드가 꺼져 있으면 종전 표시 그대로.
 function pfChangeCellHtml(row) {
   const contents = pfHeatAppliesTo(row) ? pfHeatChangeCell(row) : pfPlainChangeCell(row);
-  return typeof pfPerformanceCellHtml === 'function' ? pfPerformanceCellHtml(row, contents) : contents;
+  const q = row.quote;
+  const title = q?.reference_date && q?.original_currency
+    ? `${q.reference_date} 정규장 종가 기준 · ${q.original_currency}` : '';
+  const labeled = title ? `<span title="${escapeHtml(title)}">${contents}</span>` : contents;
+  return typeof pfPerformanceCellHtml === 'function' ? pfPerformanceCellHtml(row, labeled) : labeled;
 }
 
 // --- 전면 이펙트 (상/하한가로 전이하는 순간) --------------------------------

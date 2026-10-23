@@ -49,6 +49,7 @@ function loadHeatDom() {
   appendScript(w, extractFn("quoteSnapshotDateValue"));
   appendScript(w, STORE_SRC);
   appendScript(w, HEAT_SRC);
+  appendScript(w, extractFn('escapeHtml'));
   // 컬러 모드 off 경로에서만 쓰이는 종전 포맷터.
   w.fmtChangePct = (pct) => (pct === null || pct === undefined ? "-" : `plain:${pct}`);
   return w;
@@ -85,6 +86,13 @@ test("등락률 강도는 1/2/4/7/15% 경계에서 한 단계씩 오른다", () 
   // 부호와 무관하게 절대값 기준.
   assert.equal(w.pfHeatLevel(-8), w.pfHeatLevel(8));
   assert.equal(w.pfHeatLevel(null), 0);
+});
+
+test('미국 종목의 일간 변동률은 기준 종가 날짜와 원통화를 표시한다', () => {
+  const w = loadHeatDom();
+  const html = w.pfChangeCellHtml(holding({stock_code:'GOOGL',changePct:.04,quote:{reference_date:'2026-10-22',original_currency:'USD'}}));
+  assert.match(html,/2026-10-22 정규장 종가 기준 · USD/);
+  w.close();
 });
 
 test("상/하한가는 ±30% 근사가 아니라 호가단위에 정렬된 정확한 가격에서만 잡힌다", () => {

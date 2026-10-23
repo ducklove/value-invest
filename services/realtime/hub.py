@@ -26,6 +26,7 @@ from services.realtime.fx import CODES as FX_CODES
 from services.realtime.fx import FxStream
 from services.realtime.indices import IndexStream
 from services.realtime.kis import KisSource
+from services.realtime.references import DailyReferences
 from services.realtime.toss import Token, TossSource
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,7 @@ class QuoteHub:
         self._next_kis_id = 0
         self.indices = None
         self.fx = None
+        self.references = None
 
     def attach(self, user):
         client = Client(user)
@@ -132,7 +134,9 @@ class QuoteHub:
         from services import stock_quotes
         current = stock_quotes.get_stock_cached(code)
         tick = {"type": "quote", **quote}
-        if tick.get("previous_close") is None and current and current.previous_close:
+        if user is None and self.references is not None:
+            tick = self.references.enrich(tick)
+        elif tick.get("previous_close") is None and current and current.previous_close:
             tick["previous_close"] = current.previous_close
             tick["change"] = price - current.previous_close
             tick["change_pct"] = tick["change"] / current.previous_close * 100
@@ -149,6 +153,12 @@ class QuoteHub:
                 accepted = self.quote(client.user, code)
                 if accepted:
                     client.put(accepted)
+
+    def _reference_ready(self, code):
+        # Hydrate the latest tick, not the price that initiated the slow lookup.
+        # Its source/trade time stay intact, and quiet symbols update immediately.
+        if tick := self.cache.get((None, code)):
+            self.publish(tick)
 
     def _demands(self):
         demands = {user: {group: list(codes) for group, codes in requested.items()}
@@ -217,6 +227,8 @@ class QuoteHub:
             at = trade_timestamp(tick.get("as_of"))
             if key[1] not in wanted or at is None or now - at >= FRESH_SECONDS:
                 self.cache.pop(key)
+            elif key[0] is None and self.references is not None:
+                self.references.enrich(tick)  # Retry missing bases even without another trade.
 
     def status(self, client=None):
         visible = self.sources if client is None else self._sources_for(client.user)
@@ -248,7 +260,8 @@ class QuoteHub:
                 "fallback": len(set(wanted) - approved), "sources": sources,
                 "disconnected_codes": [code for code in wanted if code not in approved],
                 "reason": self.reason, "indices": self.indices.snapshot() if self.indices else None,
-                "fx": self.fx.snapshot() if self.fx else None}
+                "fx": self.fx.snapshot() if self.fx else None,
+                "daily_references": self.references.snapshot() if self.references else None}
 
     async def _load_holdings(self):
         db = await get_db()
@@ -283,6 +296,7 @@ class QuoteHub:
             token = Token()
             self.sources += [TossSource(index, token, self.publish) for index in range(2)]
         self.running, self.reason = True, None
+        self.references = DailyReferences(self._reference_ready)
         self.indices = IndexStream(token, self.publish_indices)
         index_task = asyncio.create_task(self.indices.run(stop, lambda: bool(self.clients)), name="realtime-indices")
         self.fx = FxStream(self.publish_indices)
@@ -304,6 +318,8 @@ class QuoteHub:
                     pass
         finally:
             self.running = False
+            references, self.references = self.references, None
+            await references.close()
             index_task.cancel()
             fx_task.cancel()
             await asyncio.gather(index_task, fx_task, return_exceptions=True)

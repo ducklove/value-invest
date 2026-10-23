@@ -36,6 +36,16 @@ function loadUtils() {
 // The functions are pure — one shared window for the whole file.
 const w = loadUtils();
 
+test('기준가 보완과 새 거래일 전환을 현재가가 같아도 화면에 반영한다', () => {
+  const q={price:100,previous_close:99,change:1,change_pct:1.01,source:'toss_ws',reference_session:'2026-10-22',reference_date:'2026-10-21'};
+  assert.equal(w.quoteSnapshotDisplayChanged(q,{...q,reference_date:'2026-10-22',reference_session:'2026-10-23'}),true);
+  const pending=w.mergeQuoteSnapshot(q,{price:100,source:'toss_ws',reference_session:'2026-10-23',reference_date:null,
+    previous_close:null,change:null,change_pct:null});
+  assert.equal(pending.previous_close,null);
+  assert.equal(pending.change_pct,undefined);
+  assert.equal(pending.reference_date,null);
+});
+
 test('금현물 NH 체결가를 우선 반영하고 수신이 끊기면 기존 조회 시세로 갱신한다', () => {
   const now = Date.now();
   const date = new Date(now).toISOString().slice(0, 10);

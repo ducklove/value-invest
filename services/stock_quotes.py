@@ -30,12 +30,12 @@ import copy
 import inspect
 import math
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Awaitable, Callable
 
 import kis_ws_manager
 from cache_layer import MemoryTTLCache
-from domain.portfolio_codes import normalize_portfolio_code
+from domain.portfolio_codes import normalize_portfolio_code, yahoo_symbol
 from services import stock_price
 from services.portfolio.quotes import should_accept_quote_snapshot
 
@@ -323,6 +323,45 @@ async def get_stock(
 
 async def get_quote_snapshot(code: str, **kwargs: Any) -> dict[str, Any]:
     return stock_to_quote(await get_stock(code, **kwargs))
+
+
+async def get_daily_reference(code: str, currency: str, session: str) -> dict[str, Any]:
+    """Public daily base in native currency, independent of the live price cache."""
+    def positive(value):
+        number = _safe_float(value)
+        return number if number is not None and number > 0 else None
+
+    target = date.fromisoformat(session)
+    if currency == "KRW":
+        cached = stock_to_quote(get_stock_cached(code))
+        if cached.get("date") != session or cached.get("_stale") or not positive(cached.get("previous_close")):
+            cached = (await stock_price.fetch_bulk_quotes_kr([code])).get(code, {})
+        base = positive(cached.get("previous_close"))
+        if base and cached.get("date") == session and not cached.get("_stale"):
+            return {"price": base, "currency": currency, "session": session, "date": None, "source": "naver_daily"}
+        return {}
+    if currency != "USD":
+        return {}
+    from services.portfolio.foreign import fetch_yahoo_chart
+
+    series = await fetch_yahoo_chart(yahoo_symbol(code), range_="5d")
+    symbol = (series.get("meta") or {}).get("symbol")
+    if series.get("currency") != "USD" or (symbol and symbol.upper() != yahoo_symbol(code).upper()):
+        return {}
+    candidates = []
+    for row in series.get("rows") or []:
+        try:
+            day, base = date.fromisoformat(row["session_date"]), positive(row.get("close"))
+        except (KeyError, TypeError, ValueError):
+            continue
+        # Select the latest completed session, never today's partial candle or
+        # chartPreviousClose (which precedes the whole multi-day chart range).
+        if base and 0 < (target - day).days <= 7:
+            candidates.append((day, base))
+    if not candidates:
+        return {}
+    day, base = max(candidates)
+    return {"price": base, "currency": currency, "session": session, "date": day.isoformat(), "source": "yahoo_daily"}
 
 
 async def _fetch_bulk_uncached(codes: list[str]) -> dict[str, dict[str, Any]]:
