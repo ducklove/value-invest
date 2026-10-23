@@ -43,11 +43,20 @@ def _fingerprint(link: dict) -> str:
 async def store_evidence(db, user: str, link: dict, batch):
     """조회가 끝난 기간을 통째로 교체한다. 거래번호를 만들거나 수입·현금을 가산하지 않는다."""
     fp = _fingerprint(link)
-    await db.execute("DELETE FROM broker_cash_review_evidence WHERE google_sub=? AND account_id=? AND fingerprint=? AND booked_date BETWEEN ? AND ?",
+    await db.execute("DELETE FROM broker_cash_review_evidence WHERE google_sub=? AND account_id=? AND fingerprint=? AND booked_date BETWEEN ? AND ? "
+                     "AND kind NOT IN ('trade_buy','trade_sell','trade_charges')",
                      (user, link["account_id"], fp, batch.start, batch.end))
     for row in batch.cash_summaries:
         await db.execute("INSERT INTO broker_cash_review_evidence VALUES (?,?,?,?,?,?,?,?)",
                          (user, link["account_id"], fp, row["booked_date"], row["date"], row["currency"], row["kind"], row["amount"]))
+
+
+async def store_trades(db, user: str, link: dict, rows: list[dict]):
+    """당일 누적 합계를 교체한다. 배당 기간 재조회가 이전 날짜의 매매 합계를 지우지 않는다."""
+    for row in rows:
+        await db.execute("INSERT INTO broker_cash_review_evidence VALUES (?,?,?,?,?,?,?,?) "
+                         "ON CONFLICT DO UPDATE SET amount=excluded.amount",
+                         (user, link["account_id"], _fingerprint(link), row["booked_date"], row["date"], row["currency"], row["kind"], row["amount"]))
 
 
 async def _evidence(db, user: str, aid: str, fp: str) -> dict:
@@ -117,20 +126,25 @@ async def _reconcile(db, user: str, aid: str, state: dict, evidence: dict, now: 
         else:
             # 같은 날 여러 조회에 나눠 반영된 거래를 날짜 합계 하나로 묶어 놓치지 않는다.
             candidates.sort(key=lambda key: (pools[key] != remaining, key))
+            matched_trade = False
             for key in candidates:
                 available = pools[key]
                 if available * remaining > 0 and abs(available) <= abs(remaining):
                     remaining -= available
                     pools[key] = Decimal(0)
-                elif remaining > 0 and available > remaining and key[2].startswith("summary:"):
+                    matched_trade |= key[2].endswith((":trade_buy", ":trade_sell"))
+                elif remaining * available > 0 and abs(available) > abs(remaining) and key[2].startswith("summary:"):
                     # 일별 합계가 여러 잔고 조회에 나눠 반영된 경우만 나눠 대조한다.
-                    # 관측된 입금 총액보다 확인 수입이 크면 상쇄 출금이 섞였을 수 있어 보류한다.
-                    future_capacity = remaining + sum((_decimal(later["amount"]) for later in rows[index + 1:]
-                        if later["currency"] == key[1] and later["amount"] > 0
+                    # 같은 방향 관측 총액보다 확인 금액이 크면 반대 변동이 섞였을 수 있어 보류한다.
+                    future_capacity = abs(remaining) + sum((abs(_decimal(later["amount"])) for later in rows[index + 1:]
+                        if later["currency"] == key[1] and _decimal(later["amount"]) * remaining > 0
                         and later["from_at"][:10] <= key[0] <= later["to_at"][:10]), Decimal(0))
-                    known_total = sum((value for other, value in pools.items()
-                                       if other[:2] == key[:2] and value > 0), Decimal(0))
-                    if future_capacity >= known_total:
+                    known_total = sum((abs(value) for other, value in pools.items()
+                                       if other[:2] == key[:2] and value * remaining > 0), Decimal(0))
+                    # 매수 원금이 맞은 관측의 비용만 일별 비용에서 나눠 사용한다.
+                    # 매도 비용은 이후 양수 매도대금과 함께 순액 대조할 수 있어 음수 관측 합계만으로 제한하지 않는다.
+                    trade_cost = matched_trade and key[2].endswith(":trade_charges")
+                    if trade_cost or future_capacity >= known_total:
                         pools[key] -= remaining
                         remaining = Decimal(0)
         if remaining != _decimal(row["unexplained"]):

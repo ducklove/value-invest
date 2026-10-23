@@ -18,6 +18,7 @@ MOCK = "https://moapi.nhplug.com:8443"
 MARKET_DATA_PATHS = frozenset({"/krstock/quote/v1/currentPrice", "/krfuture/quote/v1/day"})
 # 해외주식 일별거래내역은 배당 입금 가져오기 전용 조회다(거래 일련번호·적용환율 포함).
 READ_PATHS = frozenset({"/n2/acctinfo", "/common/inquiry/v1/totalTransaction", "/gbstock/inquiry/v1/dailyTransaction",
+                        "/krstock/inquiry/v1/realizedPnl",
                         "/krstock/inquiry/v1/balance", "/gbstock/inquiry/v1/balance",
                         "/gbstock/inquiry/v1/margin", "/krstock/quote/v1/currentPrice", "/krfuture/quote/v1/day",
                         "/krgold/inquiry/v1/goldDepositAndBalance", "/krfuture/inquiry/v1/balance",

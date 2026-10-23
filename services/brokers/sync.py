@@ -10,7 +10,7 @@ from repositories import account_holdings as holdings
 from repositories import broker_activity, broker_cash_reviews, brokers, portfolio_order
 from repositories.broker_secrets import BrokerError
 from repositories.db import transaction
-from services.brokers import activity
+from services.brokers import activity, cash_trades
 from services.brokers.symbols import domestic_code as domestic_code
 from services.brokers.symbols import foreign_code as foreign_code
 from services.brokers.symbols import records as records
@@ -82,6 +82,15 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                     # 일부만 저장하지 않고, 독립적으로 검증한 잔고 조회는 계속한다.
                     activity_error = str(exc)
             rows, balances = await fetch_snapshot(user, link)
+            trades = None
+            if (include_activity and link.get("provider", "namuh") == "namuh" and link["environment"] == "live"
+                    and link.get("product", "stocks") == "stocks"
+                    and all(key in balances.get("KRW", {}) for key in ("nxt_dd_dca", "nxt2_dd_dca"))):
+                try:
+                    # 거래내역의 5분 제한과 무관하게 체결 직후 조회한다. D+2 잔고는 이미 매매를 포함한다.
+                    trades = await cash_trades.fetch(user, link, balances)
+                except BrokerError as exc:
+                    activity_error = activity_error or str(exc)
             from services.portfolio.currencies import CURRENCY_TO_FX_CODE
             from services.portfolio.fx import cached_rate_for_currency
             # 추가 환율 요청 없이 신선한 캐시만 사용한다. 사유 중요도 판단용이며 성과 환산은 하지 않는다.
@@ -97,6 +106,8 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                         await broker_cash_reviews.store_evidence(db, user, link, entries)
                 elif activity_error:
                     await broker_activity.set_error(user, aid, activity_error)
+                if trades is not None:
+                    await broker_cash_reviews.store_trades(db, user, link, trades)
                 previous = await holdings.list_positions(user, aid)
                 other = [r for r in await holdings.list_positions(user) if r["account_id"] != aid]
                 for row in rows:

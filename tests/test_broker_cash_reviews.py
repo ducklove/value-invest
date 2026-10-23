@@ -11,7 +11,7 @@ from repositories import account_holdings, accounts, broker_activity, broker_cas
 from repositories.broker_secrets import BrokerError
 from repositories.db import get_db, transaction
 from routes import broker_accounts
-from services.brokers import activity, sync
+from services.brokers import activity, cash_trades, sync
 
 
 def cash(amount, currency="KRW"):
@@ -43,6 +43,73 @@ class CashReviewTests(TempDbMixin):
 
     async def pending(self):
         return (await broker_cash_reviews.history("u1"))["items"]
+
+    async def trade_sync(self, balance, buy=0, sell=0, charges=0, *, error=None):
+        day = stamp()[:10]
+        trades = [{"booked_date": day, "date": day, "currency": "KRW", "kind": kind, "amount": amount}
+                  for kind, amount in (("trade_buy", -buy), ("trade_sell", sell), ("trade_charges", -charges))]
+        with patch.object(sync, "fetch_snapshot", AsyncMock(return_value=([cash(balance)], {"KRW": {"nxt_dd_dca": 0, "nxt2_dd_dca": 0}}))), \
+             patch.object(activity, "fetch", AsyncMock(return_value=self.income_batch(None))), \
+             patch.object(cash_trades, "fetch", AsyncMock(return_value=trades, side_effect=error)) as query:
+            result = await sync.sync_account("u1", self.aid, include_activity=True)
+        self.assertEqual(query.await_count, 1)  # 거래내역 최소 간격 안에도 매매 대조는 실행한다.
+        return result
+
+    async def test_buy_sell_and_large_actual_costs_never_prompt_or_double_apply_cash(self):
+        await self.trade_sync(50000000)
+        await self.trade_sync(39999500, buy=10000000, charges=500)
+        self.assertEqual(await self.pending(), [])
+        await self.trade_sync(59939500, buy=10000000, sell=20000000, charges=60500)
+        await self.trade_sync(59939500, buy=10000000, sell=20000000, charges=60500)
+        self.assertEqual(await self.pending(), [])
+        self.assertTrue(all(r["unexplained"] == 0 for r in (await broker_cash_reviews.history("u1", pending=False))["items"]))
+        holdings = await account_holdings.list_positions("u1", self.aid)
+        self.assertEqual(holdings[0]["quantity"], 59939500)
+        self.assertEqual(await snapshots.get_cashflows("u1"), [])
+
+    async def test_late_cumulative_partial_fills_can_explain_multiple_withdrawals(self):
+        await self.trade_sync(20000000)
+        await self.sync(cash(15999800))
+        await self.sync(cash(9999500))
+        await self.trade_sync(9999500, buy=10000000, charges=500)
+        self.assertEqual(await self.pending(), [])
+        await self.trade_sync(9994500, buy=10000000, charges=500)
+        self.assertEqual((await self.pending())[0]["unexplained"], -5000)  # 매매 재사용 금지
+
+    async def test_trade_baseline_and_income_refetch_preserve_evidence(self):
+        await self.trade_sync(20000000, buy=10000000, charges=500)
+        await self.trade_sync(19995000, buy=10000000, charges=500)
+        self.assertEqual((await self.pending())[0]["unexplained"], -5000)
+        await self.sync(cash(19995000), entries=self.income_batch(None))
+        db = await get_db()
+        self.assertEqual((await (await db.execute("SELECT COUNT(*) FROM broker_cash_review_evidence WHERE kind LIKE 'trade_%'")).fetchone())[0], 3)
+        self.assertEqual((await self.pending())[0]["unexplained"], -5000)
+
+    async def test_existing_buy_prompt_is_reconciled_without_new_cash_change(self):
+        await self.sync(cash(20000000))
+        await self.sync(cash(9999500))
+        self.assertEqual(len(await self.pending()), 1)
+        await self.trade_sync(9999500, buy=10000000, charges=500)
+        self.assertEqual(await self.pending(), [])
+
+    async def test_trade_and_external_withdrawal_keep_only_external_amount_pending(self):
+        await self.trade_sync(20000000)
+        await self.trade_sync(9799500, buy=10000000, charges=500)
+        self.assertEqual((await self.pending())[0]["unexplained"], -200000)
+
+    async def test_external_deposit_offsetting_a_buy_is_not_hidden(self):
+        await self.trade_sync(20000000)
+        await self.trade_sync(10199500, buy=10000000, charges=500)
+        self.assertEqual(len(await self.pending()), 1)
+
+    async def test_failed_trade_query_preserves_evidence_and_balance_then_recovers(self):
+        await self.trade_sync(20000000)
+        result = await self.trade_sync(9999500, error=BrokerError("매매 대조 보류"))
+        self.assertEqual(result["activity_error"], "매매 대조 보류")
+        self.assertEqual((await account_holdings.list_positions("u1", self.aid))[0]["quantity"], 9999500)
+        self.assertEqual(len(await self.pending()), 1)
+        await self.trade_sync(9999500, buy=10000000, charges=500)
+        self.assertEqual(await self.pending(), [])
 
     async def test_baseline_repeat_sync_and_each_currency(self):
         await self.sync(cash(10000), cash(10, "USD"))
