@@ -121,7 +121,7 @@ def test_today_card_percent_uses_same_settlement_base_as_amount():
     assert "Number(cf?.signed_amount || 0)" in source
     assert "Number(latestSnap.total_units) + _pendingUnitsChange" in source
     assert "grandTotalMarketValue - _pendingCashflowWithoutUnits" in source
-    assert "_renderSummarySparklines(_l ? _liveNavValueKrw : null);" in source
+    assert "_renderSummarySparklines(_l ? _liveNavValueKrw : null, { currentReturnNav: _l ? curNav : null, latestSnap });" in source
 
 def test_today_sparkline_uses_8_to_20_session_axis():
     # 스파크라인은 그리기·데이터준비 모두 portfolio-sparklines.js 로 모였다

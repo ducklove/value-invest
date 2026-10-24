@@ -221,20 +221,46 @@ function _sparkTrendColor(isUp) {
   return value || (isUp ? '#dc2626' : '#2563eb');
 }
 
-function _renderSummarySparklines(currentTotalValue) {
+function _renderSummarySparklines(currentTotalValue, { currentReturnNav = null, latestSnap = null } = {}) {
   if (PfStore.accountId || PfStore.filters.group !== null || String(PfStore.filters.searchText || '').trim()) {
-    for (const id of ['sparkTotalReturn', 'sparkMonthly', 'sparkDaily']) _drawSparkline(id, [], _sparkTrendColor(true), 252, 'right');
+    for (const id of ['sparkYearly', 'sparkMonthly', 'sparkDaily']) _drawSparkline(id, [], _sparkTrendColor(true), 252, 'right');
     return;
   }
-  // 총 수익률 — 52주 (약 252 거래일) 누적 수익률 추이
-  if (PfStore.navHistory.length > 1) {
-    const last365 = PfStore.navHistory.slice(-365);
-    const returnPcts = last365.map(d => d.total_invested > 0 ? ((d.total_value - d.total_invested) / d.total_invested * 100) : 0);
-    const lastReturn = returnPcts[returnPcts.length - 1] || 0;
-    _drawSparkline('sparkTotalReturn', returnPcts, _sparkTrendColor(lastReturn >= 0), 252, 'right');
-  } else {
-    _drawSparkline('sparkTotalReturn', [], _sparkTrendColor(true), 252, 'right');
+
+  // YTD: previous year-end at 0%, on a fixed calendar-year axis like MTD.
+  // Use the card's linked, distribution-adjusted NAV and currency basis;
+  // total_value / total_invested is a lifetime return, not a YTD return.
+  const todayYmd = _sparkNowKstIsoMinute().slice(0, 10);
+  const today = _parseLocalYmd(todayYmd);
+  const year = today.getFullYear();
+  const prevYearEnd = new Date(year - 1, 11, 31);
+  const axisDays = _diffLocalDays(prevYearEnd, new Date(year, 11, 31));
+  const sameBasis = (snap) => snap && (snap.linked || !latestSnap?.price_basis
+    || (snap.price_basis || 'legacy_latest') === latestSnap.price_basis);
+  const returnNav = (snap) => {
+    const nav = Number(snap?.return_nav ?? snap?.nav);
+    if (!Number.isFinite(nav) || nav <= 0 || !sameBasis(snap)) return null;
+    const fx = PfStore.currency.fxRate;
+    return PfStore.currency.unit === 'USD' && fx > 0
+      ? nav / (snap.fx_usdkrw > 0 ? snap.fx_usdkrw : fx) : nav;
+  };
+  const baseNav = returnNav(PfStore.snapshots.yearStart);
+  const yearPoints = [];
+  if (baseNav) {
+    yearPoints.push({ x: 0, y: 0 });
+    for (const d of PfStore.navHistory) {
+      if (d.date < `${year}-01-01` || d.date > todayYmd) continue;
+      const date = _parseLocalYmd(d.date);
+      const nav = returnNav(d);
+      if (!date || nav === null) continue;
+      yearPoints.push({ x: _diffLocalDays(prevYearEnd, date), y: (nav / baseNav - 1) * 100 });
+    }
+    if (Number.isFinite(currentReturnNav) && currentReturnNav > 0) {
+      yearPoints.push({ x: _diffLocalDays(prevYearEnd, today), y: (currentReturnNav / baseNav - 1) * 100 });
+    }
   }
+  const lastYearPct = yearPoints[yearPoints.length - 1]?.y || 0;
+  _drawSparklinePoints('sparkYearly', yearPoints, _sparkTrendColor(lastYearPct >= 0), axisDays);
 
   // MTD sparkline: fixed previous-month-end -> current-month-end axis.
   // The first point is always previous month-end at 0%, so the shape is

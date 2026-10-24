@@ -613,10 +613,10 @@ function renderPortfolio(options = {}) {
         <div class="pf-summary-value ${_l ? returnClass(ytdReturnPct) : ''}">${_l ? (ytdReturnPct !== null ? fmtPct(ytdReturnPct) : '-') : '-'}</div>
         ${_l ? _subPair(_ytdPnl, _ytdValueChange) : '<div class="pf-summary-sub"></div>'}
       </div>
-      <canvas class="pf-sparkline" id="sparkTotalReturn"></canvas>
+      <canvas class="pf-sparkline" id="sparkYearly"></canvas>
     </button>`);
   if (typeof pfUpdateSummaryContributors === 'function') pfUpdateSummaryContributors(rows, latestSnap, _l, contributorFocus, allRows);
-  _renderSummarySparklines(_l ? _liveNavValueKrw : null);
+  _renderSummarySparklines(_l ? _liveNavValueKrw : null, { currentReturnNav: _l ? curNav : null, latestSnap });
   if (typeof pfHouseholdPortfolioValueChanged === 'function') {
     pfHouseholdPortfolioValueChanged(grandTotalMarketValue);
   }

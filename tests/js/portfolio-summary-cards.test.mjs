@@ -19,6 +19,7 @@ const read = (...parts) => readFileSync(join(root, ...parts), "utf8");
 const STORE_SRC = read("static", "js", "portfolio-store.js");
 const DATA_SRC = read("static", "js", "portfolio-data.js");
 const RENDER_SRC = read("static", "js", "portfolio-render.js");
+const SPARK_SRC = read("static", "js", "portfolio-sparklines.js");
 
 function appendScript(w, source) {
   const script = w.document.createElement("script");
@@ -26,7 +27,7 @@ function appendScript(w, source) {
   w.document.body.appendChild(script);
 }
 
-function loadSummaryDom() {
+function loadSummaryDom({ sparklines = false } = {}) {
   const dom = new JSDOM(`<!doctype html><html><body>
     <div id="pfSummary"></div>
     <table id="pfTable"><tbody id="pfBody"></tbody><tfoot id="pfFoot"></tfoot></table>
@@ -45,9 +46,102 @@ function loadSummaryDom() {
   appendScript(w, STORE_SRC);
   appendScript(w, DATA_SRC);
   appendScript(w, RENDER_SRC);
-  w._renderSummarySparklines = () => {};
+  if (sparklines) {
+    appendScript(w, SPARK_SRC);
+    w._sparkNowKstIsoMinute = () => '2026-03-15T12:00';
+    w.sparkCalls = new Map();
+    w._drawSparklinePoints = (id, points, color, axis) => w.sparkCalls.set(id, { points, color, axis });
+    w._drawSparkline = (id, points, color, axis) => w.sparkCalls.set(id, { points, color, axis });
+  } else {
+    w._renderSummarySparklines = () => {};
+  }
   return w;
 }
+
+function seedYearlySparkline(w) {
+  const base = { date: '2025-12-30', nav: 1000, total_value: 10000, total_units: 10,
+    fx_usdkrw: 1000, price_basis: 'legacy_latest', linked: true };
+  const latest = { date: '2026-03-01', nav: 1100, return_nav: 1210, return_factor: 1.1,
+    total_value: 13200, total_units: 12, fx_usdkrw: 1100, price_basis: 'regular_close_v1' };
+  w.PfStore.items = [{ stock_code: 'CASH_KRW', stock_name: '원화', quantity: 13200,
+    avg_price: 1, currency: 'KRW', quote: { price: 1, change: 0 } }];
+  w.PfStore.navHistory = [
+    { ...base, date: '2025-04-01', nav: 800 },
+    base,
+    { ...base, date: '2026-01-02', nav: 1050, fx_usdkrw: 1050, total_value: 12600, total_units: 12 },
+    latest,
+  ];
+  w.PfStore.snapshots.yearStart = base;
+  return latest;
+}
+
+for (const currency of ['KRW', 'USD']) {
+  test(`YTD sparkline uses this year's linked total-return NAV and matches the ${currency} card`, () => {
+    const w = loadSummaryDom({ sparklines: true });
+    seedYearlySparkline(w);
+    w.PfStore.currency.unit = currency;
+    w.PfStore.currency.fxRate = 1200;
+    w.pfFx = n => n / w.PfStore.currency.fxRate;
+    w.renderPortfolio({ summaryOnly: true });
+
+    const { points, axis } = w.sparkCalls.get('sparkYearly');
+    assert.equal(axis, 365);
+    assert.deepEqual(Array.from(points, p => p.x), [0, 2, 60, 74]);
+    assert.equal(points[0].y, 0);
+    const expected = currency === 'KRW' ? [5, 21, 21] : [0, 10, (1210 / 1200 - 1) * 100];
+    expected.forEach((value, i) => assert.ok(Math.abs(points[i + 1].y - value) < 1e-9));
+    const card = cardByLabel(w, 'YTD');
+    assert.ok(card.querySelector('#sparkYearly'));
+    assert.equal(card.querySelector('.pf-summary-value').textContent, w.fmtPct(points.at(-1).y));
+    w.close();
+  });
+}
+
+test('YTD sparkline stays empty without a comparable year-end baseline', () => {
+  const w = loadSummaryDom({ sparklines: true });
+  seedYearlySparkline(w);
+  for (const base of [null, { ...w.PfStore.snapshots.yearStart, linked: false }]) {
+    w.PfStore.snapshots.yearStart = base;
+    w.renderPortfolio({ summaryOnly: true });
+    assert.equal(w.sparkCalls.get('sparkYearly').points.length, 0);
+    assert.equal(cardByLabel(w, 'YTD').querySelector('.pf-summary-value').textContent, '-');
+  }
+  w.close();
+});
+
+test('YTD sparkline ignores future and unlinked snapshots and preserves calendar gaps', () => {
+  const w = loadSummaryDom({ sparklines: true });
+  const latestSnap = seedYearlySparkline(w);
+  w.PfStore.navHistory.splice(3, 0, { ...w.PfStore.navHistory[2], date: '2026-02-01', linked: false });
+  w.PfStore.navHistory.push({ ...latestSnap, date: '2026-04-01' });
+  w._renderSummarySparklines(null, { latestSnap });
+  assert.deepEqual(Array.from(w.sparkCalls.get('sparkYearly').points, p => p.x), [0, 2, 60]);
+  w.close();
+});
+
+test('YTD sparkline includes a live return before the first snapshot and clears under filters', () => {
+  const w = loadSummaryDom({ sparklines: true });
+  const latestSnap = seedYearlySparkline(w);
+  w.PfStore.navHistory = [];
+  w.PfStore.snapshots.yearStart.date = '2027-12-31';
+  w._sparkNowKstIsoMinute = () => '2028-01-01T00:01';
+  w._renderSummarySparklines(null, { currentReturnNav: 900, latestSnap });
+  const { points, axis } = w.sparkCalls.get('sparkYearly');
+  assert.equal(axis, 366);
+  assert.deepEqual(Array.from(points, p => p.x), [0, 1]);
+  assert.ok(Math.abs(points[1].y + 10) < 1e-9);
+  assert.equal(w.sparkCalls.get('sparkYearly').color, w._sparkTrendColor(false));
+  for (const applyFilter of [
+    () => { w.PfStore.accountId = 1; },
+    () => { w.PfStore.accountId = null; w.PfStore.filters.group = 'test'; },
+    () => { w.PfStore.filters.group = null; w.PfStore.filters.searchText = '원화'; },
+  ]) {
+    applyFilter();
+    w._renderSummarySparklines(null, { currentReturnNav: 900, latestSnap });
+    assert.equal(w.sparkCalls.get('sparkYearly').points.length, 0);
+  }
+  w.close();
+});
 
 // 보유 1종목: 평가액 1,000,000 (전일 정산 950,000).
 function seedPortfolio(w, { todayCashflow = 0, mtdNetCashflow = null } = {}) {
