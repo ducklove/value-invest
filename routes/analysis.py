@@ -18,7 +18,7 @@ from repositories import benchmark_daily as benchmark_repo
 from repositories import cache_values, corp_codes
 from repositories import financial as financial_repo
 from repositories import user_stocks as user_stocks_repo
-from services import stock_price, stock_quotes
+from services import research_valuation, stock_price, stock_quotes
 from services.dart import client as dart_client
 
 logger = logging.getLogger(__name__)
@@ -189,6 +189,29 @@ async def _load_cached_analysis_payload(
     )
     await analysis_repo.save_analysis_snapshot(stock_code, corp_name, payload)
     return payload
+
+
+@router.get("/api/analyze/{stock_code}/valuation")
+async def get_current_valuation(stock_code: str):
+    """Latest disclosed TTM EPS / balance-sheet BPS, independent of annual snapshots."""
+    try:
+        basis = await stock_price.fetch_current_valuation_basis(stock_code)
+    except Exception:
+        # Provider request exceptions may contain a DART API key in their URL.
+        logger.warning("현재 밸류에이션 조회 실패(%s)", stock_code)
+        basis = {"status": "unavailable", "reason": "최근 공시 재무자료를 불러오지 못했습니다"}
+    return {"stock_code": stock_code, "current": basis}
+
+
+@router.get("/api/analyze/{stock_code}/forward-valuation")
+async def get_forward_valuation(stock_code: str):
+    """Explicit broker annual forecasts; current share price is applied by the UI."""
+    try:
+        forecast = await research_valuation.fetch_forward_valuation(stock_code)
+    except Exception:
+        logger.warning("예상 밸류에이션 조회 실패(%s)", stock_code)
+        forecast = None
+    return {"stock_code": stock_code, "forward": forecast}
 
 
 @router.get("/api/analyze/{stock_code}/daily")

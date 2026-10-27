@@ -27,6 +27,9 @@ function buildChartSeries(key, series) {
     note = `표시 기준: 음수 PER와 ${PER_DISPLAY_MAX}배 초과 구간은 추세 왜곡을 막기 위해 제외합니다.`;
     spanGaps = false;
   }
+  if (['PER', 'PBR', 'EPS (원)', 'ROE (%)', '부채비율 (%)', '영업이익률 (%)'].includes(key)) {
+    note = `과거 시계열은 당시 공시된 연간 재무 기준입니다. 현재 PER(TTM)·PBR은 상단 카드에서 확인할 수 있습니다.${note ? ` ${note}` : ''}`;
+  }
 
   return { labelField, labels, values, rawValues, note, spanGaps };
 }

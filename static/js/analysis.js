@@ -378,6 +378,8 @@ async function renderResult(data) {
   _lastAnalysisData = data;
   _currentStockLinks = null;  // 종목 전환 — 이전 외부 카드 제거(loadStockExternalLinks가 다시 채움)
   _currentDr = null;  // 종목 전환 — 이전 DR 카드 제거(loadStockDr가 다시 채움)
+  _currentValuationBasis = null;
+  _forwardValuation = null;
   allReports = [];    // 이전 종목 리포트 잔상 제거 — loadReports 가 다시 채우고 목표가 카드 갱신
   _currentPeriod = 'all';
   _dailyCache = {};
@@ -389,8 +391,7 @@ async function renderResult(data) {
   activeStockCode = data.stock_code;
   activeIndicators = data.indicators || {};
   activeQuoteSnapshot = data.quote_snapshot || {};
-  // renderQuoteSnapshot → _renderCoverage 가 주간 시계열로 카드를 계산하므로,
-  // 이전 종목의 주간 데이터가 섞이지 않게 카드 첫 렌더 전에 갱신해 둔다.
+  // 카드의 배당/ROE 에 이전 종목의 주간 데이터가 섞이지 않게 먼저 갱신한다.
   _lastWeeklyIndicators = data.weekly_indicators || null;
   currentUserPreference = normalizeUserPreference(data.user_preference);
   document.getElementById('companyName').textContent = `${data.corp_name} (${data.stock_code})`;
@@ -398,6 +399,8 @@ async function renderResult(data) {
   document.getElementById('companyMeta').textContent = cachedText;
   renderUserPreference();
   renderQuoteSnapshot(data.quote_snapshot || {}, activeIndicators);
+  loadCurrentValuation(data.stock_code);
+  loadForwardValuation(data.stock_code);
   trackEvent('analysis_complete', { stock_code: data.stock_code, cached: String(Boolean(data.cached)) });
 
   // Hide empty state, show charts

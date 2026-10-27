@@ -70,10 +70,8 @@ test("_externalValuationCards returns [] when no links", () => {
 });
 
 // --- valuation 카드 지표 소스 ---
-// 2026-08 사고 회귀: 연간 market_data 캐시가 교차연도 close_price 오염으로
-// 카드 PBR 0.5(실측 0.91)·배당수익률 0.63%(TTM 2.51%)로 왜곡됐다. 카드는
-// 주간 시계열(그래프와 같은 소스)을 우선해야 한다.
-test("valuation 카드는 주간 시계열(최신 BPS·TTM 배당)을 우선한다 — 오염된 연간 캐시 무시", () => {
+// 연간/주간 차트의 연간 EPS 와 별도로 검증된 TTM EPS 를 쓴다.
+test("valuation 카드는 검증된 TTM EPS·최신 BPS와 주간 TTM 배당을 쓴다", () => {
   const w = load();
   const indicators = {
     // 오염된 연간 캐시 재현(현대차 2025 행): close 538,000 / pbr 0.67 →
@@ -91,17 +89,18 @@ test("valuation 카드는 주간 시계열(최신 BPS·TTM 배당)을 우선한�
     "주당배당금 (원)": [{ date: "2026-08-24", value: 10000 }],
     "ROE (%)": [{ date: "2026-08-24", value: 8.12 }],
   };
-  const m = w.getCurrentValuationMetrics(indicators, weekly, { price: 399000 });
+  const m = w.getCurrentValuationMetrics(indicators, weekly, { price: 399000 }, {
+    earnings_basis: 'ttm', eps_ttm: 40000, equity_basis: 'latest', bps: 440000,
+  });
 
-  // BPS = 398,600/0.91 = 438,022 → PBR = 399,000/438,022 ≈ 0.91 (연간 역산이면 0.50)
-  assert.ok(Math.abs(m.pbr - 0.911) < 0.01, `pbr=${m.pbr}`);
+  assert.equal(m.pbr, 399000 / 440000);
   // 배당수익률 = TTM 10,000/399,000 = 2.51% (연간 최신 양수 2,500 이면 0.63%)
   assert.ok(Math.abs(m.dividendYield - 2.506) < 0.01, `dy=${m.dividendYield}`);
-  assert.ok(Math.abs(m.per - 399000 / 35331) < 0.01, `per=${m.per}`);
+  assert.equal(m.per, 399000 / 40000);
   assert.equal(m.roe, 8.12);
 });
 
-test("valuation 카드: 주간 시계열이 비면 기존 연간 규칙으로 폴백한다", () => {
+test("valuation 카드: TTM 자료가 없으면 연간 EPS·BPS로 조용히 폴백하지 않는다", () => {
   const w = load();
   const indicators = {
     "주가 (원)": [{ year: 2025, value: 100000 }],
@@ -112,8 +111,8 @@ test("valuation 카드: 주간 시계열이 비면 기존 연간 규칙으로 �
   };
   const m = w.getCurrentValuationMetrics(indicators, {}, { price: 120000 });
 
-  assert.ok(Math.abs(m.pbr - 1.2) < 0.001);           // 연간 역산 BPS 100,000
-  assert.ok(Math.abs(m.per - 12) < 0.001);
+  assert.equal(m.pbr, null);
+  assert.equal(m.per, null);
   assert.ok(Math.abs(m.dividendYield - 2.5) < 0.001); // 연간 최신 양수 DPS 3,000
   assert.equal(m.roe, 10);
 });
@@ -125,10 +124,74 @@ test("valuation 카드: 주간 TTM 배당 0 은 실측 0.00% 로 표시된다", 
     "PBR": [{ date: "2026-08-24", value: 2.0 }],
     "주당배당금 (원)": [{ date: "2026-08-24", value: 0 }],
   };
-  const m = w.getCurrentValuationMetrics({}, weekly, { price: 50000 });
+  const m = w.getCurrentValuationMetrics({}, weekly, { price: 50000 }, {
+    earnings_basis: 'ttm', eps_ttm: -100, equity_basis: 'latest', bps: 25000,
+  });
 
   assert.equal(m.dividendYield, 0);
   assert.ok(Math.abs(m.pbr - 2.0) < 0.001);
+  assert.equal(m.per, null);
+});
+
+test("forward 카드는 각 지표 뒤에 표시하고 현재가 변동을 반영한다", () => {
+  const w = load();
+  w.eval(`_currentValuationBasis = {
+    earnings_basis: 'ttm', eps_ttm: 1000, equity_basis: 'latest', bps: 10000,
+    period_end: '2026-06-30', statement_basis: 'CFS'
+  }; _forwardValuation = {
+    period: '2026E', eps: 2000, bps: 12500, source: '테스트증권',
+    source_url: 'https://stock.naver.com/research/company/1', as_of: '2026-10-12'
+  };`);
+  const root = w.document.getElementById('coverageNote');
+  root.innerHTML = w.renderCurrentValuationSummary({}, {}, { price: 20000 });
+  const cards = [...root.querySelectorAll('.valuation-card')];
+  assert.deepEqual(cards.slice(0, 4).map(c => c.querySelector('.valuation-label').textContent),
+    ['PER', 'Forward PER', 'PBR', 'Forward PBR']);
+  assert.deepEqual(cards.slice(0, 4).map(c => c.querySelector('.valuation-value').textContent),
+    ['20.00', '10.00', '2.00', '1.60']);
+  assert.match(cards[0].textContent, /최근 4분기.*26\.06/);
+  assert.match(cards[2].textContent, /분기말.*26\.06/);
+  assert.match(cards[0].title, /실적 2026-06-30/);
+  assert.match(cards[2].title, /분기말 2026-06-30/);
+  assert.match(cards[1].textContent, /2026E.*테스트증권/);
+  assert.match(cards[1].title, /리포트 게시일 2026-10-12/);
+  assert.equal(cards[1].querySelector('a').getAttribute('href'), 'https://stock.naver.com/research/company/1');
+  root.innerHTML = w.renderCurrentValuationSummary({}, {}, { price: 24000 });
+  assert.equal(root.querySelectorAll('.valuation-value')[1].textContent, '12.00');
+  w.eval('_forwardValuation = null');
+  root.innerHTML = w.renderCurrentValuationSummary({}, {}, { price: 24000 });
+  assert.ok(!root.textContent.includes('Forward'));
+});
+
+test("일부 예상치만 제공되면 해당 forward 카드만 표시하고 외부 텍스트를 이스케이프한다", () => {
+  const w = load();
+  w.eval(`_forwardValuation = {
+    period: '2026E', eps: -10, bps: null, source: '<img src=x onerror=alert(1)>',
+    source_url: 'javascript:alert(1)', report_title: '\" onmouseover=\"alert(1)'
+  }; _currentValuationBasis = {};`);
+  const root = w.document.getElementById('coverageNote');
+  root.innerHTML = w.renderCurrentValuationSummary({}, {}, { price: 20000 });
+  assert.equal(root.querySelectorAll('.valuation-card').length, 8);
+  assert.equal(root.querySelectorAll('.valuation-value')[1].textContent, 'N/A');
+  assert.equal(root.querySelectorAll('img, [onmouseover], a').length, 0);
+  assert.ok(!root.textContent.includes('Forward PBR'));
+});
+
+test("늦게 도착한 이전 종목의 현재·예상 재무자료는 다음 종목 카드에 섞이지 않는다", async () => {
+  const w = load();
+  w.activeStockCode = '005930';
+  let resolve;
+  w.apiFetchJson = () => new Promise(r => { resolve = r; });
+  const pending = w.loadCurrentValuation('005930');
+  w.activeStockCode = '000660';
+  resolve({ current: { eps_ttm: 10000 } });
+  await pending;
+  assert.equal(w.eval('_currentValuationBasis'), null);
+  const forward = w.loadForwardValuation('000660');
+  w.activeStockCode = '005380';
+  resolve({ forward: { eps: 20000 } });
+  await forward;
+  assert.equal(w.eval('_forwardValuation'), null);
 });
 
 test("_stripBlockBars removes unicode block-bar glyphs but keeps text", () => {

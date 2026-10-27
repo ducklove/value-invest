@@ -33,55 +33,17 @@ function formatMetricNumber(value, suffix = '') {
     : `${value.toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${suffix}`;
 }
 
-function getLatestDerivedBps(indicators) {
-  const priceByYear = new Map((indicators['주가 (원)'] || []).map(item => [item.year, Number(item.value)]));
-  const pbrSeries = indicators['PBR'] || [];
-
-  for (let index = pbrSeries.length - 1; index >= 0; index -= 1) {
-    const item = pbrSeries[index];
-    const pbr = Number(item?.value);
-    const price = priceByYear.get(item?.year);
-    if (Number.isFinite(price) && Number.isFinite(pbr) && pbr > 0) {
-      return price / pbr;
-    }
-  }
-
-  return null;
-}
-
-// 주간 시계열에서 최신 BPS 를 역산한다 — 같은 주의 (주가 ÷ PBR). 주간 지표는
-// 분석 때마다 KIS 재무비율로 새로 계산되므로, 여러 소스가 누적되는 연간
-// 캐시(market_data)와 달리 아래 PBR 그래프와 항상 정합한다.
-function getLatestWeeklyBps(weeklyIndicators) {
-  const priceByDate = new Map((weeklyIndicators?.['주가'] || []).map(item => [item.date, Number(item.value)]));
-  const pbrSeries = weeklyIndicators?.['PBR'] || [];
-
-  for (let index = pbrSeries.length - 1; index >= 0; index -= 1) {
-    const item = pbrSeries[index];
-    const pbr = Number(item?.value);
-    const price = priceByDate.get(item?.date);
-    if (Number.isFinite(price) && Number.isFinite(pbr) && pbr > 0 && price > 0) {
-      return price / pbr;
-    }
-  }
-
-  return null;
-}
-
-function getCurrentValuationMetrics(indicators, weeklyIndicators, quoteSnapshot) {
+function getCurrentValuationMetrics(indicators, weeklyIndicators, quoteSnapshot, valuationBasis = null) {
   const currentPrice = Number(quoteSnapshot?.price);
   if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
     return { per: null, pbr: null, roe: null, dividendYield: null, marketCap: null };
   }
 
-  // 카드의 분모(EPS/BPS/DPS/ROE)는 주간 시계열 최신값을 우선한다 — 아래
-  // 그래프와 같은 소스라 카드-그래프 불일치가 구조적으로 사라지고, 연간
-  // market_data 캐시 오염(교차연도 close_price 등)이 카드로 새지 않는다.
-  // 주간이 비어 있을 때만 연간 시계열로 폴백.
+  // 과거 차트의 EPS/BPS 는 연간 실적이다. 현재 PER/PBR 에는 별도로
+  // 검증한 TTM EPS / 최신 분기말 BPS 만 사용하고, 없으면 N/A 로 둔다.
   const weekly = weeklyIndicators || {};
-  const latestEps = getLatestIndicatorValue(weekly['EPS (원)'])
-    ?? getLatestIndicatorValue(indicators['EPS (원)']);
-  const latestBps = getLatestWeeklyBps(weekly) ?? getLatestDerivedBps(indicators);
+  const latestEps = valuationBasis?.earnings_basis === 'ttm' ? Number(valuationBasis.eps_ttm) : null;
+  const latestBps = valuationBasis?.equity_basis === 'latest' ? Number(valuationBasis.bps) : null;
 
   // 주간 주당배당금은 시점별 TTM(최근 365일 합)이라 그대로 연 수익률의
   // 분자가 된다. 연간 시계열의 현재 연도 값은 연초 이후 분기배당 부분합이라
@@ -95,8 +57,8 @@ function getCurrentValuationMetrics(indicators, weeklyIndicators, quoteSnapshot)
     ?? getLatestIndicatorValue(indicators['ROE (%)']);
 
   return {
-    per: latestEps && latestEps > 0 ? currentPrice / latestEps : null,
-    pbr: latestBps && latestBps > 0 ? currentPrice / latestBps : null,
+    per: Number.isFinite(latestEps) && latestEps > 0 ? currentPrice / latestEps : null,
+    pbr: Number.isFinite(latestBps) && latestBps > 0 ? currentPrice / latestBps : null,
     roe,
     dividendYield: trailingDps !== null ? (trailingDps / currentPrice) * 100 : null,
     marketCap: getCurrentMarketCap(indicators, currentPrice),
@@ -122,6 +84,85 @@ function getCurrentMarketCap(indicators, currentPrice) {
 let _currentBeta = null;   // {beta, sample_size, benchmark} 또는 null
 let _currentStockLinks = null;  // {preferred?, holding?} 또는 null — 외부 분석 도구
 let _currentDr = null;  // [{label, exchange, ticker, change_pct, converted_price}] 또는 null — 해외 DR
+let _currentValuationBasis = null;  // null: 로딩 중, {}: 조회 불가
+let _forwardValuation = null;  // 증권사 리포트의 명시적인 연간 예상 EPS/BPS
+
+function _valuationSourceLink(label, url) {
+  const text = escapeHtml(String(label || ''));
+  return /^https?:\/\//i.test(String(url || ''))
+    ? `<a href="${escapeHtml(String(url))}" target="_blank" rel="noopener noreferrer">${text}</a>`
+    : text;
+}
+
+function _currentBasisCard(label, value, metric) {
+  const basis = _currentValuationBasis;
+  const entry = basis?.[metric] || {};
+  const period = entry.period_end || basis?.period_end;
+  const prefix = metric === 'earnings' ? '최근 4분기' : '분기말';
+  const compactPeriod = /^\d{4}-\d{2}-\d{2}$/.test(String(period || ''))
+    ? `${period.slice(2, 4)}.${period.slice(5, 7)}` : '';
+  const sub = `${prefix}${compactPeriod ? ` · ${compactPeriod}` : ''}`;
+  const unavailable = {
+    quarterly_financials_unavailable: '분기 재무자료가 없습니다',
+    quarterly_financials_symbol_mismatch: '종목과 일치하는 재무자료가 없습니다',
+    ambiguous_quarter_columns: '분기 구분을 확인할 수 없습니다',
+    ambiguous_per_share_rows: '주당 실적을 확인할 수 없습니다',
+    reported_quarters_unavailable: '발표된 분기 실적이 없습니다',
+    reported_quarters_stale: '최근 분기 재무자료가 없습니다',
+    four_consecutive_reported_eps_unavailable: '최근 4개 분기의 EPS가 모두 필요합니다',
+    latest_reported_bps_unavailable: '최근 분기말 BPS가 없습니다',
+    quarterly_provider_unavailable: '분기 재무자료를 불러오지 못했습니다',
+    invalid_stock_code: '지원하지 않는 종목입니다',
+  };
+  const title = [
+    metric === 'earnings' ? '현재가 ÷ 최근 4개 분기 EPS' : '현재가 ÷ 최근 공시 순자산 BPS',
+    period ? `${metric === 'earnings' ? '실적' : '분기말'} ${entry.period_start ? `${entry.period_start} ~ ` : ''}${period}` : '',
+    basis?.statement_basis === 'CFS' ? '연결재무제표' : basis?.statement_basis === 'OFS' ? '별도재무제표' : basis?.statement_basis_label || '',
+    entry.available_date || basis?.available_date ? `공시 ${entry.available_date || basis.available_date}` : '',
+    metric === 'earnings' && entry.quarter_count === 4 ? '분기 EPS 4개 합산' : '',
+    value === null && basis?.reason ? unavailable[basis.reason] || '최근 재무자료를 확인할 수 없습니다' : '',
+  ].filter(Boolean).join(' · ');
+  return { label, value: basis === null ? '…' : formatMetricNumber(value), sub: _valuationSourceLink(sub, entry.source_url), title };
+}
+
+function _forwardBasisCard(label, field, price) {
+  const forecast = _forwardValuation;
+  if (!forecast || forecast[field] === null || forecast[field] === undefined) return [];
+  const denominator = Number(forecast[field]);
+  if (!Number.isFinite(denominator)) return [];
+  const multiple = Number.isFinite(price) && price > 0 && denominator > 0 ? price / denominator : null;
+  const source = `${forecast.period || `${forecast.fiscal_year}E`} · ${forecast.source || '증권사 리포트'}`;
+  const title = [
+    `현재가 ÷ 예상 ${field.toUpperCase()} (${formatMetricNumber(denominator)}원)`,
+    '해당 회계연도 예상치', forecast.as_of ? `리포트 게시일 ${forecast.as_of}` : '', forecast.report_title || '',
+    denominator <= 0 ? '예상 주당값이 0 이하이면 배수를 표시하지 않습니다' : '',
+  ].filter(Boolean).join(' · ');
+  return [{ label, value: formatMetricNumber(multiple), sub: _valuationSourceLink(source, forecast.source_url), title }];
+}
+
+async function loadCurrentValuation(stockCode) {
+  try {
+    const data = await apiFetchJson(`/api/analyze/${encodeURIComponent(stockCode)}/valuation`);
+    if (activeStockCode !== stockCode) return;
+    _currentValuationBasis = data.current || {};
+  } catch (_) {
+    if (activeStockCode !== stockCode) return;
+    _currentValuationBasis = { reason: '최근 공시 재무자료를 불러오지 못했습니다' };
+  }
+  _renderCoverage();
+}
+
+async function loadForwardValuation(stockCode) {
+  try {
+    const data = await apiFetchJson(`/api/analyze/${encodeURIComponent(stockCode)}/forward-valuation`);
+    if (activeStockCode !== stockCode) return;
+    _forwardValuation = data.forward || null;
+  } catch (_) {
+    if (activeStockCode !== stockCode) return;
+    _forwardValuation = null;
+  }
+  _renderCoverage();
+}
 
 // 시총을 조/억 단위로 압축 표기.
 function _fmtMarketCap(v) {
@@ -154,20 +195,23 @@ function _fmtTargetAvg() {
 }
 
 function renderCurrentValuationSummary(indicators, weeklyIndicators, quoteSnapshot) {
-  const metrics = getCurrentValuationMetrics(indicators, weeklyIndicators, quoteSnapshot);
+  const metrics = getCurrentValuationMetrics(indicators, weeklyIndicators, quoteSnapshot, _currentValuationBasis);
+  const price = Number(quoteSnapshot?.price);
   const betaVal = _currentBeta && _currentBeta.beta !== null && _currentBeta.beta !== undefined
     ? Number(_currentBeta.beta).toFixed(2)
     : (_currentBeta === null ? '…' : 'N/A');
   return [
-    { label: 'PER', value: formatMetricNumber(metrics.per) },
-    { label: 'PBR', value: formatMetricNumber(metrics.pbr) },
-    { label: 'ROE', value: formatMetricNumber(metrics.roe, '%') },
+    _currentBasisCard('PER', metrics.per, 'earnings'),
+    ..._forwardBasisCard('Forward PER', 'eps', price),
+    _currentBasisCard('PBR', metrics.pbr, 'equity'),
+    ..._forwardBasisCard('Forward PBR', 'bps', price),
+    { label: 'ROE', value: formatMetricNumber(metrics.roe, '%'), sub: '연간 실적' },
     { label: '배당수익률', value: formatMetricNumber(metrics.dividendYield, '%') },
     { label: '시가총액', value: _fmtMarketCap(metrics.marketCap) },
     { label: '목표가', value: _fmtTargetAvg() },
     { label: '베타 (1Y)', value: betaVal, attr: 'data-beta="1"' },
   ].map(item => (
-    `<div class="valuation-card" ${item.attr || ''}><span class="valuation-label">${item.label}</span><span class="valuation-value">${item.value}</span></div>`
+    `<div class="valuation-card" ${item.attr || ''}${item.title ? ` title="${escapeHtml(item.title)}"` : ''}><span class="valuation-label">${item.label}</span><span class="valuation-value">${item.value}</span>${item.sub ? `<span class="valuation-sub">${item.sub}</span>` : ''}</div>`
   )).join('') + _externalValuationCards(_currentStockLinks).join('') + _drValuationCards(_currentDr).join('');
 }
 

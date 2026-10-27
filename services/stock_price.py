@@ -31,6 +31,13 @@ logger = logging.getLogger(__name__)
 KRW_PER_EOK = 100_000_000
 WS_QUOTE_MAX_AGE_SECONDS = 90
 
+
+async def fetch_current_valuation_basis(stock_code: str, *, as_of: date | str | None = None, corp_code: str | None = None) -> dict:
+    """Current TTM EPS/latest-quarter BPS, independent of annual market data."""
+    from services.stock_valuation import fetch_current_valuation_basis as fetch_basis
+
+    return await fetch_basis(stock_code, as_of=as_of, corp_code=corp_code)
+
 # yfinance 는 블로킹이고 wait_for 타임아웃 뒤에도 스레드가 계속 돈다. 모든
 # yfinance 호출은 services.market.sources.yfinance_runner 의 전용 소형 풀·
 # 동시성 한도·짧은 negative cache 를 거친다.

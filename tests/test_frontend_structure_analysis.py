@@ -51,9 +51,10 @@ def test_analysis_split_files_keep_feature_homes():
     assert "const FILING_REVIEW_GENERATE_TIMEOUT_MS = 10 * 60 * 1000;" in filings
     assert "function renderReportsTable(" in filings
     assert "async function loadWiki(" in filings
-    # 밸류에이션 카드: #coverageNote 그리드 — 지표 계산(주간 우선), 외부/DR 카드.
+    # 현재 지표는 연간 차트와 별도로 TTM/최근 분기를 조회한다.
     assert "function getCurrentValuationMetrics(" in valuation
-    assert "function getLatestWeeklyBps(" in valuation
+    assert "async function loadCurrentValuation(" in valuation
+    assert "async function loadForwardValuation(" in valuation
     assert "function renderCurrentValuationSummary(" in valuation
     assert "function _renderCoverage()" in valuation
     assert "function _externalValuationCards(" in valuation
