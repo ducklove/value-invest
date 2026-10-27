@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+from domain.market_calendar import is_trading_day
 from domain.timeutil import KST
 from repositories.broker_secrets import BrokerError
 from services.brokers import namuh
@@ -13,6 +14,11 @@ PATH = "/krstock/inquiry/v1/realizedPnl"
 
 async def fetch(user: str, link: dict, balances: dict) -> list[dict]:
     day = datetime.now(KST).date()
+    trading = is_trading_day(day)
+    if trading is False:
+        return []  # 휴장일에는 NH가 전 거래일 합계를 그대로 반환할 수 있다.
+    if trading is None:
+        raise BrokerError("거래일 달력을 확인할 수 없어 당일 매매 자동 대조를 보류했습니다.")
     pages = await namuh.pages(user, link["credential_id"], PATH, {
         "act_no": link["account_no"], "iqr_dit_cd1": "2", "fee_dit_cd": "1",
         "qut_dit_cd": "UNT", "aly_qut_cd": "2",

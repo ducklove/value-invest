@@ -2,10 +2,12 @@
 
 import json
 from collections import defaultdict
+from datetime import date, timedelta
 from decimal import Decimal
 
 from domain.broker_activity import stamp
 from domain.cash_review import minor_limit
+from domain.market_calendar import is_trading_day
 from repositories.broker_secrets import BrokerError
 from repositories.db import read_snapshot, transaction
 
@@ -81,12 +83,42 @@ async def _evidence(db, user: str, aid: str, fp: str) -> dict:
             ledger_groups.add((data["date"], data["currency"], kind))
     summaries = await (await db.execute("SELECT * FROM broker_cash_review_evidence WHERE google_sub=? AND account_id=? AND fingerprint=?",
                                        (user, aid, fp))).fetchall()
-    for row in summaries:
+    previous_mmw = {}
+    for row in sorted(summaries, key=lambda row: (row["date"], row["booked_date"], row["kind"])):
+        if row["kind"] in {"trade_buy", "trade_sell", "trade_charges"} and is_trading_day(date.fromisoformat(row["date"])) is not True:
+            continue  # 휴장일 조회에서 전 거래일 합계가 반복된 기존 자료도 사용하지 않는다.
         if (row["date"], row["currency"], row["kind"]) in ledger_groups:
             continue  # 같은 수입이 기존 확정 원장에도 있으면 합계로 다시 설명하지 않는다.
         key = ":".join(("summary", row["booked_date"], row["date"], row["currency"], row["kind"]))
         result[key] = {"date": row["date"], "effects": {row["currency"]: row["amount"]}, "summary": True}
+        if row["kind"] == "mmw_interest":
+            previous = previous_mmw.get(row["currency"])
+            # MMW는 휴일 평가이자를 다음 상환일에 합산한다. 원문 금액을 날짜별로 추정 배분하지 않는다.
+            if previous and previous < row["date"]:
+                result[key]["from_date"] = (date.fromisoformat(previous) + timedelta(days=1)).isoformat()
+            previous_mmw[row["currency"]] = row["date"]
     return result
+
+
+def _mmw_allocations(rows, pools: dict, evidence: dict) -> dict:
+    """MMW 상환 사이의 순수 입금 관측 합계가 API 평가이자와 정확히 맞을 때만 배정한다."""
+    allocations = {}
+    other_receipts = {row["id"] for row in rows if row["amount"] > 0 and any(
+        amount == _decimal(row["amount"]) and key[1] == row["currency"]
+        and row["from_at"][:10] <= key[0] <= row["to_at"][:10] and not key[2].endswith(":mmw_interest")
+        for key, amount in pools.items())}
+    for key in pools:
+        if not key[2].endswith(":mmw_interest"):
+            continue
+        amount = pools[key]
+        pools[key] = Decimal(0)  # 평가이자를 음수 매매·비용과 상쇄하지 않는다.
+        start = evidence[key[2]].get("from_date", key[0])
+        candidates = [row for row in rows if row["currency"] == key[1] and row["amount"] > 0
+                      and not row["positions_changed"] and start <= row["to_at"][:10] <= key[0]
+                      and row["id"] not in allocations and row["id"] not in other_receipts]
+        if amount > 0 and sum((_decimal(row["amount"]) for row in candidates), Decimal(0)) == amount:
+            allocations.update({row["id"]: _decimal(row["amount"]) for row in candidates})
+    return allocations
 
 
 async def _reconcile(db, user: str, aid: str, state: dict, evidence: dict, now: str):
@@ -108,8 +140,9 @@ async def _reconcile(db, user: str, aid: str, state: dict, evidence: dict, now: 
     rows = await (await db.execute(
         "SELECT * FROM broker_cash_reviews WHERE google_sub=? AND account_id=? AND fingerprint=? ORDER BY id",
         (user, aid, state["fingerprint"]))).fetchall()
+    mmw = _mmw_allocations(rows, pools, evidence)
     for index, row in enumerate(rows):
-        remaining = _decimal(row["amount"])
+        remaining = _decimal(row["amount"]) - mmw.get(row["id"], 0)
         candidates = [key for key, amount in pools.items() if amount and key[1] == row["currency"]
                       and row["from_at"][:10] <= key[0] <= row["to_at"][:10]]
         # 금액이 정확히 맞는 다음 관측을 우선한다. 오후 대여료를 새벽 MMW 이자에서 먼저 빼지 않는다.

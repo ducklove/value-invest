@@ -28,6 +28,10 @@ class CashReviewTests(TempDbMixin):
         cid = await brokers.store_credential("u1", "cash-review-key", "cash-review-secret")
         await brokers.link_account("u1", self.aid, cid, "12345678901", "live")
         self.link = await brokers.get_link("u1", self.aid)
+        # 아래 매매 사례는 거래일을 가정한다. 실제 휴장일 자료의 배제는 별도 사례에서 검증한다.
+        calendar = patch.object(broker_cash_reviews, "is_trading_day", return_value=True)
+        calendar.start()
+        self.addCleanup(calendar.stop)
 
     async def sync(self, *rows, entries=None):
         with patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(list(rows), {}))), \
@@ -448,3 +452,76 @@ class CashReviewTests(TempDbMixin):
         await self.sync(cash(10000), entries=batch)
         await self.sync(cash(8000), entries=batch)
         self.assertEqual((await self.pending())[0]["unexplained"], -2000)
+
+    async def weekend_interest(self, *, extra_deposit=0, interest=9002):
+        def batch(day, kind, amount):
+            return activity.ActivityBatch([], [{"date": day, "booked_date": day, "currency": "KRW", "kind": kind, "amount": amount}],
+                                          date(2026, 10, 23), date(2026, 10, 26))
+        with patch.object(broker_cash_reviews, "stamp", return_value="2026-10-23T09:00:00"):
+            await self.sync(cash(20000000), entries=batch("2026-10-23", "mmw_interest", 4000))
+        balance = 20000000
+        for day, amount in (("2026-10-24", 3000), ("2026-10-25", 3001), ("2026-10-26", 3001)):
+            balance += amount
+            with patch.object(broker_cash_reviews, "stamp", return_value=day + "T00:45:00"):
+                await self.sync(cash(balance))
+        if extra_deposit:
+            balance += extra_deposit
+            with patch.object(broker_cash_reviews, "stamp", return_value="2026-10-26T02:00:00"):
+                await self.sync(cash(balance))
+        with patch.object(broker_cash_reviews, "stamp", return_value="2026-10-26T04:45:00"):
+            await self.sync(cash(balance - 1500))
+        balance -= 1500
+        for clock, amount in (("10:00:00", 6000500), ("11:00:00", 4000400), ("15:30:00", 10000)):
+            balance -= amount
+            with patch.object(broker_cash_reviews, "stamp", return_value="2026-10-26T" + clock):
+                await self.sync(cash(balance))
+        evidence = batch("2026-10-26", "mmw_interest", interest)
+        evidence.cash_summaries.insert(0, {"date": "2026-10-23", "booked_date": "2026-10-23", "currency": "KRW", "kind": "mmw_interest", "amount": 4000})
+        evidence.cash_summaries.append({"date": "2026-10-26", "booked_date": "2026-10-26", "currency": "KRW", "kind": "mmw_charges", "amount": -1500})
+        async with transaction() as db:
+            await broker_cash_reviews.store_trades(db, "u1", self.link, [
+                {"date": "2026-10-26", "booked_date": "2026-10-26", "currency": "KRW", "kind": kind, "amount": amount}
+                for kind, amount in (("trade_buy", -10010000), ("trade_charges", -900))])
+        with patch.object(broker_cash_reviews, "stamp", return_value="2026-10-26T16:00:00"):
+            await self.sync(cash(balance), entries=evidence)
+            await self.sync(cash(balance), entries=evidence)
+
+    async def test_weekend_mmw_accruals_match_redemption_total_and_do_not_contaminate_buys(self):
+        await self.weekend_interest()
+        rows = (await broker_cash_reviews.history("u1", pending=False))["items"]
+        self.assertTrue(all(row["unexplained"] == 0 for row in rows))
+        self.assertEqual(await self.pending(), [])
+        self.assertEqual(await snapshots.get_cashflows("u1"), [])
+
+    async def test_mmw_mismatch_does_not_create_a_false_trade_withdrawal(self):
+        await self.weekend_interest(interest=9003)
+        rows = (await broker_cash_reviews.history("u1", pending=False))["items"]
+        self.assertTrue(all(row["unexplained"] == 0 for row in rows if row["amount"] < 0))
+        self.assertEqual(sum(row["unexplained"] for row in rows), 9002)
+
+    async def test_extra_external_receipt_cannot_be_hidden_by_weekend_interest_matching(self):
+        await self.weekend_interest(extra_deposit=5000)
+        rows = (await broker_cash_reviews.history("u1", pending=False))["items"]
+        self.assertEqual(sum(row["unexplained"] for row in rows if row["amount"] > 0), 14002)
+        self.assertTrue(await self.pending())
+
+    async def test_existing_weekend_trade_totals_are_not_reused_for_external_transfers(self):
+        with patch.object(broker_cash_reviews, "stamp", return_value="2026-10-23T18:00:00"):
+            await self.sync(cash(20000000))
+        async with transaction() as db:
+            await broker_cash_reviews.store_trades(db, "u1", self.link, [{"date": "2026-10-24", "booked_date": "2026-10-24", "currency": "KRW", "kind": "trade_sell", "amount": 100000}])
+        with patch.object(broker_cash_reviews, "stamp", return_value="2026-10-24T01:00:00"), \
+             patch.object(broker_cash_reviews, "is_trading_day", return_value=False):
+            await self.sync(cash(20100000))
+        self.assertEqual((await self.pending())[0]["unexplained"], 100000)
+
+    async def test_mmw_accruals_already_in_initial_balance_are_not_invented_as_observations(self):
+        batch = activity.ActivityBatch([], [
+            {"date": "2026-10-23", "booked_date": "2026-10-23", "currency": "KRW", "kind": "mmw_interest", "amount": 4000},
+            {"date": "2026-10-26", "booked_date": "2026-10-26", "currency": "KRW", "kind": "mmw_interest", "amount": 9002},
+        ], date(2026, 10, 23), date(2026, 10, 26))
+        with patch.object(broker_cash_reviews, "stamp", return_value="2026-10-24T12:00:00"):
+            await self.sync(cash(20003000))  # 토요일 이자는 추적 시작 잔고에 이미 포함
+        with patch.object(broker_cash_reviews, "stamp", return_value="2026-10-26T05:00:00"):
+            await self.sync(cash(20009002), entries=batch)
+        self.assertEqual((await self.pending())[0]["unexplained"], 6002)

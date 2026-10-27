@@ -1,12 +1,20 @@
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from domain.timeutil import KST
 from repositories.broker_secrets import BrokerError
 from services.brokers import cash_trades, namuh
 
 LINK = {"account_no": "12345678901", "credential_id": "test"}
+
+
+@pytest.fixture(autouse=True)
+def trading_clock():
+    with patch.object(cash_trades, "datetime", wraps=datetime) as clock:
+        clock.now.return_value = datetime(2026, 10, 28, 10, tzinfo=KST)
+        yield clock
 
 
 def total(buy=1000000, sell=0, charges=500, **extra):
@@ -68,3 +76,18 @@ async def test_midnight_during_query_does_not_put_yesterdays_trades_in_today():
         clock.now.side_effect = [before, after]
         with pytest.raises(BrokerError):
             await fetch(total())
+
+
+@pytest.mark.parametrize("day", [date(2026, 10, 24), date(2026, 10, 25), date(2026, 10, 9)])
+async def test_nontrading_days_do_not_relabel_previous_session_totals_as_new_trades(trading_clock, day):
+    trading_clock.now.return_value = datetime.combine(day, datetime.min.time(), KST)
+    with patch.object(namuh, "pages", AsyncMock()) as query:
+        assert await cash_trades.fetch("u1", LINK, {"KRW": total()}) == []
+    query.assert_not_awaited()
+
+
+async def test_unknown_calendar_does_not_assume_a_new_trade_date(trading_clock):
+    trading_clock.now.return_value = datetime(2028, 1, 3, 10, tzinfo=KST)
+    with patch.object(namuh, "pages", AsyncMock()) as query, pytest.raises(BrokerError):
+        await cash_trades.fetch("u1", LINK, {"KRW": total()})
+    query.assert_not_awaited()
