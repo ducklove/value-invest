@@ -43,8 +43,10 @@ def _empty(stock_code: str, reason: str, *, as_of: date) -> dict:
         "stock_code": stock_code,
         "eps_ttm": None,
         "bps": None,
+        "roe_ttm": None,
         "earnings_basis": "ttm",
         "equity_basis": "latest",
+        "roe_basis": "ttm",
         "period_end": None,
         "available_date": None,
         "statement_basis": None,
@@ -56,6 +58,8 @@ def _empty(stock_code: str, reason: str, *, as_of: date) -> dict:
         "fetched_at": None,
         "earnings": None,
         "equity": None,
+        "roe": None,
+        "roe_reason": "four_reported_income_quarters_or_roe_unavailable",
         "reason": reason,
     }
 
@@ -84,7 +88,10 @@ def parse_quarterly_valuation(payload: dict, stock_code: str, *, today: date | N
     Missing latest-quarter EPS/BPS never causes an older complete window to
     masquerade as the latest one. Zero and loss quarters count toward TTM.
     Provider EPS already represents a quarter, so it is summed directly;
-    provider PER/ROE figures are not reused or reverse engineered.
+    provider PER is not reused. The latest quarterly ROE is already a rolling
+    four-quarter ratio per the provider's Financial Summary definition; it is
+    never summed or approximated using EPS/BPS. Four actual income quarters
+    must be present before accepting it.
     """
     today = today or _today()
     result = _empty(stock_code, "quarterly_financials_unavailable", as_of=today)
@@ -124,7 +131,7 @@ def parse_quarterly_valuation(payload: dict, stock_code: str, *, today: date | N
         if not isinstance(row, dict):
             continue
         title = str(row.get("title") or "").strip().upper()
-        if title in {"EPS", "BPS"}:
+        if title in {"EPS", "BPS", "ROE", "지배주주순이익", "당기순이익"}:
             if title in rows:
                 result["reason"] = "ambiguous_per_share_rows"
                 return result
@@ -148,16 +155,19 @@ def parse_quarterly_valuation(payload: dict, stock_code: str, *, today: date | N
         for left, right in zip(quarters, quarters[1:])
     )
     values = [_number(rows.get("EPS", {}).get(periods[period])) for period in quarters]
-    if consecutive and all(value is not None for value in values):
-        result["eps_ttm"] = round(sum(values), 6)
+    period_start = None
+    if consecutive:
         first = quarters[0]
         first_month = first.month - 2
         start_year = first.year
         if first_month <= 0:
             first_month += 12
             start_year -= 1
+        period_start = date(start_year, first_month, 1).isoformat()
+    if consecutive and all(value is not None for value in values):
+        result["eps_ttm"] = round(sum(values), 6)
         result["earnings"] = {
-            "period_start": date(start_year, first_month, 1).isoformat(),
+            "period_start": period_start,
             "period_end": latest.isoformat(),
             "available_date": None,
             "method": "sum_reported_quarter_eps",
@@ -165,6 +175,25 @@ def parse_quarterly_valuation(payload: dict, stock_code: str, *, today: date | N
             "quarters": [{"period_end": period.isoformat(), "eps": value} for period, value in zip(quarters, values)],
             "statement_basis": None,
             "source_url": result["source_url"],
+        }
+
+    owner_income = rows.get("지배주주순이익", {})
+    income_title = "지배주주순이익" if any(
+        _number(owner_income.get(periods[period])) is not None for period in quarters
+    ) else "당기순이익"
+    income_values = [_number(rows.get(income_title, {}).get(periods[period])) for period in quarters]
+    reported_roe = _number(rows.get("ROE", {}).get(latest_key))
+    if consecutive and all(value is not None for value in income_values) and reported_roe is not None:
+        result["roe_ttm"] = reported_roe
+        result["roe_reason"] = None
+        result["roe"] = {
+            "period_start": period_start,
+            "period_end": latest.isoformat(),
+            "quarter_count": 4,
+            "method": "provider_reported_ttm_roe",
+            "net_income_account": income_title,
+            "source_url": result["source_url"],
+            "definition_url": f"https://navercomp.wisereport.co.kr/v2/company/c1010001.aspx?cmp_cd={stock_code}",
         }
 
     complete = result["eps_ttm"] is not None and result["bps"] is not None

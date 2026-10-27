@@ -52,6 +52,53 @@ class QuarterlyValuationTests(unittest.TestCase):
         self.assertEqual(result["eps_ttm"], -70)
         self.assertEqual(result["status"], "ready")
 
+    def roe_payload(self):
+        payload = quarterly_payload()
+        payload["financeInfo"]["rowList"].extend([
+            {"title": "지배주주순이익", "columns": {key: {"value": "100"} for key in ("202509", "202512", "202603", "202606")}},
+            {"title": "ROE", "columns": {"202603": {"value": "19.16"}, "202606": {"value": "31.39"}, "202609": {"value": "99"}}},
+        ])
+        return payload
+
+    def test_roe_uses_latest_provider_ttm_ratio_not_sum_or_eps_bps(self):
+        result = self.parse(self.roe_payload())
+        self.assertEqual(result["roe_ttm"], 31.39)
+        self.assertNotAlmostEqual(result["roe_ttm"], result["eps_ttm"] / result["bps"] * 100)
+        self.assertEqual(result["roe"]["period_start"], "2025-07-01")
+        self.assertEqual(result["roe"]["period_end"], "2026-06-30")
+        self.assertEqual(result["roe"]["quarter_count"], 4)
+        self.assertEqual(result["roe"]["method"], "provider_reported_ttm_roe")
+        self.assertIsNone(result["roe_reason"])
+
+    def test_missing_roe_or_income_quarter_never_uses_old_roe_or_eps_bps(self):
+        for missing in ("roe", "income", "quarter"):
+            with self.subTest(missing=missing):
+                payload = self.roe_payload()
+                if missing == "roe":
+                    payload["financeInfo"]["rowList"][-1]["columns"]["202606"]["value"] = "-"
+                elif missing == "income":
+                    payload["financeInfo"]["rowList"][-2]["columns"]["202512"]["value"] = "-"
+                else:
+                    payload["financeInfo"]["trTitleList"] = [c for c in payload["financeInfo"]["trTitleList"] if c["key"] != "202512"]
+                self.assertIsNone(self.parse(payload)["roe_ttm"])
+
+    def test_roe_zero_and_losses_are_preserved_and_eps_is_independent(self):
+        for value in ("0", "-5.25"):
+            payload = self.roe_payload()
+            payload["financeInfo"]["rowList"][-1]["columns"]["202606"]["value"] = value
+            payload["financeInfo"]["rowList"][0]["columns"]["202606"]["value"] = "-"
+            result = self.parse(payload)
+            self.assertEqual(result["roe_ttm"], float(value))
+            self.assertIsNone(result["eps_ttm"])
+
+    def test_incomplete_parent_income_does_not_switch_to_total_income(self):
+        payload = self.roe_payload()
+        payload["financeInfo"]["rowList"][-2]["columns"]["202512"]["value"] = "-"
+        payload["financeInfo"]["rowList"].append({"title": "당기순이익", "columns": {
+            key: {"value": "1000"} for key in ("202509", "202512", "202603", "202606")
+        }})
+        self.assertIsNone(self.parse(payload)["roe_ttm"])
+
     def test_missing_latest_eps_does_not_select_an_older_complete_window(self):
         payload = quarterly_payload()
         payload["financeInfo"]["rowList"][0]["columns"]["202606"]["value"] = "-"

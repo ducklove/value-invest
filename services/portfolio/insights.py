@@ -38,8 +38,7 @@ from services.portfolio.identifiers import (
 from services.portfolio.identifiers import (
     static_foreign_ticker as _static_foreign_ticker,
 )
-from services.portfolio.time_windows import today_kst_date
-from services.portfolio.valuation import fetch_valuation_basis
+from services.portfolio.valuation import fetch_current_insight_basis
 
 logger = logging.getLogger(__name__)
 
@@ -324,29 +323,32 @@ def holding_context_for_asset(code: str) -> dict | None:
 
 
 async def fetch_insight_valuation_basis(stock_code: str) -> dict:
-    return await fetch_valuation_basis(stock_code, as_of=today_kst_date())
+    return await fetch_current_insight_basis(stock_code)
 
 
 def build_insight_valuation(quote: dict | None, basis: dict) -> dict:
     if not basis.get("applicable"):
         return {"applicable": False}
-    price = asset_insights.safe_float((quote or {}).get("price")) or asset_insights.safe_float(basis.get("closePrice"))
+    price = asset_insights.safe_float((quote or {}).get("price"))
     calculated = asset_insights.calculate_valuation_metrics(
         price=price,
-        eps=basis.get("eps"),
-        bps=basis.get("bps"),
-        net_income=basis.get("netIncome"),
-        equity=basis.get("equity"),
-        per=basis.get("perFallback"),
-        pbr=basis.get("pbrFallback"),
+        eps=basis.get("eps") if basis.get("earningsBasis") == "ttm" else None,
+        bps=basis.get("bps") if basis.get("equityBasis") == "latest" else None,
     )
     return {
         "applicable": True,
         **calculated,
+        # The generic helper has an EPS/BPS approximation; insights require
+        # the provider's TTM income / average-equity ROE instead.
+        "roe": asset_insights.safe_float(basis.get("roe")) if basis.get("roeBasis") == "ttm" else None,
         "source": basis.get("source"),
         "sourceCode": basis.get("sourceCode"),
         "fiscalYear": basis.get("fiscalYear"),
         "asOf": basis.get("asOf"),
+        **{key: basis.get(key) for key in (
+            "sourceUrl", "earningsBasis", "equityBasis", "roeBasis", "earningsPeriod", "equityPeriod", "roePeriod",
+            "statementBasis", "statementBasisLabel", "reason", "roeReason", "treasuryFiscalYear", "treasuryAsOf",
+        )},
         "treasuryShareRatioPct": basis.get("treasuryShareRatioPct"),
         "treasuryShares": basis.get("treasuryShares"),
         "issuedShares": basis.get("issuedShares"),

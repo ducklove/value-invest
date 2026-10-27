@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, datetime
 from typing import Any
@@ -10,11 +11,13 @@ from repositories import portfolio as portfolio_repo
 from services.market.sources import close_price as close_price_client
 from services.portfolio.identifiers import common_stock_code, is_korean_stock, is_preferred_stock
 from services.portfolio.time_windows import today_kst_date
+from services.stock_valuation import fetch_current_valuation_basis
 
 logger = logging.getLogger(__name__)
 
 _VALUATION_CACHE_TTL_SECONDS = 300
 _valuation_basis_cache = MemoryTTLCache("portfolio.valuation_basis", _VALUATION_CACHE_TTL_SECONDS, evict_expired_after=0)
+_insight_basis_cache = MemoryTTLCache("portfolio.insight_ttm_basis", _VALUATION_CACHE_TTL_SECONDS, evict_expired_after=0)
 
 
 def _as_of_key(as_of: date | datetime | str | None) -> str:
@@ -125,6 +128,55 @@ def treasury_share_basis(fundamental: dict) -> dict:
         "issuedShares": round(issued_total),
         "outstandingShares": round(outstanding_total) if outstanding_total > 0 else None,
     }
+
+
+async def fetch_current_insight_basis(stock_code: str) -> dict:
+    """Current insight ratios never use annual financial/market-cache fallbacks.
+
+    Keep target-formula inputs and historical annual persistence separate.
+    finance-pi is consulted only for the independent treasury-share card.
+    """
+    if not is_korean_stock(stock_code):
+        return {"applicable": False}
+    source_code = common_stock_code(stock_code) if is_preferred_stock(stock_code) else stock_code
+    today = today_kst_date()
+    key = (source_code, today.isoformat())
+    cached = _insight_basis_cache.get(key)
+    if cached is not None:
+        return cached
+    quarterly, fundamentals = await asyncio.gather(
+        fetch_current_valuation_basis(source_code, as_of=today),
+        close_price_client.get_basic_fundamentals([source_code], as_of=today.isoformat()),
+        return_exceptions=True,
+    )
+    quarterly = quarterly if isinstance(quarterly, dict) else {}
+    raw = fundamentals.get(source_code) if isinstance(fundamentals, dict) else None
+    fundamental = raw if isinstance(raw, dict) else {}
+    basis = {
+        "applicable": True,
+        "sourceCode": source_code,
+        "source": quarterly.get("source") or "NAVER Finance",
+        "sourceUrl": quarterly.get("source_url"),
+        "asOf": quarterly.get("period_end"),
+        "earningsBasis": "ttm",
+        "equityBasis": "latest",
+        "roeBasis": "ttm",
+        "eps": quarterly.get("eps_ttm") if quarterly.get("earnings_basis") == "ttm" else None,
+        "bps": quarterly.get("bps") if quarterly.get("equity_basis") == "latest" else None,
+        "roe": quarterly.get("roe_ttm") if quarterly.get("roe_basis") == "ttm" else None,
+        "earningsPeriod": quarterly.get("earnings"),
+        "equityPeriod": quarterly.get("equity"),
+        "roePeriod": quarterly.get("roe"),
+        "statementBasis": quarterly.get("statement_basis"),
+        "statementBasisLabel": quarterly.get("statement_basis_label"),
+        "reason": quarterly.get("reason"),
+        "roeReason": quarterly.get("roe_reason"),
+        "treasuryFiscalYear": fundamental.get("fiscal_year"),
+        "treasuryAsOf": fundamental.get("as_of") or fundamental.get("available_date"),
+        **treasury_share_basis(fundamental),
+    }
+    _insight_basis_cache.set(key, basis)
+    return basis
 
 
 def needs_market_valuation_fallback(basis: dict) -> bool:

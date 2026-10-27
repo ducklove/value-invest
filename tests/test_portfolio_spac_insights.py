@@ -107,7 +107,10 @@ class SpacSourceTests(unittest.IsolatedAsyncioTestCase):
                 mock(pf.insights, "resolve_insight_benchmark", "IDX_KOSPI")
                 mock(pf.insights, "benchmark_history_for_insight", [])
                 mock(pf.insights, "fetch_insight_indicators", {})
-                basis = mock(pf.insights, "fetch_insight_valuation_basis", {"applicable": True, "eps": 100, "bps": 2000})
+                basis = mock(pf.insights, "fetch_insight_valuation_basis", {
+                    "applicable": True, "eps": 100, "bps": 2000, "roe": 6.25,
+                    "earningsBasis": "ttm", "equityBasis": "latest", "roeBasis": "ttm",
+                })
                 mock(pf, "_fetch_benchmark_quote", {})
                 mock(pf, "_resolve_benchmark_name", "코스피")
                 source = mock(external_tools, "fetch_spac_data", DATA)
@@ -126,3 +129,4 @@ class SpacSourceTests(unittest.IsolatedAsyncioTestCase):
                 source.assert_not_awaited()
                 self.assertIsNone(result["spac"])
                 self.assertEqual(result["valuation"]["per"], 18.82)
+                self.assertEqual(result["valuation"]["roe"], 6.25)

@@ -102,8 +102,8 @@ function _insightClass(value) {
   return n > 0 ? 'positive' : n < 0 ? 'negative' : '';
 }
 
-function _renderInsightCard(label, value, sub = '', cls = '') {
-  return `<div class="pf-insight-card">
+function _renderInsightCard(label, value, sub = '', cls = '', title = '') {
+  return `<div class="pf-insight-card"${title ? ` title="${escapeHtml(title)}"` : ''}>
     <div class="pf-insight-card-label">${escapeHtml(label)}</div>
     <div class="pf-insight-card-value ${cls}">${escapeHtml(value)}</div>
     ${sub ? `<div class="pf-insight-card-sub">${escapeHtml(sub)}</div>` : ''}
@@ -307,10 +307,21 @@ function _renderAssetInsight(data) {
   const etf = data.etf || null;
   const actionLinks = _renderInsightActionLinks(code, goldGap, holding, etf);
   const tagPanel = _renderInsightTags(code, data.tags || [], data.tagSuggestions || []);
-  const valuationYear = valuation.fiscalYear ? `${valuation.fiscalYear}년 기준` : '';
   const valuationSourceCode = valuation.sourceCode && valuation.sourceCode !== code ? `기준 ${valuation.sourceCode}` : '';
-  const valuationBasis = [valuationSourceCode, valuationYear].filter(Boolean).join(' · ');
-  const treasuryBasis = ['발행주식 대비', valuationBasis].filter(Boolean).join(' · ');
+  const periodText = (period, label) => {
+    const end = String(period?.period_end || '');
+    const compact = /^\d{4}-\d{2}-\d{2}$/.test(end) ? `${end.slice(2, 4)}.${end.slice(5, 7)}` : '';
+    return compact ? `${label} · ${compact}` : `${label} 자료 없음`;
+  };
+  const earningsBasis = periodText(valuation.earningsPeriod, '최근 4분기');
+  const equityBasis = periodText(valuation.equityPeriod, '최근 분기말');
+  const roeBasis = periodText(valuation.roePeriod, '최근 4분기');
+  const basisTitle = (period, formula) => [
+    formula, period?.period_start && period?.period_end ? `${period.period_start} ~ ${period.period_end}` : period?.period_end,
+    valuationSourceCode, valuation.source, valuation.statementBasisLabel,
+  ].filter(Boolean).join(' · ');
+  const treasuryYear = valuation.treasuryFiscalYear ? `${valuation.treasuryFiscalYear}년 기준` : '';
+  const treasuryBasis = ['발행주식 대비', valuationSourceCode, treasuryYear].filter(Boolean).join(' · ');
 
   const cards = [
     _renderInsightCard('현재가', _fmtInsightPrice(position.currentPrice, positionCurrency), benchmark.dayChangePct !== null && benchmark.dayChangePct !== undefined ? `벤치마크 오늘 ${_fmtInsightPct(benchmark.dayChangePct)}` : ''),
@@ -323,9 +334,9 @@ function _renderAssetInsight(data) {
       _renderInsightCard('연환산 기대수익률', _fmtInsightPct(spac.annualizedReturnPct), spac.payoutDate ? `청산금 수령 예정 ${spac.payoutDate}` : '청산금 수령 예정일 기준', _insightClass(spac.annualizedReturnPct)),
       _renderInsightCard('상장일', spac.listingDate || '-', spac.updatedAt ? `SPAC Hunter · ${spac.updatedAt}` : 'SPAC Hunter'),
     ] : valuation.applicable ? [
-      _renderInsightCard('PBR', _fmtInsightMultiple(valuation.pbr), valuation.bps !== null && valuation.bps !== undefined ? `BPS ${_fmtInsightPrice(valuation.bps, 'KRW')}` : valuationBasis),
-      _renderInsightCard('PER', _fmtInsightMultiple(valuation.per), valuation.eps !== null && valuation.eps !== undefined ? `EPS ${_fmtInsightPrice(valuation.eps, 'KRW')}` : valuationBasis),
-      _renderInsightCard('ROE', _fmtInsightPct(valuation.roe, false), valuationBasis),
+      _renderInsightCard('PBR', _fmtInsightMultiple(valuation.pbr), [equityBasis, valuation.bps != null ? `BPS ${_fmtInsightPrice(valuation.bps, 'KRW')}` : ''].filter(Boolean).join(' · '), '', basisTitle(valuation.equityPeriod, '현재가 ÷ 최신 분기말 BPS')),
+      _renderInsightCard('PER', _fmtInsightMultiple(valuation.per), [earningsBasis, valuation.eps != null ? `EPS ${_fmtInsightPrice(valuation.eps, 'KRW')}` : ''].filter(Boolean).join(' · '), '', basisTitle(valuation.earningsPeriod, '현재가 ÷ 최근 4분기 EPS 합계')),
+      _renderInsightCard('ROE', _fmtInsightPct(valuation.roe, false), roeBasis, '', basisTitle(valuation.roePeriod, '최근 4분기 순이익 ÷ 해당 기간 평균 자기자본 × 100 (제공사 산출값)')),
       _renderInsightCard('자사주 비율', _fmtInsightPct(valuation.treasuryShareRatioPct, false), treasuryBasis),
     ] : []),
     ...(holding?.applicable ? [

@@ -7,14 +7,27 @@ from routes import portfolio as pf
 from services.market.sources import close_price as close_price_client
 from services.market.sources import kis_proxy as kis_proxy_client
 from services.portfolio import insights
+from services.portfolio import valuation as valuation_service
+
+
+def reported_basis(eps=6000, bps=80000, roe=12.5):
+    period = {"period_start": "2025-07-01", "period_end": "2026-06-30", "quarter_count": 4}
+    return {
+        "eps_ttm": eps, "bps": bps, "roe_ttm": roe,
+        "earnings_basis": "ttm", "equity_basis": "latest", "roe_basis": "ttm",
+        "period_end": "2026-06-30", "source": "NAVER Finance",
+        "earnings": period, "equity": {"period_end": "2026-06-30"}, "roe": period,
+    }
 
 
 class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         insights.asset_history_cache.clear()
+        valuation_service._insight_basis_cache.clear()
 
     async def asyncTearDown(self):
         insights.asset_history_cache.clear()
+        valuation_service._insight_basis_cache.clear()
 
     async def test_korean_history_prefers_internal_close_api(self):
         local_rows = [{"date": "2026-05-07", "close": 12660.0}]
@@ -133,9 +146,10 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
         }
 
         with (
+            patch.object(valuation_service, "fetch_current_valuation_basis", new=AsyncMock(return_value=reported_basis())) as quarterly,
             patch.object(close_price_client, "get_basic_fundamentals", new=AsyncMock(return_value=fundamentals)) as local,
             patch.object(portfolio_repo, "get_latest_market_valuation", new=AsyncMock(return_value={})),
-            patch.object(portfolio_repo, "upsert_market_target_metrics", new=AsyncMock(return_value=None)),
+            patch.object(portfolio_repo, "upsert_market_target_metrics", new=AsyncMock(return_value=None)) as write,
         ):
             basis = await insights.fetch_insight_valuation_basis("005935")
             valuation = insights.build_insight_valuation({"price": 40000}, basis)
@@ -143,17 +157,21 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
         local.assert_awaited_once()
         self.assertEqual(local.await_args.args[0], ["005930"])
         self.assertEqual(valuation["sourceCode"], "005930")
-        self.assertEqual(valuation["per"], 8.0)
-        self.assertEqual(valuation["pbr"], 0.8)
-        self.assertEqual(valuation["roe"], 11.0)
-        self.assertEqual(valuation["eps"], 5000)
-        self.assertEqual(valuation["bps"], 50000)
+        self.assertEqual(quarterly.await_args.args[0], "005930")
+        self.assertEqual(valuation["per"], 6.67)
+        self.assertEqual(valuation["pbr"], 0.5)
+        self.assertEqual(valuation["roe"], 12.5)
+        self.assertEqual(valuation["eps"], 6000)
+        self.assertEqual(valuation["bps"], 80000)
+        self.assertEqual(valuation["earningsPeriod"]["period_end"], "2026-06-30")
+        self.assertEqual(valuation["treasuryFiscalYear"], 2025)
+        write.assert_not_awaited()
         self.assertEqual(valuation["treasuryShareRatioPct"], 10.0)
         self.assertEqual(valuation["treasuryShares"], 120)
         self.assertEqual(valuation["issuedShares"], 1200)
         self.assertEqual(valuation["outstandingShares"], 1080)
 
-    async def test_insight_valuation_prefers_refreshed_internal_bps_over_cache(self):
+    async def test_insight_valuation_prefers_quarterly_inputs_over_annual_fundamentals_and_cache(self):
         fundamentals = {
             "009770": {
                 "fiscal_year": 2025,
@@ -172,6 +190,7 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
 
         cache_lookup = AsyncMock(return_value=cached)
         with (
+            patch.object(valuation_service, "fetch_current_valuation_basis", new=AsyncMock(return_value=reported_basis(eps=200, bps=100000))),
             patch.object(close_price_client, "get_basic_fundamentals", new=AsyncMock(return_value=fundamentals)),
             patch.object(portfolio_repo, "get_latest_market_valuation", new=cache_lookup),
             patch.object(portfolio_repo, "upsert_market_target_metrics", new=AsyncMock(return_value=None)),
@@ -180,8 +199,49 @@ class AssetInsightHistorySourceTests(unittest.IsolatedAsyncioTestCase):
             valuation = insights.build_insight_valuation({"price": 36000}, basis)
 
         cache_lookup.assert_not_awaited()
-        self.assertEqual(valuation["bps"], 72000)
-        self.assertEqual(valuation["eps"], 100)
-        self.assertEqual(valuation["pbr"], 0.5)
-        self.assertEqual(valuation["per"], 360.0)
-        self.assertEqual(valuation["source"], "internal_fundamentals")
+        self.assertEqual(valuation["bps"], 100000)
+        self.assertEqual(valuation["eps"], 200)
+        self.assertEqual(valuation["pbr"], 0.36)
+        self.assertEqual(valuation["per"], 180.0)
+        self.assertEqual(valuation["source"], "NAVER Finance")
+
+    async def test_quarterly_failure_does_not_fall_back_to_annual_or_cached_ratios(self):
+        annual = {"005930": {"per_share": {"eps_annual": {"value": 5000}, "bps": {"value": 50000}}}}
+        with (
+            patch.object(valuation_service, "fetch_current_valuation_basis", new=AsyncMock(side_effect=RuntimeError("offline"))),
+            patch.object(close_price_client, "get_basic_fundamentals", new=AsyncMock(return_value=annual)),
+            patch.object(portfolio_repo, "get_latest_market_valuation", new=AsyncMock(return_value={"per": 10, "pbr": 1})) as cache,
+        ):
+            basis = await insights.fetch_insight_valuation_basis("005930")
+            valuation = insights.build_insight_valuation({"price": 50000}, basis)
+        self.assertIsNone(valuation["per"])
+        self.assertIsNone(valuation["pbr"])
+        self.assertIsNone(valuation["roe"])
+        cache.assert_not_awaited()
+
+    async def test_current_financials_survive_treasury_provider_failure(self):
+        with (
+            patch.object(valuation_service, "fetch_current_valuation_basis", new=AsyncMock(return_value=reported_basis())),
+            patch.object(close_price_client, "get_basic_fundamentals", new=AsyncMock(side_effect=RuntimeError("offline"))),
+        ):
+            valuation = insights.build_insight_valuation({"price": 40000}, await insights.fetch_insight_valuation_basis("005930"))
+        self.assertEqual(valuation["per"], 6.67)
+        self.assertEqual(valuation["roe"], 12.5)
+        self.assertIsNone(valuation["treasuryShareRatioPct"])
+
+    async def test_foreign_asset_skips_domestic_financial_providers(self):
+        with patch.object(valuation_service, "fetch_current_valuation_basis", new=AsyncMock()) as fetch:
+            self.assertEqual(await insights.fetch_insight_valuation_basis("AAPL"), {"applicable": False})
+        fetch.assert_not_awaited()
+
+    def test_legacy_annual_fields_and_eps_bps_roe_approximation_are_rejected(self):
+        annual = {"applicable": True, "eps": 100, "bps": 1000, "netIncome": 100, "equity": 1000,
+                  "perFallback": 10, "pbrFallback": 1, "closePrice": 1000, "roe": 10}
+        valuation = insights.build_insight_valuation({"price": 1000}, annual)
+        self.assertIsNone(valuation["per"])
+        self.assertIsNone(valuation["pbr"])
+        self.assertIsNone(valuation["roe"])
+        current = {"applicable": True, "eps": 100, "bps": 1000, "earningsBasis": "ttm", "equityBasis": "latest"}
+        valuation = insights.build_insight_valuation({"price": 1000}, current)
+        self.assertEqual(valuation["per"], 10)
+        self.assertIsNone(valuation["roe"])

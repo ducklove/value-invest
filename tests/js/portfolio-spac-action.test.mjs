@@ -114,3 +114,52 @@ test('일반 종목 인사이트는 기존 기업 지표를 유지한다', () =>
   assert.ok(!('청산가' in cards));
   w.close();
 });
+
+test('투자 인사이트 PER·ROE는 4분기, PBR은 분기말 기준을 표시하고 자사주 기준은 구분한다', () => {
+  const w = loadPortfolioActions([{ stock_code: '005935', stock_name: '삼성전자우' }]);
+  const container = w.document.createElement('div');
+  const period = { period_start: '2025-07-01', period_end: '2026-06-30' };
+  container.innerHTML = w._renderAssetInsight({
+    profile: { code: '005935', name: '삼성전자우' },
+    valuation: { applicable: true, per: 10, pbr: 1, roe: 31.39, eps: 22358, bps: 86052,
+      sourceCode: '005930', source: 'NAVER Finance', fiscalYear: 2025,
+      earningsPeriod: period, equityPeriod: { period_end: '2026-06-30' }, roePeriod: period,
+      treasuryShareRatioPct: 5, treasuryFiscalYear: 2025,
+      statementBasisLabel: '연결/별도 구분 미제공',
+    },
+  });
+  const cards = Object.fromEntries([...container.querySelectorAll('.pf-insight-card')].map(card => [
+    card.querySelector('.pf-insight-card-label').textContent, card,
+  ]));
+  for (const label of ['PER', 'ROE']) {
+    assert.match(cards[label].querySelector('.pf-insight-card-sub').textContent, /최근 4분기 · 26\.06/);
+    assert.match(cards[label].title, /2025-07-01 ~ 2026-06-30/);
+    assert.ok(!cards[label].textContent.includes('2025년 기준'));
+  }
+  assert.match(cards.PBR.textContent, /최근 분기말 · 26\.06.*BPS 86,052/);
+  assert.match(cards.ROE.textContent, /31\.39%/);
+  assert.match(cards.ROE.title, /평균 자기자본/);
+  assert.match(cards.ROE.title, /연결\/별도 구분 미제공/);
+  assert.match(cards['자사주 비율'].textContent, /2025년 기준/);
+  w.close();
+});
+
+test('최근 실적이 없으면 투자 인사이트에 자료 없음으로 표시하고 툴팁을 이스케이프한다', () => {
+  const w = loadPortfolioActions([]);
+  const container = w.document.createElement('div');
+  container.innerHTML = w._renderAssetInsight({
+    profile: { code: '005930' },
+    valuation: { applicable: true, per: null, pbr: null, roe: null, fiscalYear: 2025,
+      statementBasisLabel: '\"><img src=x onerror=alert(1)>',
+    },
+  });
+  const cards = [...container.querySelectorAll('.pf-insight-card')].filter(card =>
+    ['PER', 'PBR', 'ROE'].includes(card.querySelector('.pf-insight-card-label').textContent));
+  for (const card of cards) {
+    assert.equal(card.querySelector('.pf-insight-card-value').textContent, '-');
+    assert.match(card.textContent, /자료 없음/);
+    assert.ok(!card.textContent.includes('2025년 기준'));
+  }
+  assert.equal(container.querySelectorAll('img, [onerror]').length, 0);
+  w.close();
+});
