@@ -83,9 +83,10 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                     activity_error = str(exc)
             rows, balances = await fetch_snapshot(user, link)
             trades = None
-            if (include_activity and link.get("provider", "namuh") == "namuh" and link["environment"] == "live"
+            review_trades = (include_activity and link.get("provider", "namuh") == "namuh" and link["environment"] == "live"
                     and link.get("product", "stocks") == "stocks"
-                    and all(key in balances.get("KRW", {}) for key in ("nxt_dd_dca", "nxt2_dd_dca"))):
+                    and all(key in balances.get("KRW", {}) for key in ("nxt_dd_dca", "nxt2_dd_dca")))
+            if review_trades:
                 try:
                     # 거래내역의 5분 제한과 무관하게 체결 직후 조회한다. D+2 잔고는 이미 매매를 포함한다.
                     trades = await cash_trades.fetch(user, link, balances)
@@ -118,7 +119,8 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                     if not row["stock_code"].startswith("CASH_") and not is_futures_value(row["stock_code"]) and any(r["stock_code"] == row["stock_code"] and r["quantity"] * row["quantity"] < 0 for r in other):
                         raise BrokerError("다른 계좌의 공매도 잔고와 충돌하여 동기화를 보류했습니다.")
                 now = datetime.now(timezone.utc).isoformat()
-                await broker_cash_reviews.observe(db, user, current, rows, previous, fx_rates=review_fx)
+                await broker_cash_reviews.observe(db, user, current, rows, previous, fx_rates=review_fx,
+                                                  trades=trades, settling=review_trades)
                 created = {r["stock_code"]: r["created_at"] for r in previous}
                 await db.execute("DELETE FROM account_holdings WHERE google_sub=? AND account_id=?", (user, aid))
                 for row in rows:

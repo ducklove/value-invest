@@ -81,3 +81,40 @@ test('소액 자동처리는 접속 시 입력 창을 열지 않고 전체 이�
   await page.getByText('직접 사유 기록 (선택)',{exact:true}).click();
   await expect(page.locator('#pfCashReviewRows select')).toBeVisible();
 });
+
+test('매매 대조 중에는 입력 창을 열지 않고 자동 확인 후 남은 자동 창도 닫는다', async ({page}) => {
+  await page.routeWebSocket('**/ws/quotes',()=>{});
+  await page.route('**/*',route=>new URL(route.request().url()).hostname === '127.0.0.1'?route.continue():route.abort());
+  await page.request.post('/api/auth/register',{data:{email:`cash-checking-${Date.now()}@example.com`,name:'매매 검증',password:'browser-test-password'},headers:{Origin:'http://127.0.0.1:18765'}});
+  const {categories}=await (await page.request.get('/api/portfolio/cash-reviews')).json();
+  const item={id:1,account_name:'매매 계좌',from_at:'2026-10-28T10:00:00',to_at:'2026-10-28T10:01:00',currency:'KRW',amount:-1000050,unexplained:-1000050,revision:1,category:'',reason:'',auto_resolution:'checking',review_required:false};
+  let pending=[],calls=0;
+  await page.route('**/api/portfolio/cash-reviews**',async route=>{
+    calls++;
+    const isPending=new URL(route.request().url()).searchParams.get('pending') !== 'false';
+    const rows=isPending?pending:[item];
+    await route.fulfill({json:{items:rows,total:rows.length,has_more:false,categories}});
+  });
+  await page.goto('/portfolio');
+  await expect.poll(()=>calls).toBeGreaterThan(0);
+  for(let i=0;i<4;i++) {
+    const before=calls;
+    await page.evaluate(()=>pfCheckCashReviews());
+    await expect.poll(()=>calls).toBeGreaterThan(before);
+    await expect(page.locator('#pfCashReviewDialog')).toHaveCount(0);
+  }
+  await page.locator('#pfAccountsOpen').click();
+  await page.locator('#pfCashReviewsOpen').click();
+  await page.locator('#pfCashReviewMode').click();
+  await expect(page.locator('#pfCashReviewRows')).toContainText('자동 대조 중');
+  await expect(page.locator('#pfCashReviewRows select')).toBeHidden();
+  await page.locator('#pfCashReviewClose').click();
+  await page.locator('#pfAccountsClose').click();
+  await page.evaluate(()=>pfResetCashReviews());
+  pending=[{...item,auto_resolution:null,review_required:true}];
+  await page.evaluate(()=>pfCheckCashReviews());
+  await expect(page.locator('#pfCashReviewDialog')).toBeVisible();
+  pending=[];
+  await page.evaluate(()=>pfCheckCashReviews());
+  await expect(page.locator('#pfCashReviewDialog')).toBeHidden();
+});

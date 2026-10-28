@@ -1126,6 +1126,9 @@ CREATE INDEX IF NOT EXISTS idx_distributions_user_date ON portfolio_distribution
 # the list here makes init_db's migration surface explicit while the larger
 # table-creation script is still being split out of cache.py.
 CORE_COLUMN_MIGRATIONS: tuple[ColumnSpec, ...] = (
+    ("broker_cash_review_state", "trade_json", "TEXT NOT NULL DEFAULT '{}'"),
+    ("broker_cash_reviews", "trade_amount", "REAL"),
+    ("broker_cash_reviews", "review_after", "TEXT"),
     ("broker_cash_reviews", "cash_basis", "REAL"),
     ("broker_cash_reviews", "minor_limit_native", "REAL"),
     ("broker_credentials", "provider", "TEXT NOT NULL DEFAULT 'namuh'"),

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -46,14 +46,17 @@ class CashReviewTests(TempDbMixin):
                 "currency": currency, "fx_rate": 1 if currency == "KRW" else None, **extra}
 
     async def pending(self):
-        return (await broker_cash_reviews.history("u1"))["items"]
+        # 일반 미확인 사례는 자동 대조 대기 시간이 지난 뒤의 사유 요구를 검증한다.
+        later = (datetime.fromisoformat(stamp()) + timedelta(minutes=6)).isoformat()
+        with patch.object(broker_cash_reviews, "stamp", return_value=later):
+            return (await broker_cash_reviews.history("u1"))["items"]
 
-    async def trade_sync(self, balance, buy=0, sell=0, charges=0, *, error=None):
+    async def trade_sync(self, balance, buy=0, sell=0, charges=0, *, error=None, entries=None):
         day = stamp()[:10]
         trades = [{"booked_date": day, "date": day, "currency": "KRW", "kind": kind, "amount": amount}
                   for kind, amount in (("trade_buy", -buy), ("trade_sell", sell), ("trade_charges", -charges))]
         with patch.object(sync, "fetch_snapshot", AsyncMock(return_value=([cash(balance)], {"KRW": {"nxt_dd_dca": 0, "nxt2_dd_dca": 0}}))), \
-             patch.object(activity, "fetch", AsyncMock(return_value=self.income_batch(None))), \
+             patch.object(activity, "fetch", AsyncMock(return_value=entries if entries is not None else self.income_batch(None))), \
              patch.object(cash_trades, "fetch", AsyncMock(return_value=trades, side_effect=error)) as query:
             result = await sync.sync_account("u1", self.aid, include_activity=True)
         self.assertEqual(query.await_count, 1)  # 거래내역 최소 간격 안에도 매매 대조는 실행한다.
@@ -104,7 +107,93 @@ class CashReviewTests(TempDbMixin):
     async def test_external_deposit_offsetting_a_buy_is_not_hidden(self):
         await self.trade_sync(20000000)
         await self.trade_sync(10199500, buy=10000000, charges=500)
-        self.assertEqual(len(await self.pending()), 1)
+        self.assertEqual((await self.pending())[0]["unexplained"], 200000)
+
+    async def test_repeated_interleaved_trades_remain_confirmed_after_every_sync(self):
+        balance, buy, sell, costs = 50000000, 0, 0, 0
+        await self.trade_sync(balance)
+        for side, gross, fee in [("buy", 1000000, 50), ("buy", 500000, 20), ("sell", 2000000, 4000),
+                                 ("buy", 3000000, 150), ("sell", 1000000, 2000), ("buy", 500000, 20)] * 2:
+            if side == "buy":
+                buy += gross
+                balance -= gross + fee
+            else:
+                sell += gross
+                balance += gross - fee
+            costs += fee
+            await self.trade_sync(balance, buy=buy, sell=sell, charges=costs)
+            self.assertEqual((await broker_cash_reviews.history("u1"))["total"], 0)
+            rows = (await broker_cash_reviews.history("u1", pending=False))["items"]
+            self.assertTrue(all(r["auto_resolution"] == "confirmed" and r["trade_amount"] == r["amount"] for r in rows))
+        await self.trade_sync(balance, buy=buy, sell=sell, charges=costs)
+        self.assertEqual(await self.pending(), [])
+
+    async def test_delayed_trade_evidence_is_checking_then_confirmed_without_prompt(self):
+        await self.trade_sync(20000000)
+        await self.trade_sync(9999500, error=BrokerError("매매 반영 대기"))
+        self.assertEqual((await broker_cash_reviews.history("u1"))["total"], 0)
+        row = (await broker_cash_reviews.history("u1", pending=False))["items"][0]
+        self.assertEqual((row["auto_resolution"], row["review_required"]), ("checking", False))
+        self.assertEqual((await self.pending())[0]["unexplained"], -10000500)  # 확인 불가 시 5분 뒤에는 재확인 대상
+        await self.trade_sync(9999500, buy=10000000, charges=500)
+        row = (await broker_cash_reviews.history("u1", pending=False))["items"][0]
+        self.assertEqual((row["auto_resolution"], row["unexplained"]), ("confirmed", 0))
+
+    async def test_legacy_interleaved_trades_and_separate_mmw_are_repaired_and_stay_confirmed(self):
+        balance = 20000000
+        await self.sync(cash(balance))
+        for amount in (4000, -700, -3000100, -7000200, 1996000, -1000050):
+            balance += amount
+            await self.sync(cash(balance))
+        day = stamp()[:10]
+        batch = activity.ActivityBatch([], [
+            {"date": day, "booked_date": day, "currency": "KRW", "kind": "mmw_interest", "amount": 4000},
+            {"date": day, "booked_date": day, "currency": "KRW", "kind": "mmw_charges", "amount": -700},
+        ], date.fromisoformat(day), date.fromisoformat(day))
+        await self.trade_sync(balance, buy=11000000, sell=2000000, charges=4350, entries=batch)
+        self.assertEqual(await self.pending(), [])
+        balance -= 500020
+        await self.trade_sync(balance, buy=11500000, sell=2000000, charges=4370, entries=batch)
+        rows = (await broker_cash_reviews.history("u1", pending=False))["items"]
+        self.assertTrue(all(r["auto_resolution"] == "confirmed" and r["unexplained"] == 0 for r in rows))
+
+    async def test_waiting_large_trade_does_not_make_old_small_income_require_input(self):
+        await self.trade_sync(20000000)
+        await self.sync(cash(20000500))
+        await self.trade_sync(10000000, error=BrokerError("반영 대기"))
+        rows = (await broker_cash_reviews.history("u1", pending=False))["items"]
+        self.assertEqual([r["auto_resolution"] for r in rows], ["checking", "minor"])
+        self.assertEqual((await broker_cash_reviews.history("u1"))["total"], 0)
+
+    async def test_external_roundtrip_is_not_hidden_by_daily_trade_totals(self):
+        await self.trade_sync(20000000)
+        await self.trade_sync(19000950, buy=1000000, charges=50)  # 매수와 외부 입금 1,000원
+        await self.trade_sync(18999950, buy=1000000, charges=50)  # 외부 출금 1,000원
+        self.assertEqual(sorted(r["unexplained"] for r in await self.pending()), [-1000, 1000])
+
+    async def test_external_roundtrip_after_buy_and_sell_is_not_reallocated_as_trade_costs(self):
+        await self.trade_sync(50000000)
+        await self.trade_sync(39999500, buy=10000000, charges=500)
+        await self.trade_sync(59939500, buy=10000000, sell=20000000, charges=60500)
+        await self.trade_sync(59949500, buy=10000000, sell=20000000, charges=60500)
+        await self.trade_sync(59939500, buy=10000000, sell=20000000, charges=60500)
+        self.assertEqual(sorted(r["unexplained"] for r in await self.pending()), [-10000, 10000])
+        recent = (await broker_cash_reviews.history("u1", pending=False))["items"][:2]
+        self.assertEqual([r["trade_amount"] for r in recent], [0, 0])
+
+    async def test_trade_totals_reset_does_not_invent_a_large_refund(self):
+        await self.trade_sync(20000000, buy=10000000, charges=500)
+        await self.trade_sync(20005000, buy=0, charges=0)
+        self.assertEqual((await self.pending())[0]["unexplained"], 5000)
+
+    async def test_mmw_and_trade_in_one_observation_are_not_misidentified_as_external_flow(self):
+        await self.trade_sync(20000000)
+        batch = self.income_batch(12000, kind="mmw_interest")
+        with patch.object(sync, "ACTIVITY_MIN_INTERVAL", 0):
+            await self.trade_sync(19011950, buy=1000000, charges=50, entries=batch)
+            await self.trade_sync(19011950, buy=1000000, charges=50, entries=batch)
+        row = (await broker_cash_reviews.history("u1", pending=False))["items"][0]
+        self.assertEqual((row["unexplained"], row["auto_resolution"]), (0, "confirmed"))
 
     async def test_failed_trade_query_preserves_evidence_and_balance_then_recovers(self):
         await self.trade_sync(20000000)

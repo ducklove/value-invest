@@ -152,3 +152,43 @@ test('소액만 있으면 자동 창·알림을 띄우지 않고 이력에서 �
     assert.match(form.querySelector('summary').textContent,/선택/);
   } finally {s.dom.window.close();}
 });
+
+test('자동 대조 중인 매매는 창을 띄우지 않고 전체 이력에서 선택적으로 확인한다', async () => {
+  const s=setup();
+  try {
+    const checking={...row,amount:-1000000,unexplained:-1000000,auto_resolution:'checking',review_required:false};
+    s.w.apiFetchJson=async path=>path.includes('pending=false')?result([checking]):result([]);
+    for(let i=0;i<5;i++) await s.w.pfLoadCashReviews({auto:true});
+    assert.equal(s.el('pfCashReviewDialog'),null);
+    assert.equal(s.el('pfCashReviewNotice'),null);
+    await s.w.pfOpenCashReviews();
+    s.el('pfCashReviewMode').click(); await tick();
+    assert.match(s.el('pfCashReviewRows').textContent,/자동 대조 중/);
+    assert.match(s.el('pfCashReviewRows').textContent,/지금은 사유를 입력하지 않아도 됩니다/);
+    assert.equal(s.el('pfCashReviewRows').querySelector('details').open,false);
+  } finally {s.dom.window.close();}
+});
+
+test('자동으로 열린 창은 대조 완료 후 닫고 직접 연 창과 입력 초안은 유지한다', async () => {
+  const s=setup(); let pending=[row];
+  try {
+    s.w.apiFetchJson=async()=>result(pending);
+    await s.w.pfLoadCashReviews({auto:true});
+    assert.equal(s.el('pfCashReviewDialog').open,true);
+    pending=[];
+    await s.w.pfLoadCashReviews({render:true});
+    assert.equal(s.el('pfCashReviewDialog').open,false);
+    assert.equal(s.el('pfCashReviewNotice').hidden,true);
+    await s.w.pfOpenCashReviews();
+    assert.equal(s.el('pfCashReviewDialog').open,true);
+    pending=[row];
+    s.w.pfResetCashReviews();
+    await s.w.pfLoadCashReviews({auto:true});
+    const text=s.el('pfCashReviewRows').querySelector('textarea');
+    text.value='확인 중인 내용'; text.dispatchEvent(new s.w.Event('input',{bubbles:true}));
+    pending=[];
+    await s.w.pfLoadCashReviews();
+    assert.equal(s.el('pfCashReviewDialog').open,true);
+    assert.equal(text.value,'확인 중인 내용');
+  } finally {s.dom.window.close();}
+});
