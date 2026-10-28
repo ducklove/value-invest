@@ -35,6 +35,7 @@ function pfFmtNativeAvgPrice(value, currency) {
 }
 
 function pfFmtAvgPriceCell(row, formatter = pfFmtPortfolioValue) {
+  if (pfIsFuturesHolding(row)) return '-';
   const main = formatter(row.avgPriceKrw);
   if (row.avgPriceCurrency === 'KRW') return main;
   return `${main}<span class="pf-native-price">${escapeHtml(row.avgPriceCurrency)} ${escapeHtml(pfFmtNativeAvgPrice(row.avgPrice, row.avgPriceCurrency))}</span>`;
@@ -664,6 +665,7 @@ function renderPortfolio(options = {}) {
     const isEditing = PfStore.edit.code === r.stock_code;
     const isCash = r.stock_code.startsWith('CASH_');
     const isRp = r.stock_code === 'CMA_RP_KRW';
+    const isFutures = pfIsFuturesHolding(r);
     const isFuturesValue = ['FUTURES_BASE_KRW', 'FUTURES_PNL_KRW'].includes(r.stock_code);
     const isSpecialFloat = ['KRX_GOLD', 'CMA_RP_KRW', 'CRYPTO_BTC', 'CRYPTO_ETH', 'CRYPTO_USDT'].includes(r.stock_code) || isCash || isFuturesValue;
     const curTag = isFuturesValue ? '<span class="pf-stock-code" title="수량 열은 원화 평가 금액입니다. 계약 수는 선물 잔고에서 확인하세요.">평가액 · 원</span>' : isRp ? '<span class="pf-stock-code" title="수량은 최근 잔고 동기화 시점의 RP 평가액(원)입니다.">평가액 · 원</span>' : r.stock_code === 'KRX_GOLD' ? '<span class="pf-stock-code">원/g</span>' : r.cur !== 'KRW' ? `<span class="pf-stock-code">${r.cur}</span>` : '';
@@ -735,8 +737,8 @@ function renderPortfolio(options = {}) {
         <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
         <td class="pf-col-num pf-col-benchmark js-pf-bench-picker" title="벤치마크 변경">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
         <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtTradingValueKrw(r.tradingValue) : '-'}</td>
-        <td class="pf-col-num pf-col-buyprice"><span class="pf-price-edit-wrap"><input class="pf-edit-input js-pf-edit-price" id="pfEditPrice" value="${r.avgPrice}" type="number" step="any"${balanceAttrs}>${avgPriceCurrencyControl}</span></td>
-        <td class="pf-col-num pf-col-target"${targetTitle}><span class="pf-target-edit-wrap"><input class="pf-edit-input js-pf-edit-target" id="pfEditTarget" value="${escapeHtml(targetInputValue)}" type="text" inputmode="decimal" placeholder="자동 또는 BPS*0.4+DPS*10" title="${escapeHtml(targetHelp)}"${editAttrs}><button type="button" class="pf-target-clear js-pf-target-clear" title="목표가 표시 안 함 (- 로 고정)"${editAttrs}>×</button></span></td>
+        <td class="pf-col-num pf-col-buyprice">${isFutures ? `-<input class="pf-edit-input js-pf-edit-price" id="pfEditPrice" value="${r.avgPrice}" type="hidden">` : `<span class="pf-price-edit-wrap"><input class="pf-edit-input js-pf-edit-price" id="pfEditPrice" value="${r.avgPrice}" type="number" step="any"${balanceAttrs}>${avgPriceCurrencyControl}</span>`}</td>
+        <td class="pf-col-num pf-col-target"${targetTitle}>${isFutures ? '-' : `<span class="pf-target-edit-wrap"><input class="pf-edit-input js-pf-edit-target" id="pfEditTarget" value="${escapeHtml(targetInputValue)}" type="text" inputmode="decimal" placeholder="자동 또는 BPS*0.4+DPS*10" title="${escapeHtml(targetHelp)}"${editAttrs}><button type="button" class="pf-target-clear js-pf-target-clear" title="목표가 표시 안 함 (- 로 고정)"${editAttrs}>×</button></span>`}</td>
         <td class="pf-col-num pf-col-achiev"${targetTitle}>${r.achievementPct !== null ? fmtPct(r.achievementPct, false) : '-'}</td>
         <td class="pf-col-num pf-col-return">${pfPerformanceCellHtml(r, `<span class="pf-return ${returnClass(r.returnPct)}">${r.returnPct !== null ? fmtPct(r.returnPct) : '-'}</span>`, 'returnPct')}</td>
         <td class="pf-col-num pf-col-qty"><input class="pf-edit-input js-pf-edit-qty" id="pfEditQty" value="${r.qty}" type="number" step="${qtyStep}"${balanceAttrs}></td>

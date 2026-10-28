@@ -5,6 +5,11 @@ let _pfTodayStatePromise = null;
 const _PF_PORTFOLIO_SNAPSHOT_KEY = 'valueInvestPortfolioSnapshot:v2';
 const _PF_PORTFOLIO_SNAPSHOT_QUOTE_TTL_MS = 2 * 60 * 1000;
 
+function pfIsFuturesHolding(item) {
+  const code = String(item?.stock_code || '');
+  return code.startsWith('KRFUT_') || ['FUTURES_BASE_KRW', 'FUTURES_PNL_KRW'].includes(code);
+}
+
 function _pfSetLoadStatus(message = '', state = 'error') {
   const status = document.getElementById('pfLoadStatus');
   if (!status) return;
@@ -297,6 +302,7 @@ function pfKeepPairsTogether(items) {
 
 // 모든 보유 행에 같은 툴팁을 적용한다. 롱숏은 합산 성과를 보여준다.
 function pfPerformanceCellHtml(item, contents, metric = 'changePct') {
+  if (metric === 'returnPct' && pfIsFuturesHolding(item)) return '-';
   return `<span class="pf-value-hint js-pf-performance-tooltip" data-code="${escapeHtml(item.stock_code)}" data-metric="${metric}" tabindex="0">${contents}</span>`;
 }
 

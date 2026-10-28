@@ -135,6 +135,46 @@ test("special asset codes are skipped without any fetch", async () => {
   assert.ok(!tip || !tip.classList.contains("visible"));
 });
 
+test('같은 종목 행 교체 중에는 열린 그래프를 유지하고 다른 행으로 바뀌면 닫는다', async () => {
+  const {w, calls} = load();
+  const body = w.document.getElementById('pfBody');
+  hover(w, body.querySelector('strong'));
+  await tick();
+  const tip = w.document.getElementById('stockHoverTip');
+  const canvas = tip.querySelector('canvas');
+  w.document.elementFromPoint = () => body.querySelector('strong');
+  body.innerHTML = body.innerHTML;
+  await tick();
+  hover(w, body.querySelector('strong'));
+  await tick();
+  assert.ok(tip.classList.contains('visible'));
+  assert.equal(tip.querySelector('canvas'), canvas);
+  assert.equal(calls.length, 1);
+  // 종목과 관계없는 DOM에서 발생한 mouseout은 열린 미리보기에 영향 없음.
+  unhover(w, w.document.getElementById('anySurface'));
+  assert.ok(tip.classList.contains('visible'));
+  body.querySelector('tr').remove();
+  await tick();
+  assert.equal(tip.classList.contains('visible'), false);
+  w.close();
+});
+
+test('일중 조회를 기다리는 동안 같은 종목 행이 바뀌어도 응답을 표시한다', async () => {
+  const {w} = load();
+  let respond;
+  w.apiFetchJson = () => new Promise(resolve => {respond = resolve;});
+  const body = w.document.getElementById('pfBody');
+  hover(w, body.querySelector('strong'));
+  await tick();
+  w.document.elementFromPoint = () => body.querySelector('strong');
+  body.innerHTML = body.innerHTML;
+  await tick();
+  respond(FIXTURE);
+  await tick();
+  assert.ok(w.document.getElementById('stockHoverTip').classList.contains('visible'));
+  w.close();
+});
+
 test("non-hover environments (touch) do nothing", async () => {
   const { w, calls } = load({ hoverCapable: false });
   hover(w, w.document.querySelector('tr[data-code="005930"] strong'));

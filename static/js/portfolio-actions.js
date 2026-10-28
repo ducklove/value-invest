@@ -720,6 +720,7 @@ function _evaluateTargetFormula(formula, variables) {
 //   - 숫자 → 그 값. 계산 출처는 _targetPriceSource 가 별도 알려줌.
 function _computeTargetPrice(item, allItems) {
   const code = item.stock_code;
+  if (pfIsFuturesHolding(item)) return null;
   if (code.startsWith('CASH_') || code === 'CMA_RP_KRW') return null;
   if (item.target_price_disabled) return null;
   if (item.target_price_formula) {
@@ -743,6 +744,7 @@ function _computeTargetPrice(item, allItems) {
 
 function _targetPriceSource(item) {
   const code = item.stock_code;
+  if (pfIsFuturesHolding(item)) return 'futures';
   if (code.startsWith('CASH_') || code === 'CMA_RP_KRW') return 'cash';
   if (item.target_price_disabled) return 'disabled';
   if (item.target_price_formula) return 'formula';
@@ -753,6 +755,7 @@ function _targetPriceSource(item) {
 }
 
 function _targetPriceTooltip(item) {
+  if (pfIsFuturesHolding(item)) return '';
   if (item.target_price_formula) return `목표가 수식: ${item.target_price_formula}`;
   if (item.target_price != null) return `직접 입력: ${Number(item.target_price).toLocaleString()}원`;
   const source = _targetPriceSource(item);

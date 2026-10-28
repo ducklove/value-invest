@@ -31,6 +31,7 @@ const _schcInflight = new Map();  // code -> Promise
 let _schcHoverEl = null;
 let _schcShowTimer = null;
 let _schcSeq = 0;
+let _schcPointer = null;
 
 function _schcHoverCapable() {
   try {
@@ -231,6 +232,7 @@ function _schcPosition(tip, anchorRect) {
 
 function _schcHide() {
   _schcHoverEl = null;
+  _schcPointer = null;
   _schcSeq++;
   if (_schcShowTimer) {
     clearTimeout(_schcShowTimer);
@@ -240,18 +242,39 @@ function _schcHide() {
   if (tip) tip.classList.remove('visible');
 }
 
-async function _schcShow(target, info, seq) {
+// 시세/잔고 갱신으로 앵커 DOM이 바뀌어도 같은 종목 위에 머무르면
+// 지연 타이머와 열린 canvas를 유지한다. 정렬/필터로 다른 행이 오면 닫는다.
+function _schcRefreshAnchor() {
+  if (!_schcHoverEl || _schcHoverEl.isConnected) return;
+  const info = _schcTargetInfo(_schcHoverEl);
+  const hit = _schcPointer && document.elementFromPoint(_schcPointer.x, _schcPointer.y);
+  const next = hit instanceof Element ? hit.closest(SCHC_HOVER_SELECTOR) : null;
+  if (!next || _schcTargetInfo(next)?.code !== info?.code) {
+    _schcHide();
+    return;
+  }
+  _schcHoverEl = next;
+  const tip = document.getElementById('stockHoverTip');
+  if (tip?.classList.contains('visible')) _schcPosition(tip, next.getBoundingClientRect());
+}
+
+async function _schcShow(info, seq) {
   const data = await _schcData(info.code);
-  if (seq !== _schcSeq || _schcHoverEl !== target) return;
+  _schcRefreshAnchor();
+  if (seq !== _schcSeq || !_schcHoverEl) return;
   if (!data) return;
   const tip = _schcEnsureTip();
   _schcRender(tip, info, data);
   tip.classList.add('visible');
-  _schcPosition(tip, target.getBoundingClientRect());
+  _schcPosition(tip, _schcHoverEl.getBoundingClientRect());
 }
 
 function _schcOnMouseOver(e) {
   if (!_schcHoverCapable()) return;
+  if (_schcHoverEl) {
+    _schcPointer = { x: e.clientX, y: e.clientY };
+    _schcRefreshAnchor();
+  }
   const target = e.target instanceof Element ? e.target.closest(SCHC_HOVER_SELECTOR) : null;
   if (!target) return;
   if (target === _schcHoverEl) return;
@@ -259,16 +282,19 @@ function _schcOnMouseOver(e) {
   if (!info || !info.code || SCHC_SKIP_CODE_RE.test(info.code)) return;
   _schcHide();
   _schcHoverEl = target;
+  _schcPointer = { x: e.clientX, y: e.clientY };
   const seq = _schcSeq;
   _schcData(info.code); // 지연과 병행해 미리 받아둔다.
   _schcShowTimer = setTimeout(() => {
     _schcShowTimer = null;
-    _schcShow(target, info, seq);
+    _schcShow(info, seq);
   }, SCHC_SHOW_DELAY_MS);
 }
 
 function _schcOnMouseOut(e) {
   if (!_schcHoverEl) return;
+  _schcRefreshAnchor();
+  if (!_schcHoverEl || !(e.target instanceof Element) || !_schcHoverEl.contains(e.target)) return;
   const to = e.relatedTarget;
   if (to instanceof Element && _schcHoverEl.contains(to)) return;
   _schcHide();
@@ -276,6 +302,10 @@ function _schcOnMouseOut(e) {
 
 document.addEventListener('mouseover', _schcOnMouseOver);
 document.addEventListener('mouseout', _schcOnMouseOut);
+document.addEventListener('mousemove', e => {
+  if (_schcHoverEl) _schcPointer = { x: e.clientX, y: e.clientY };
+});
+new MutationObserver(_schcRefreshAnchor).observe(document.body, { childList: true, subtree: true });
 // 스크롤·클릭 시 앵커가 이동/재렌더될 수 있어 즉시 닫는다.
 document.addEventListener('scroll', () => { if (_schcHoverEl) _schcHide(); }, true);
 document.addEventListener('click', () => { if (_schcHoverEl) _schcHide(); }, true);

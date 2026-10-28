@@ -37,6 +37,15 @@ test('금현물·국내·해외선물의 연결 종류와 계약·평가액 표�
     await expect(page.locator('#pfDerivativeBalances')).toHaveCount(0);
     if (product === 'krfuture') {
       const row = page.locator('#pfBody [data-code="KRFUT_KA486B000"]');
+      for (const column of ['target', 'buyprice', 'achiev', 'return']) {
+        await expect(row.locator(`.pf-col-${column}`)).toHaveText('-');
+      }
+      await row.locator('.js-pf-edit').click();
+      for (const column of ['target', 'buyprice', 'achiev', 'return']) {
+        await expect(row.locator(`.pf-col-${column}`)).toHaveText('-');
+      }
+      await row.locator('.js-pf-save').click();
+      await expect(row.locator('.js-pf-edit')).toBeVisible();
       await expect(row.locator('.pf-col-qty')).toContainText('-20');
       await expect(row.locator('.pf-col-curprice')).toContainText('355');
       await expect(row.locator('.pf-col-changepct')).toContainText('+2.50%');
@@ -53,6 +62,11 @@ test('금현물·국내·해외선물의 연결 종류와 계약·평가액 표�
       expect(sum).toBe(900);
     }
     if (product === 'gbfuture') {
+      for (const row of await page.locator('#pfBody [data-code^="FUTURES_"]').all()) {
+        for (const column of ['target', 'buyprice', 'achiev', 'return']) {
+          await expect(row.locator(`.pf-col-${column}`)).toHaveText('-');
+        }
+      }
       await expect(page.locator('#pfBody [data-code="FUTURES_PNL_KRW"] .pf-col-mktval')).toContainText(product === 'krfuture' ? '-100' : '90');
       if (product === 'gbfuture') {
         await page.setViewportSize({width:390,height:844});
