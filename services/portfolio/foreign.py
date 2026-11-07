@@ -17,8 +17,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import re
+from datetime import datetime
 from functools import partial
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -654,7 +657,7 @@ async def fetch_yahoo_chart(ticker: str, *, range_: str = "1y", interval: str = 
     )
 
 
-async def yfinance_fetch_quote_fast(ticker: str) -> dict:
+async def yfinance_fetch_quote_fast(ticker: str, *, require_regular_session: bool = False) -> dict:
     # No negative-cache gate here: the chart API is a single cheap, reliable
     # call, so it must not be skipped just because the unreliable fast_info
     # path marked this ticker as failed (that is exactly when we want it).
@@ -662,15 +665,30 @@ async def yfinance_fetch_quote_fast(ticker: str) -> dict:
         return {}
     try:
         payload = await asyncio.wait_for(fetch_yahoo_chart(ticker, range_="5d"), timeout=7.0)
-        values = [row["close"] for row in payload.get("rows") or [] if row.get("close") is not None]
+        rows = payload.get("rows") or []
+        values = [row["close"] for row in rows if row.get("close") is not None]
         if not values:
             return {}
         meta = payload.get("meta") or {}
-        price = float(meta.get("regularMarketPrice") or values[-1])
-        # For multi-day chart ranges Yahoo's chartPreviousClose is the close
-        # before the requested range, not the previous trading day's close.
-        prev = float(values[-2] if len(values) >= 2 else meta.get("chartPreviousClose") or values[-1])
-        if price is None:
+        if require_regular_session:
+            session_date = datetime.fromtimestamp(
+                meta["regularMarketTime"], tz=ZoneInfo(meta["exchangeTimezoneName"]),
+            ).date().isoformat()
+            # Yahoo can publish regularMarketPrice before the same day's
+            # daily close is populated. Match the reference by session date.
+            previous_rows = [
+                row for row in rows
+                if row.get("session_date") and row["session_date"] < session_date and row.get("close") is not None
+            ]
+            if not previous_rows:
+                return {}
+            price = float(meta["regularMarketPrice"])
+            prev = float(max(previous_rows, key=lambda row: row["session_date"])["close"])
+        else:
+            price = float(meta.get("regularMarketPrice") or values[-1])
+            # chartPreviousClose precedes the requested range, not its last bar.
+            prev = float(values[-2] if len(values) >= 2 else meta.get("chartPreviousClose") or values[-1])
+        if not (math.isfinite(price) and math.isfinite(prev) and price > 0 and prev > 0):
             return {}
         change = round(price - prev, 4) if prev else 0
         change_pct = round(change / prev * 100, 2) if prev else None

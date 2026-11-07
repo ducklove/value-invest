@@ -159,12 +159,12 @@ async def _regular_daily_quote(code: str) -> dict:
         async with asyncio.timeout(REGULAR_DAILY_QUOTE_TIMEOUT_SECONDS):
             await foreign.ensure_ticker_map()
             ticker = foreign.yfinance_direct_ticker(foreign._ticker_map.get(code) or code)
-            quote = await foreign.yfinance_fetch_quote_fast(ticker)
+            quote = await foreign.yfinance_fetch_quote_fast(ticker, require_regular_session=True)
             if not quote:
                 resolved = await foreign.resolve_foreign_reuters(code)
                 if resolved and foreign.yfinance_direct_ticker(resolved) != ticker:
                     await foreign.save_ticker(code, resolved)
-                    quote = await foreign.yfinance_fetch_quote_fast(resolved)
+                    quote = await foreign.yfinance_fetch_quote_fast(resolved, require_regular_session=True)
             return quote or {}
     except Exception as exc:
         logger.info("regular daily quote failed for %s: %s", code, str(exc) or type(exc).__name__)
@@ -205,6 +205,9 @@ async def _safe_quote(code: str, *, regular_daily_change: bool = False, market_o
             if daily_only:
                 # 가격까지 정규장 일간 시세에서 왔다 — NAV 합산에는 쓰지 않는다.
                 quote["_daily_only"] = True
+        elif quote:
+            # 장후 등락률이나 기준일이 검증되지 않은 시세는 일간 알림에 쓰지 않는다.
+            quote = {**quote, "change_pct": None}
     if not quote or quote.get("_stale") is True:
         return {}
     return quote

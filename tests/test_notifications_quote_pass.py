@@ -187,6 +187,15 @@ class PassQuotesUnitTests(TempDbMixin):
         self.assertTrue(quote["_daily_only"])
         self.assertEqual(quote["change_pct"], 2.0)
 
+    async def test_safe_quote_ignores_live_change_without_regular_daily_quote(self):
+        live = {"price": 123.37, "change_pct": -5.50}
+        with patch.object(engine.runtime_quotes, "fetch_quote", new=AsyncMock(return_value=live)), \
+             patch.object(engine, "_regular_daily_quote", new=AsyncMock(return_value={})):
+            quote = await engine._safe_quote("QTUM", regular_daily_change=True)
+        self.assertEqual(quote["price"], 123.37)
+        self.assertIsNone(engine._quote_change_pct(quote))
+        self.assertEqual(live["change_pct"], -5.50)
+
 
 class _ForeignProbes:
     """해외 종목 탐색 경로(yfinance·Yahoo chart·네이버/야후 HTTP·KIS 해외)를 모두 막고
@@ -280,6 +289,31 @@ class PseudoCodeAlertPassTests(TempDbMixin):
             self.assertEqual((await engine._regular_daily_quote("AGNC.O"))["change_pct"], 1.5)
             self.assertEqual((await engine._regular_daily_quote("GOOGL.O"))["change_pct"], 1.5)
         self.assertEqual([c.args[0] for c in fast.await_args_list], ["AGNC", "GOOGL"])
+        self.assertTrue(all(c.kwargs == {"require_regular_session": True} for c in fast.await_args_list))
+
+    async def test_regular_daily_quote_matches_qtum_price_to_previous_session(self):
+        from services.portfolio import foreign
+
+        payload = {
+            "currency": "USD",
+            "meta": {
+                "regularMarketTime": 1793998800,
+                "exchangeTimezoneName": "America/New_York",
+                "regularMarketPrice": 123.37,
+            },
+            # Yahoo omits the November 6 row while its daily close is null.
+            "rows": [
+                {"session_date": "2026-11-04", "close": 130.55},
+                {"session_date": "2026-11-05", "close": 119.30},
+            ],
+        }
+        with patch.object(foreign, "fetch_yahoo_chart", new=AsyncMock(return_value=payload)), \
+             patch.object(foreign.fx, "fx_rate_for_currency", new=AsyncMock(return_value=1.0)):
+            quote = await engine._regular_daily_quote("QTUM")
+            self.assertEqual(quote["change_pct"], 3.41)
+            payload["rows"].append({"session_date": "2026-11-06", "close": 123.37})
+            quote = await engine._regular_daily_quote("QTUM")
+            self.assertEqual(quote["change_pct"], 3.41)
 
 
 class AlertQuoteDeadlineTests(TempDbMixin):
