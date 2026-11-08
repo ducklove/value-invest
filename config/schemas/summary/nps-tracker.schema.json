@@ -63,6 +63,40 @@
           "sector": {"type": ["string", "null"]}
         }
       }
+    },
+    "positionsAsOf": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "Optional. Filing date label of the year-end holdings behind 'weights' and 'ownership' (not the price date)."},
+    "weights": {
+      "type": "object",
+      "description": "Optional. Compact code -> % of the tracked portfolio at the price date (3 decimals). Built on estimated share counts.",
+      "propertyNames": {"pattern": "^[0-9A-Z]{6}$"},
+      "additionalProperties": {"type": "number"}
+    },
+    "ownership": {
+      "type": "object",
+      "description": "Optional. Compact code -> filed ownership, % (2 decimals). Codes without a filed value are left out.",
+      "propertyNames": {"pattern": "^[0-9A-Z]{6}$"},
+      "additionalProperties": {"type": "number"}
+    },
+    "ownershipChange": {
+      "description": "Optional. Filed ownership change between the two latest year-end archives. Null while fewer than two archives exist.",
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["from", "to", "comparable", "changes"],
+          "properties": {
+            "from": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+            "to": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+            "comparable": {"type": "boolean", "description": "False when nearly every code keeps the same ownership, which means the source re-issued the same file; 'changes' is then empty."},
+            "changes": {
+              "type": "object",
+              "description": "Code -> ownership change in %p, moved codes only.",
+              "propertyNames": {"pattern": "^[0-9A-Z]{6}$"},
+              "additionalProperties": {"type": "number"}
+            }
+          }
+        }
+      ]
     }
   },
   "$defs": {

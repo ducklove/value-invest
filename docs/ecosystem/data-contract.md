@@ -157,8 +157,10 @@ Python과 JS가 같은 파일을 만든다(`generatedAt`만 다를 수 있다).
 | `pairs[].code` | 6자리 | 지주사 종목코드 (`.KS` 제거) |
 | `pairs[].ratio, ratioChange` | number\|null | 보유가치/조정시총 %, 전일 대비 %p |
 | `pairs[].holdingValue, marketCap` | number\|null | 억원 |
+| `pairs[].ratioPct1y, ratioPct3y` | int\|null (선택) | 현재 `ratio` 이하인 표본 비율(%). 분포는 `ratioPctEnd`에서 끝나는 365일·1,095일이고 표본 30개 미만이면 null. holding_value 카드 칩과 같은 식 |
+| `pairs[].ratioPctEnd` | date\|null (선택) | 일봉 분포의 마지막 날짜. 일봉 작업이 실패하면 envelope `asOf`보다 오래될 수 있다 |
 
-허브 유도: TOP 카드 = `ratio`가 있는 행을 내림차순으로 N개. 종목 매칭 = `code`가 같은 **첫** 행이고, 그 행의 `ratio`가 null이면 매칭 없음(`_match_holding`과 같은 의미).
+3년 분포의 730일 이전 구간은 주간 다운샘플이라 근사치다(holding_value README). 허브 유도: TOP 카드 = `ratio`가 있는 행을 내림차순으로 N개. 종목 매칭 = `code`가 같은 **첫** 행이고, 그 행의 `ratio`가 null이면 매칭 없음(`_match_holding`과 같은 의미).
 
 ### 6.2 common_preferred_spread (≈ 10 KB)
 
@@ -173,6 +175,10 @@ Python과 JS가 같은 파일을 만든다(`generatedAt`만 다를 수 있다).
 | `pairs[].spread, spreadChange` | number\|null | 괴리율 %, %p |
 | `pairs[].commonPrice, preferredPrice` | number\|null | 원 |
 | `pairs[].date` | date\|null | 시세 기준일 |
+| `pairs[].spreadPct1y, spreadPct3y` | int\|null (선택) | 현재 `spread` 이하인 표본 비율(%). 분포는 `spreadPctEnd`에서 끝나는 365일·1,095일이고 표본 30개 미만이면 null. cps 카드와 같은 식 |
+| `pairs[].spreadPctEnd` | date\|null (선택) | `data/summary.json` `spreadPercentiles.date`(일봉 분포의 마지막 날짜) |
+| `pairs[].attractiveness` | number\|null (선택) | `data/summary.json` `attractiveness.total`, 0~100 |
+| `pairs[].commonAvgTradedValue20, preferredAvgTradedValue20` | number\|null (선택) | 최근 20거래일 평균 거래대금(원) |
 
 허브 유도: TOP 카드 = `spread` 내림차순. 단, 같은 `commonCode`에서는 괴리율이 가장 큰 우선주 하나만 남긴다. 종목 매칭 = `commonCode` 또는 `preferredCode`가 같은 첫 행.
 
@@ -241,6 +247,12 @@ Python과 JS가 같은 파일을 만든다(`generatedAt`만 다를 수 있다).
 | `summary` | `{totalValue, nav, count, todayPct, mtdPct, ytdPct, asOf}` | totalValue는 원 |
 | `allocation` | `{asOf, estimated, classes[{key, label, pct, target?}]}` \| null | 기금 자산배분(추정 현재 비중). `target`이 있으면 허브 상수보다 우선한다 |
 | `top[]` (≤20, 권장 10) | | `{code, name, weight, marketValue, changePct, ownershipPct, sector}`, weight 내림차순 |
+| `positionsAsOf` | date\|null (선택) | `weights`·`ownership`이 근거한 연말 공시 기준일(가격 기준일 아님) |
+| `weights` | `{code: pct}` (선택) | 전 보유 종목의 포트폴리오 비중 %(소수 3자리). 추정 수량 기반 |
+| `ownership` | `{code: pct}` (선택) | 공시 지분율 %(소수 2자리). 값이 없는 종목은 뺀다 |
+| `ownershipChange` | `{from, to, comparable, changes}`\|null (선택) | 최신 연말 아카이브 두 개의 지분율 차이. `changes`는 달라진 종목만 `{code: %p}`. 거의 모든 종목의 지분율이 같으면 원천이 같은 파일을 다시 낸 것으로 보고 `comparable: false`, `changes: {}` |
+
+`weights`·`ownership`을 합쳐 약 35 KB라 권장 크기(16 KB)는 넘지만 예산(64 KB) 안이다. 허브는 임의 종목의 국민연금 보유 여부를 답해야 해서 상위 N으로 줄일 수 없다.
 
 ### 6.8 bond-mate (≈ 10 KB, data/current.json 112 KB 대체)
 

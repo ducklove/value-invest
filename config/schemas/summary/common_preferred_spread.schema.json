@@ -26,13 +26,20 @@
           "spreadChange": {"$ref": "#/$defs/num", "description": "%p vs previous close."},
           "commonPrice": {"$ref": "#/$defs/num"},
           "preferredPrice": {"$ref": "#/$defs/num"},
-          "date": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$"}
+          "date": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+          "spreadPct1y": {"$ref": "#/$defs/pct", "description": "Optional. Share of samples at or below the current spread in the trailing 365 days ending at spreadPctEnd (dashboard card rule: integer, at least 30 samples, else null)."},
+          "spreadPct3y": {"$ref": "#/$defs/pct", "description": "Optional. Same for 1,095 days."},
+          "spreadPctEnd": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "Optional. Last date of the daily distribution (data/summary.json spreadPercentiles.date)."},
+          "attractiveness": {"$ref": "#/$defs/num", "description": "Optional. data/summary.json attractiveness.total, 0-100 (spread, spread position, liquidity, dividend, common-stock health)."},
+          "commonAvgTradedValue20": {"$ref": "#/$defs/num", "description": "Optional. Common stock 20-session average traded value, KRW."},
+          "preferredAvgTradedValue20": {"$ref": "#/$defs/num", "description": "Optional. Preferred stock 20-session average traded value, KRW."}
         }
       }
     }
   },
   "$defs": {
     "num": {"type": ["number", "null"]},
+    "pct": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
     "krCode": {"type": "string", "pattern": "^[0-9A-Z]{6}$"}
   }
 }
