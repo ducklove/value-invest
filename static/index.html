@@ -478,6 +478,7 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
       <nav class="pf-deep-anchors" aria-label="심층 분석 섹션 바로가기">
         <a class="pf-deep-anchor-link" href="#pfNavWrap">NAV</a>
         <a class="pf-deep-anchor-link" href="#pfRiskWrap">리스크</a>
+        <a class="pf-deep-anchor-link" href="#pfExposureWrap">X-Ray</a>
         <a class="pf-deep-anchor-link" href="#pfAttributionWrap">수익 분해</a>
         <a class="pf-deep-anchor-link" href="#pfThesisWrap">투자 논거</a>
         <a class="pf-deep-anchor-link" href="#pfPeriodReportWrap">보고서</a>
@@ -518,6 +519,11 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
           <div class="pf-risk-empty">성과 탭을 열면 리스크 지표를 불러옵니다.</div>
         </div>
       </div>
+
+      <section class="pf-nav-chart-wrap pf-analysis-card" id="pfExposureWrap" aria-labelledby="pfExposureTitle">
+        <div class="pf-nav-header"><div><h3 id="pfExposureTitle">포트폴리오 X-Ray</h3><span class="pf-chart-note">ETF·지주사·우선주를 풀어 본 실제 노출 · 입력 없음</span></div></div>
+        <div id="pfExposureContent" aria-live="polite">심층 분석을 열면 실제 노출을 계산합니다.</div>
+      </section>
 
       <section class="pf-nav-chart-wrap pf-analysis-card" id="pfAttributionWrap" aria-labelledby="pfAttributionTitle">
         <div class="pf-nav-header"><div><h3 id="pfAttributionTitle">수익 원인 분해</h3><span class="pf-chart-note">가격 · 환율 · 배당 · 순입출금과 미분류 금액</span></div></div>
@@ -1284,6 +1290,7 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
 <script data-feature="portfolio-performance" data-src="./js/portfolio-reports.js"></script>
 <script src="./js/portfolio-performance.js" defer></script>
 <script data-feature="portfolio-performance" data-src="./js/portfolio-risk.js"></script>
+<script data-feature="portfolio-performance" data-src="./js/portfolio-exposure.js"></script>
 <script data-feature="portfolio-performance" data-src="./js/portfolio-rebalance.js"></script>
 <script data-feature="portfolio-performance" data-src="./js/portfolio-dividends-calendar.js"></script>
 <script data-feature="portfolio-performance" data-src="./js/portfolio-journal.js"></script>

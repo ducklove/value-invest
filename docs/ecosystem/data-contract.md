@@ -13,7 +13,7 @@ all-about-gold, nps-tracker, bond-mate)는 각자 GitHub Pages에 큰 JSON을 �
 
 | 지금 허브가 받는 파일 | 크기 | 실제로 쓰는 것 |
 |---|---|---|
-| eiayn `data/etfs.json` | 9.3 MB | `universe` 코드 목록 |
+| eiayn `data/etfs.json` | 9.3 MB | `universe` 코드 목록. X-Ray는 `etfs[].holdings`를 ETag 조건부로 받아 압축본을 DB에 둔다(`services/portfolio/exposure_data.py`) |
 | spac-hunter `data.json` | 3.8 MB | 스팩별 필드 약 15개 |
 | buybacks `holding_snapshots.json` | 1.2 MB | 종목별 최신 자사주 비율 |
 | gold_gap `data.json` | 563 KB | 자산 4개의 마지막 갭 |

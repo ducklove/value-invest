@@ -50,6 +50,7 @@ PORTFOLIO_SPLIT_FILES = [
     "portfolio-reports.js",
     "portfolio-performance.js",
     "portfolio-risk.js",
+    "portfolio-exposure.js",
     "portfolio-rebalance.js",
     "portfolio-dividends-calendar.js",
     "portfolio-journal.js",
