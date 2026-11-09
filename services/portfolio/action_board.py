@@ -4,6 +4,7 @@ The board turns existing data into a short review queue:
 
 * rebalance breaches from services.portfolio.rebalance
 * linked-dashboard signals from external_tools
+* overseas deduction and financial-income items from services.portfolio.realized_tax
 * user review state from repositories.action_reviews
 
 The generated actions are intentionally stateless; only the review status is
@@ -18,8 +19,8 @@ from domain.timeutil import KST
 from repositories import action_reviews as reviews_repo
 from repositories import portfolio as portfolio_repo
 from services.ecosystem import external_tools
+from services.portfolio import realized_tax, theses
 from services.portfolio import rebalance as rebalance_service
-from services.portfolio import theses
 
 SEVERITY_RANK = {"high": 0, "watch": 1, "info": 2}
 
@@ -154,6 +155,7 @@ async def build_action_board(google_sub: str) -> dict:
 
     actions = _rebalance_actions(rebalance_report) + _signal_actions(holdings, signals_by_code)
     actions += await theses.actions(google_sub)
+    actions += await realized_tax.actions(google_sub)
     reviews = await reviews_repo.list_reviews(google_sub, [item["key"] for item in actions])
     actions = _sort_actions(_merge_review_state(actions, reviews))
 

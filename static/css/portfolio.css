@@ -3848,3 +3848,36 @@ body.pf-compact-rows .pf-pair-connector, body.pf-compact-rows .pf-row-position {
 .pf-cash-review-row select, .pf-cash-review-row textarea { width: 100%; min-width: 0; box-sizing: border-box; padding: 8px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font: inherit; }
 .pf-cash-review-notice { position: fixed; right: 16px; bottom: calc(20px + env(safe-area-inset-bottom)); z-index: 1100; padding: 12px 16px; border: 1px solid var(--border); border-radius: 24px; background: var(--primary); color: var(--surface); box-shadow: 0 3px 12px rgba(0,0,0,.15); cursor: pointer; }
 .pf-cash-review-notice[hidden] { display: none; }
+
+/* 실현손익·세금 추정. 상태 색은 미터에만 쓰고 숫자는 본문 색을 유지한다. */
+.pf-tax-banner { margin: 12px 0 0; }
+.pf-tax-tiles small { display: block; margin-top: 4px; color: var(--text-secondary); font-size: 11.5px; font-weight: 400; line-height: 1.4; }
+.pf-tax-heading { margin: 20px 0 8px; font-size: 13px; }
+.pf-tax-note { margin: 6px 0 0; font-weight: 400; text-align: left; overflow-wrap: anywhere; }
+.pf-tax-coverage { margin-top: 10px; }
+.pf-tax-table th small { color: var(--text-secondary); font-weight: 400; }
+.pf-tax-table td { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pf-tax-income { --pf-tax-fill: var(--primary); --pf-tax-track: var(--down-tint); margin: 20px 0 0; padding: 14px; border: 1px solid var(--border); border-radius: 8px; }
+.pf-tax-income.near { --pf-tax-fill: var(--warning); --pf-tax-track: var(--warning-tint); }
+.pf-tax-income.over { --pf-tax-fill: var(--danger); --pf-tax-track: var(--danger-tint); }
+.pf-tax-income-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.pf-tax-income-head h4 { margin: 0; font-size: 13px; }
+.pf-tax-status { flex: none; padding: 2px 8px; border-radius: 10px; background: var(--pf-tax-track); color: var(--text); font-size: 11.5px; font-weight: 600; }
+.pf-tax-meter { position: relative; display: flex; gap: 2px; height: 8px; border-radius: 4px; background: var(--pf-tax-track); }
+.pf-tax-meter i { display: block; height: 100%; min-width: 0; background: var(--pf-tax-fill); }
+.pf-tax-meter i:first-child { border-radius: 4px 0 0 4px; }
+.pf-tax-meter i.upcoming { opacity: .45; }
+.pf-tax-meter i[style*="width:0%"] { display: none; }
+/* 초과 예상에서는 눈금이 막대 안쪽으로 들어와 기준 위치를 보여 준다. */
+.pf-tax-meter-limit { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -2px; background: var(--text); }
+.pf-tax-income-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 20px; margin: 12px 0 0; font-size: 12px; }
+.pf-tax-income-list > div { display: flex; justify-content: space-between; gap: 12px; min-width: 0; }
+.pf-tax-income-list dt { color: var(--text-secondary); overflow-wrap: anywhere; }
+.pf-tax-income-list dd { flex: none; margin: 0; font-variant-numeric: tabular-nums; }
+.pf-tax-income-total dt, .pf-tax-income-total dd { color: var(--text); font-weight: 600; }
+.pf-tax-swatch { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 2px; background: var(--pf-tax-fill); }
+.pf-tax-swatch.upcoming { opacity: .45; }
+@media (max-width: 600px) {
+  .pf-tax-income-list { grid-template-columns: minmax(0, 1fr); }
+  .pf-tax-table th, .pf-tax-table td { padding: 8px 4px; font-size: 11px; }
+}

@@ -9,6 +9,14 @@ class ExtensibleResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class RealizedTaxResponse(ExtensibleResponse):
+    # 신고용이 아닌 추정. fields_verified가 False면 NH 필드 의미를 운영 응답으로 확인하기 전이다.
+    available: bool
+    as_of: str
+    year: int
+    fields_verified: bool = False
+
+
 class QuoteResponse(ExtensibleResponse):
     # 배치 조회의 빈 객체는 해당 자산의 시세 없음이며 0원과 다르다.
     price: FiniteFloat | None = None

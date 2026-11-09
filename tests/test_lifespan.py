@@ -84,7 +84,8 @@ async def test_real_app_starts_database_and_joins_all_background_tasks(lifecycle
             assert (await client.get("/healthz")).status_code == 200
             assert (await client.get("/readyz")).json()["database"] == "ok"
         assert "READY=1" in calls
-        assert len(app.state.background_tasks) == 14
+        assert len(app.state.background_tasks) == 15
+        assert any(task.get_name() == "nh-realized-pnl" and not task.done() for task, _ in app.state.background_tasks)
         assert any(task.get_name() == "realtime-quotes" for task, _ in app.state.background_tasks)
         for provider in ("namuh", "kis", "kiwoom", "ls"):
             assert any(task.get_name() == f"{provider}-accounts" and not task.done() for task, _ in app.state.background_tasks)
@@ -123,6 +124,14 @@ async def test_partial_startup_closes_every_acquired_resource(lifecycle_setup, m
     assert [item.removeprefix("close:") for item in calls if item.startswith("close:")] == closed
     assert "READY=1" not in calls
     assert db._conn is None and db._writer_conn is None
+
+
+async def test_realized_pnl_collection_can_be_turned_off(lifecycle_setup, monkeypatch):
+    settings, _ = lifecycle_setup
+    monkeypatch.setenv("NH_REALIZED_PNL_INTERVAL_S", "0")
+    app = create_app(settings)
+    async with app.router.lifespan_context(app):
+        assert not any(task.get_name() == "nh-realized-pnl" for task, _ in app.state.background_tasks)
 
 
 async def test_late_startup_failure_cancels_already_created_tasks(lifecycle_setup, monkeypatch):

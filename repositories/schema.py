@@ -930,6 +930,49 @@ CREATE TABLE IF NOT EXISTS broker_cash_review_evidence (
     amount REAL NOT NULL,
     PRIMARY KEY (google_sub,account_id,fingerprint,booked_date,date,currency,kind)
 );
+-- NH 기간 손익 응답의 정규화 사본. 계좌번호 원문을 넣지 않으며 잔고·현금·NAV를 바꾸지 않는다.
+-- 일자·국가·통화(해외)와 종목(국내) 묶음 group_key 단위로 교체해 재조회가 멱등이다.
+CREATE TABLE IF NOT EXISTS broker_realized_pnl (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    account_id TEXT NOT NULL REFERENCES portfolio_accounts(account_id) ON DELETE CASCADE,
+    account_fingerprint TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    group_key TEXT NOT NULL,
+    market TEXT NOT NULL,
+    trade_date TEXT NOT NULL,
+    stock_code TEXT NOT NULL DEFAULT '',
+    symbol TEXT NOT NULL DEFAULT '',
+    stock_name TEXT NOT NULL DEFAULT '',
+    nation_code TEXT NOT NULL DEFAULT '',
+    currency TEXT NOT NULL,
+    sell_quantity REAL,
+    sell_native REAL,
+    realized_native REAL,
+    sell_krw REAL,
+    realized_krw REAL,
+    issues_json TEXT NOT NULL DEFAULT '[]',
+    data_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    UNIQUE(google_sub, source_key)
+);
+CREATE INDEX IF NOT EXISTS idx_broker_realized_pnl_group ON broker_realized_pnl(google_sub, account_fingerprint, group_key);
+CREATE INDEX IF NOT EXISTS idx_broker_realized_pnl_date ON broker_realized_pnl(google_sub, trade_date);
+-- 계좌·연도·구분(domestic·overseas·income)별 수집 상태. digests_json으로 바뀐 묶음만 다시 조회한다.
+CREATE TABLE IF NOT EXISTS broker_realized_pnl_state (
+    account_id TEXT NOT NULL REFERENCES portfolio_accounts(account_id) ON DELETE CASCADE,
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    year INTEGER NOT NULL,
+    market TEXT NOT NULL,
+    account_fingerprint TEXT NOT NULL,
+    digests_json TEXT NOT NULL DEFAULT '{}',
+    broker_total REAL,
+    last_success_at TEXT,
+    attempted_at TEXT,
+    failed_attempts INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    PRIMARY KEY (account_id, year, market)
+);
 
 CREATE TABLE IF NOT EXISTS household_assets (
     asset_id TEXT PRIMARY KEY,

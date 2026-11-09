@@ -175,6 +175,30 @@ def test_cashflow_history_renders_before_nav_charts_finish():
     assert source.find("void cashflowPromise.then(cfData =>") < source.find("const navData = await navPromise;")
     assert "renderCashflows(cfData, navData);" in source
 
+def test_performance_tab_includes_realized_tax_card_without_inputs():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = _all_css()
+    tax = (JS / "portfolio-tax.js").read_text(encoding="utf-8")
+    performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
+    board = (JS / "portfolio-action-board.js").read_text(encoding="utf-8")
+
+    assert 'id="pfTaxWrap"' in html
+    assert 'id="pfTaxContent"' in html
+    assert '<a class="pf-deep-anchor-link" href="#pfTaxWrap">세금</a>' in html
+    assert html.find('id="pfAttributionWrap"') < html.find('id="pfTaxWrap"') < html.find('id="pfThesisWrap"')
+    # 같은 지연 로드 그룹에서 수익 분해 뒤, 보고서 앞에 실행한다(docs/portfolio-frontend-structure.md).
+    assert '<script data-feature="portfolio-performance" data-src="./js/portfolio-tax.js"></script>' in html
+    assert html.find("./js/portfolio-attribution.js") < html.find("./js/portfolio-tax.js") < html.find("./js/portfolio-reports.js")
+    assert "if (typeof pfLoadTaxPanel === 'function') pfLoadTaxPanel();" in performance
+    assert "async function pfLoadTaxPanel(" in tax
+    assert "/api/portfolio/realized-tax" in tax
+    # 액션 보드 항목의 열기 버튼이 심층 분석 탭으로 이동하고 간편 모드도 해제한다.
+    assert "'#pfTaxWrap'" in board
+    assert ".pf-tax-meter" in styles
+    section = html[html.find('id="pfTaxWrap"'):html.find('id="pfThesisWrap"')]
+    assert "<input" not in section and "<form" not in section
+
+
 def test_performance_tab_includes_period_report_panel():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     styles = _all_css()
