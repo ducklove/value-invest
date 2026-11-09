@@ -19,6 +19,7 @@
 - 개별 등록의 초기 잔고 입력·보유분 정리 선택 창: `portfolio-add-search.js`. 초안은 창 안에서만 유지하고 저장 전 보유 목록에 넣지 않는다. 매수·매도는 같은 `trades` 그룹으로 종목과 입력 기본값을 전달한다.
 - 분배금 출금: `portfolio-distributions.js` (`distributions` 그룹). 수동 배당 수취 입력은 제거했다. 기존 원장과 NAV·총수익 분리 계약은 [배당 기록과 분배금](dividend-receipts.md)을 따른다.
 - 도구 진입: `insights.js`, `screener.js`, `masters.js`를 각 화면에서 로드.
+- 기회 보드 `/opportunities`: `opportunity-board.js`를 `opportunities` 그룹으로 지연 로드한다. 스타일은 `labs.css`, 점수·순위 규칙은 [연결 프로젝트](linked-projects.md#기회-보드와-종목-360)를 따른다.
 - 퀀트 운용실 `/quant`: `quant-research.js` → `quant-scanner.js` → `quant-basis.js`를 `quant` 그룹으로 지연 로드한다. 첫 화면은 전체 순회·후보 호가 감시이며 기존 연구는 접힌 보조 메뉴다. 스타일은 `labs.css`, [감시 설계·현재 구현 범위](realtime-arbitrage-terminal.md)와 [퀀트 연구 안내](quant-research.md)를 따른다.
 - `switchView()`·`pfSwitchTab()`은 필요한 파일이 준비되면 화면을 열며, 그 사이
   사용자가 다른 탭을 선택하면 이전 전환을 적용하지 않는다. 전환 후 스크롤 등
@@ -74,6 +75,7 @@ CSS: 생태계 공통 토큰 `./static/ecosystem/vc-tokens.css`가 분할 CSS �
 7. `analysis-charts.js`: 주간/연간 가치평가 차트 렌더, 기간 전환, 목표가 오버레이, 차트 모달.
 8. `analysis-filings.js`: DART AI 리뷰 카드/상세, 리포트 테이블, 위키 요약 로딩.
 9. `analysis-valuation.js`: 밸류에이션 요약 카드 그리드(#coverageNote) — PER/PBR/배당 등 지표 계산(주간 시계열 우선), 베타/외부 도구/DR 카드.
+    바로 뒤의 `analysis-360.js`는 종목 360° 수치 패널(#stock360Panel)을 담당한다. `renderResult`가 종목마다 부르고, 신호가 없으면 패널을 숨긴다.
 10. `analysis.js`: 단일 종목 분석 본체 — 검색, 기업 헤더, 개인화, analyze SSE, 위키 Q&A.
 11. `portfolio-store.js`: `PfStore` — 파일 간 공유 포트폴리오 상태의 단일 컨테이너.
     바로 뒤의 `portfolio-accounts.js`는 계좌 선택·관리·NH 연결 창과 사용자 전용 시세 소켓을 담당한다. 선택 계좌는 `PfStore.accountId`, 키·시크릿은 브라우저 저장소에 보관하지 않는다.

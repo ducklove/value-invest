@@ -8,7 +8,7 @@
 // stays as top-level declarations in the owning split file.
 const PF_QUOTE_REFRESH_MS = 60_000;
 // "도구" 허브(labsView)와 그 하위 딥링크 화면들 — switchView 의 상단 탭 활성 표시를 묶는 데 쓰인다.
-const PF_TOOLS_HUB_VIEWS = new Set(['labs', 'nps', 'insights', 'screener', 'masters', 'bonds', 'quant']);
+const PF_TOOLS_HUB_VIEWS = new Set(['labs', 'nps', 'insights', 'screener', 'masters', 'bonds', 'quant', 'opportunities']);
 // view ↔ URL 경로 매핑. switchView 의 history.pushState(정방향)와 app-main.js 의 최초 진입
 // 라우팅·popstate 복원(역방향)이 이 표 하나를 공유한다 — 표가 두 곳에 따로 있으면 한쪽만
 // 고치고 잊는 사고가 나기 쉽다(예: 새 뷰 추가 시 pushState 는 되는데 새로고침 복원은 안 되는 식).
@@ -21,6 +21,7 @@ const PF_VIEW_PATHS = {
   insights: '/insights',
   screener: '/screener',
   quant: '/quant',
+  opportunities: '/opportunities',
   masters: '/masters',
   bonds: '/bonds',
 };
@@ -34,6 +35,7 @@ const PF_PATH_TO_VIEW = {
   '/insights': 'insights',
   '/screener': 'screener',
   '/quant': 'quant',
+  '/opportunities': 'opportunities',
   '/masters': 'masters',
   '/bonds': 'bonds',
 };
@@ -376,7 +378,9 @@ function switchView(view, options = {}) {
   const mastersView = document.getElementById('mastersView');
   const bondsView = document.getElementById('bondsView');
   const quantView = document.getElementById('quantView');
+  const opportunitiesView = document.getElementById('opportunitiesView');
   if (quantView) quantView.style.display = view === 'quant' ? 'block' : 'none';
+  if (opportunitiesView) opportunitiesView.style.display = view === 'opportunities' ? 'block' : 'none';
   if (investingView) investingView.style.display = view === 'investing' ? 'block' : 'none';
   analysisView.style.display = view === 'analysis' ? 'block' : 'none';
   portfolioView.style.display = view === 'portfolio' ? 'block' : 'none';
@@ -395,6 +399,7 @@ function switchView(view, options = {}) {
                   : view === 'masters' ? mastersView
                   : view === 'bonds' ? bondsView
                   : view === 'quant' ? quantView
+                  : view === 'opportunities' ? opportunitiesView
                   : npsView;
   if (activeEl) {
     activeEl.classList.remove('fade-in');
@@ -419,6 +424,8 @@ function switchView(view, options = {}) {
     loadBondsView();
   } else if (view === 'quant' && typeof loadQuant === 'function') {
     loadQuant();
+  } else if (view === 'opportunities' && typeof loadOpportunityBoard === 'function') {
+    loadOpportunityBoard();
   }
   _updateQuoteSubscriptions();
   // 모바일에서 탭 전환 시 이전 뷰의 스크롤 위치가 남아 본문이 중간에서 시작하는

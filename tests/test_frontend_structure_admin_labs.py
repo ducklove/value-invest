@@ -300,3 +300,26 @@ def test_labs_view_has_registry_driven_ecosystem_section():
     assert "ecoGoHref(t.id)" in links, "새 탭 핸드오프는 허브 /go/{id} 경유"
     css = (STATIC / "css" / "labs.css").read_text(encoding="utf-8")
     assert css.index(".lab-eco-grid") > css.index(".quant-page"), "새 규칙은 labs.css 끝에"
+
+
+def test_opportunity_board_view_is_wired_as_deep_linkable_tool():
+    """기회 보드: 도구 카드 → /opportunities, 지연 로드 그룹, 직접 URL, 화면 CSS."""
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    shell = (JS / "portfolio-shell.js").read_text(encoding="utf-8")
+    board = (JS / "opportunity-board.js").read_text(encoding="utf-8")
+    routes = (STATIC / ".." / "core" / "static_routes.py").resolve().read_text(encoding="utf-8")
+    css = (STATIC / "css" / "labs.css").read_text(encoding="utf-8")
+
+    assert 'href="/opportunities"' in html and "switchView('opportunities')" in html
+    assert 'id="opportunitiesView"' in html
+    assert '<script data-feature="opportunities" data-src="./js/opportunity-board.js"></script>' in html
+    assert html.find("./js/screener.js") < html.find("./js/opportunity-board.js") < html.find("./js/app-main.js")
+    assert '"/opportunities"' in routes
+    assert "opportunities: '/opportunities'" in shell
+    assert "'/opportunities': 'opportunities'" in shell
+    assert "view === 'opportunities'" in shell
+    assert "typeof loadOpportunityBoard === 'function'" in shell
+    assert "'quant', 'opportunities']" in shell, "도구 허브 하위 화면이면 도구 탭이 활성으로 표시된다"
+    assert "async function loadOpportunityBoard(" in board
+    assert "/api/external/opportunities" in board
+    assert css.index(".opportunity-page") > css.index(".lab-eco-grid"), "새 규칙은 labs.css 끝에"

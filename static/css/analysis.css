@@ -560,3 +560,31 @@
 .eco-chip:hover { border-color: var(--eco-chip-accent); color: var(--eco-chip-accent); }
 .eco-chip:focus-visible { outline: none; box-shadow: var(--ring); }
 .eco-chip-back { border-color: var(--eco-chip-accent); color: var(--eco-chip-accent); }
+
+/* 종목 360° 수치 패널 (#stock360Panel) — analysis-360.js */
+.stock360 { margin-top: 14px; }
+.stock360[hidden] { display: none; }
+.stock360-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin-bottom: 8px; }
+.stock360-head h3 { margin: 0; font-size: 15px; }
+.stock360-liquidity { font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.stock360-liquidity.is-low { color: var(--warning); font-weight: 600; }
+.stock360-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.stock360-card { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); min-width: 0; }
+.stock360-card.is-stale { border-color: color-mix(in srgb, var(--warning) 45%, var(--border)); }
+.stock360-card header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.stock360-label { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; color: var(--text-secondary); }
+.stock360-card header a { flex: none; font-size: 12px; color: var(--primary); text-decoration: none; }
+.stock360-card header a:hover { text-decoration: underline; }
+.stock360-subject { margin: 0; font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
+.stock360-subject small { font-size: 11px; font-weight: 400; color: var(--text-secondary); }
+.stock360-score { display: flex; align-items: baseline; gap: 6px; margin: 0; }
+.stock360-score strong { font-size: 20px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.stock360-score span { font-size: 11px; color: var(--text-secondary); }
+.stock360-metrics { display: grid; gap: 3px; margin: 0; font-size: 12px; }
+.stock360-metrics div { display: flex; justify-content: space-between; gap: 10px; }
+.stock360-metrics dt { color: var(--text-secondary); }
+.stock360-metrics dd { margin: 0; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stock360-asof { margin: 0; font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.stock360-warning { margin: 0; font-size: 12px; line-height: 1.45; color: var(--warning); }
+.stock360-failed { margin: 8px 0 0; font-size: 12px; color: var(--danger); }
+.stock360-note { margin: 8px 0 0; font-size: 12px; line-height: 1.55; color: var(--text-secondary); }

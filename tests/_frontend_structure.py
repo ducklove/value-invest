@@ -71,6 +71,7 @@ ANALYSIS_SPLIT_FILES = [
     "analysis-charts.js",
     "analysis-filings.js",
     "analysis-valuation.js",
+    "analysis-360.js",
     "analysis.js",
 ]
 
