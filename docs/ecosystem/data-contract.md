@@ -141,8 +141,8 @@ Python과 JS가 같은 파일을 만든다(`generatedAt`만 다를 수 있다).
 설계 원칙은 "허브가 지금 쓰는 필드만, 그러나 허브가 원본 파일 없이 기존 기능을 전부 재현할 수 있을
 만큼"이다. 기준이 된 허브 소비자는 `services/ecosystem/external_tools.py`(인사이트 카드 `_summarize_*`, 종목 딥링크
 `_match_*`, 액션보드 `fetch_portfolio_signals`, ETF `fetch_etf_universe`/`etf_link_for`, 스팩
-`fetch_spac_data`), `services/portfolio/spac.py`(청산가치 지표), `static/js/market-bond-mate.js`
-(브라우저 금리·환율 병합)다. 크기는 실데이터 기준 전체 발행 시 추정치(압축 전)다.
+`fetch_spac_data`), `services/portfolio/spac.py`(청산가치 지표), `services/ecosystem/opportunities.py`
+(기회 보드·종목 360°), `static/js/market-bond-mate.js`(브라우저 금리·환율 병합)다. 크기는 실데이터 기준 전체 발행 시 추정치(압축 전)다.
 
 ### 6.1 holding_value (≈ 9 KB)
 
@@ -293,9 +293,10 @@ Python과 JS가 같은 파일을 만든다(`generatedAt`만 다를 수 있다).
 2. **캐시**: `MemoryTTLCache` 300초. TTL이 만료되면 조건부 GET(`If-None-Match`/ETag, Pages가 지원)을 보낸다. 304 응답이면 TTL만 연장한다. 404·계약 위반은 **900초 음성 캐시**한다(그동안 summary를 다시 시도하지 않고 바로 레거시로 간다). 사이블링이 아직 summary를 발행하지 않은 동안 요청이 두 배로 늘지 않게 하기 위해서다. 허브 카드의 가격 의존 값은 별도 120초 캐시의 공유 시세로 갱신한다([linked-projects](../linked-projects.md#서버-쪽-외부-인사이트)).
 3. **변경 감지(선택)**: 워치독이나 폴러는 `version.json`만 받는다. `files["summary.json"]`이 캐시한 `contentHash`와 같으면 본문을 다시 받지 않는다.
 4. **stale-while-error**: 새로 받는 데 실패하면 마지막으로 성공한 envelope를 `stale: true`로 표시해 1일까지 쓴다.
-5. **신선도**: `asOf`가 도구별 허용치(예: 장중 도구 1거래일, buybacks 분기, all-about-gold 월)를 넘으면 UI에 "기준일" 경고를 붙인다. 판정 기준은 `generatedAt`이 아니라 `asOf`다. no-op 규칙 때문에 `generatedAt`은 갱신되지 않을 수 있다.
-6. 허브 응답 모양(`/api/external/insights`, `fetch_stock_links`, `fetch_portfolio_signals`, `fetch_spac_data`)은 바꾸지 않는다. §6의 "허브 유도"대로 summary를 기존 모양으로 바꿔 돌려준다.
+5. **신선도**: `asOf`가 도구별 허용치(`services/ecosystem/signals.py` `FRESHNESS`: cps·holding_value·spac-hunter 2거래일, eiayn 5거래일, buybacks·nps-tracker 460일)를 넘으면 UI에 "기준일" 경고를 붙인다. buybacks와 nps-tracker는 연말 공시 기준이라 다음 해 공시가 나올 때까지 정상이다. 판정 기준은 `generatedAt`이 아니라 `asOf`다. no-op 규칙 때문에 `generatedAt`은 갱신되지 않을 수 있다. 일봉 분포(`ratioPctEnd`·`spreadPctEnd`)는 5거래일 넘게 밀리면 경고하고 90일이 지나면 백분위를 쓰지 않는다.
+6. 허브 응답 모양(`/api/external/insights`, `fetch_stock_links`, `fetch_portfolio_signals`, `fetch_spac_data`)은 바꾸지 않는다. §6의 "허브 유도"대로 summary를 기존 모양으로 바꿔 돌려준다. `fetch_portfolio_signals`의 `severity` 값은 우선주·지주사에서 자기 3년 백분위 90 이상이면 `high`이고, 백분위를 쓸 수 없으면 기존 고정 임계값(괴리 50%, 보유가치/시총 150%)을 쓴다. 자사주(20%)와 김프는 자기 역사가 없어 고정값을 유지한다. 키와 `metric`은 그대로다.
 7. URL은 레지스트리(`config/ecosystem.json`)의 도구 `url`에서 만든다. `raw.githubusercontent.com`과 브랜치 이름은 쓰지 않는다.
+8. **선택 필드 폴백**: 기회 보드와 종목 360°는 §6의 선택 필드(`spreadPct3y`, `ratioPct3y`, `weights`)가 summary에 없으면 이미 공개된 파일(레지스트리 `dashboard-summary` = cps·holding_value `data/summary.json`, nps-tracker `current`)에서 같은 값을 만든다. 형제가 발행하기 전이나 summary를 끈 상태에서도 동작하기 위해서다. 이 파일이 실패하면 백분위만 빠지고 현재 값은 표시된다. 저장된 `pctile*` 값은 일봉 작업과 함께 멈추므로 쓰지 않고 현재 값으로 다시 계산한다.
 
 ## 8. no-op 규칙과 GitHub Actions
 

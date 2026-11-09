@@ -93,12 +93,13 @@
 | 순위 | ID | 아이디어 | 무엇을 쓰나 | 공수 | 선행 조건 |
 |---|---|---|---|---|---|
 | 1 | N-1 | **도구 상태(신선도) 패널** — 허브 labs나 admin에 도구별 `asOf`·마지막 확인·stale·오류를 표로. 기준보다 오래되면 경고 배지, 연속 실패면 알림 | `/api/ecosystem` `freshness`, data-contract §7 신선도 허용치 | S | 지금 `freshness`는 로더가 한 번 돈 도구만 채운다. 주기적으로 summary를 미리 받는 작업(타이머나 lifespan 루프) 추가 |
-| 2 | N-2 | **종목 360° 페이지** — 한 종목에 대해 모든 도구의 신호를 모은다: 지주사 할인율(holding_value), 우선주 괴리·백분위(cps), 자사주 비율(buybacks), 국민연금 비중(nps-tracker), SPAC 청산가치 할인(spac-hunter), 편입 ETF(eiayn). 허브 분석 탭의 섹션 또는 `/analysis?code=…&view=360` | 각 형제 summary.json(이미 허브에 캐시), 레지스트리 `stockLink` | M | summary 스키마에 종목별 필드가 있는 도구부터(cps·buybacks·nps·spac). eiayn 편입 종목은 새 필드 필요 |
+| 2 | N-2 | **(2026-11 구현: 분석 화면 `#stock360Panel`, [linked-projects](../linked-projects.md#기회-보드와-종목-360)) 종목 360° 페이지** — 한 종목에 대해 모든 도구의 신호를 모은다: 지주사 할인율(holding_value), 우선주 괴리·백분위(cps), 자사주 비율(buybacks), 국민연금 비중(nps-tracker), SPAC 청산가치 할인(spac-hunter), 편입 ETF(eiayn). 허브 분석 탭의 섹션 또는 `/analysis?code=…&view=360` | 각 형제 summary.json(이미 허브에 캐시), 레지스트리 `stockLink` | M | summary 스키마에 종목별 필드가 있는 도구부터(cps·buybacks·nps·spac). eiayn 편입 종목은 새 필드 필요 |
 | 3 | N-3 | **교차 도구 관심종목·알림** — 사용자가 종목별 조건을 건다(예: 우선주 괴리 백분위 90 이상, 지주사 할인 확대, 자사주 소각 공시, 국민연금 신규 편입, 김프 5% 초과). 허브 알림 엔진이 summary 갱신 때 평가하고 기존 채널(Telegram·Kakao)로 보낸다 | `services/notifications/engine`, summary.json, 알림 채널 | M | N-1의 주기적 summary 갱신. 형제 쪽 이벤트는 `/api/internal/notify`로도 보낼 수 있다 |
 | 4 | N-4 | **모든 대시보드의 포트폴리오 컨텍스트** — 보유 배지를 nps-tracker 보유표·all-about-gold ETF 카드로 확대하고, 배지 툴팁에 '포트폴리오에서 보기'(`/portfolio?focus=CODE`) 링크. 보유 비중 오버레이(예: cps 표에 내 보유 수량) | `portfolio-held-badges.js`(fragment 보존 완료), `/portfolio?focus` | S~M | 레지스트리 `heldBadges: true` 전환, 형제 `data-portfolio-code` 마크업 |
 | 5 | N-5 | **생태계 검색** — 허브 검색창에서 종목을 찾으면 그 종목을 다루는 도구를 함께 보여 준다(`accepts` 정규식 + summary 포함 여부). 셸 팝오버에도 같은 검색 | 레지스트리, summary 캐시 | S | — |
 | 6 | N-6 | **주간 생태계 다이제스트** — 주 1회 summary.json 변화(괴리 상위 변동, 새 SPAC, 소각 공시, 국민연금 비중 변화, 김프, 금리 커브)를 보유 종목 중심으로 요약해 기존 브리핑 채널로 발송 | `services/daily_briefing` 인프라, summary 스냅샷 보관(주간 diff용) | M | summary 이력 저장 테이블 |
 | 7 | N-7 | **디바이스 카드 확장** — e-paper·X3에 '오늘의 생태계 신호' 카드(보유 종목에 걸린 신호 3개) | `/api/device/portfolio` 확장 | S | R-9(x3 API 전환) |
+| 9 | N-9 | **(2026-11 구현: `/opportunities`) 기회 보드** — 형제 신호를 0~100 점수로 모아 보유 여부와 무관하게 순위를 매긴다. 후보마다 거래대금과 기준일을 함께 표시한다 | `services/ecosystem/signals.py`·`opportunities.py`, 각 summary 선택 필드 | M | N-3 교차 알림·N-6 다이제스트가 같은 점수를 쓸 수 있다 |
 | 8 | N-8 | **형제 간 크로스 링크 확대** — 이번에 생긴 cps→holding_value, gold_gap↔all-about-gold, all-about-gold ETF→eiayn 외에 spac-hunter 합병 완료 → 허브 분석, buybacks 기업 → cps(우선주 있으면), nps-tracker 행 → holding_value(지주사면) | `VCShell.linkTo` + 레지스트리 `accepts` | S | — |
 
 ## 관련 문서

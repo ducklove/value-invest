@@ -305,6 +305,7 @@ all-about-gold `all-about-gold-update.timer`(07:17), nps-tracker 트리거 cront
 | `GET /go/{tool_id}` | 허브 [routes/ecosystem.py](../../routes/ecosystem.py) | 없음(handoff 도구는 세션이 있으면 보유 스냅샷 첨부) | 허브 SPA 링크, labs '연결 대시보드' |
 | `GET /api/ecosystem` | 허브 | 없음, `max-age=60` | 공개 레지스트리 투영 + 형제별 신선도(`asOf`) |
 | `GET /app-config.js`, `/api/integrations` | 허브 | 없음 | 허브 SPA(`APP_CONFIG.integrations`·`.ecosystem`). kisProxy는 빠졌다 |
+| `GET /api/external/opportunities`, `GET /api/external/stock/{code}/360` | 허브 | 없음(세션이 있으면 보드에 보유 표시용 `heldCodes`) | 허브 SPA 기회 보드·종목 360° |
 | `GET /api/portfolio/held-codes` | 허브 | 세션 쿠키(credentialed CORS) | `portfolio-held-badges.js`(형제 5개) |
 | `GET /api/portfolio/open/{key}` | 허브 | 세션 | `/go` handoff 경로의 별칭 |
 | `POST /api/internal/notify` | 허브 | 루프백 직접 연결 **또는** `X-Internal-Token` | buybacks 워크플로 4종(실패 알림) |

@@ -100,6 +100,24 @@ holding_value, common_preferred_spread, spac-hunter, buybacks, eiayn **다섯** 
   eiayn AIYN 상위 100에서 뽑은 오늘의 ETF(허브가 등락률 보강).
 - `ECOSYSTEM_SUMMARIES=0`이면 summary 단계를 끄고 항상 레거시 파일을 쓴다(비상 스위치).
 
+### 기회 보드와 종목 360° (2026-11)
+
+`/opportunities`(도구)와 분석 화면 `#stock360Panel`은 입력 없이 형제 신호를 모아 보여 준다.
+계산은 [services/ecosystem/signals.py](../services/ecosystem/signals.py)의 순수 함수이고
+[services/ecosystem/opportunities.py](../services/ecosystem/opportunities.py)가 데이터를 받아 넘긴다.
+
+- **점수**: 0~100. 우선주 괴리와 지주사 보유가치/시총은 자기 3년 분포에서 현재 값 이하인 비율(형제 카드와 같은 식, 최소 30표본)이다.
+  스팩 연환산, 자사주 비율, 국민연금 지분율 변화는 같은 도구 종목군 안의 순위다(최소 10종목). 합병이 진행 중인 스팩은 순위와 모집단에서 뺀다.
+- **순위**: 10점 구간 → 자기 역사 기준 먼저 → 점수 → 거래대금. 점수 80 이상만, 도구별 상위 12개까지 보여 주고 잘린 수를 상태 칸에 표시한다.
+  같은 구간에서 자기 역사를 앞에 두는 이유는 자사주처럼 종목이 많고 거의 변하지 않는 횡단면 신호가 상단을 차지하지 않게 하려는 것이다.
+- **국민연금**: 비중과 지분율 수준은 문맥으로만 쓰고, 지분율이 실제로 늘어난 종목만 순위에 넣는다. 최신 연말 아카이브 두 개의 지분율이
+  거의 전부 같으면 같은 파일이 다시 나온 것이므로 변화를 내지 않는다(`ownershipChange.comparable: false`).
+- **유동성**: 형제의 20일 평균 거래대금(cps)을 먼저 쓰고, 없으면 공유 벌크 시세의 당일 누적을 쓴다. 모르면 0이 아니라 미확인으로 표시한다.
+- **표현**: 점수는 과거 분포나 종목군 안의 위치이고 수익을 뜻하지 않는다. 거래비용을 추정할 수 없으므로 비용을 뺀 수치는 만들지 않는다.
+- **실패 격리**: 도구는 독립적으로 실패한다. 보드는 `tools[].status`, 패널은 `failedTools`로 실패한 도구를 드러내고 나머지를 표시한다.
+- **액션 보드**: 우선주·지주사 `severity`가 같은 3년 백분위를 쓴다(90 이상이면 `high`). 2026-11 실데이터에서 고정 임계값은 우선주 59개 중 23개,
+  지주사 48개 중 28개를 항상 `high`로 표시해 변별력이 없었다. 백분위를 쓸 수 없으면 고정 임계값으로 돌아간다([data-contract](ecosystem/data-contract.md) §7).
+
 ### 카드의 가격 갱신 (2026-10-01)
 
 `market-dashboard.js` → `/api/external/insights` → `external_tools` → `siblings`의

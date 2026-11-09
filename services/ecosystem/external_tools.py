@@ -45,7 +45,7 @@ from core.errors import DBError
 from core.http import get_http_client
 from domain.portfolio_codes import is_korean_stock
 from domain.timeutil import KST
-from services.ecosystem import adapters, links, siblings
+from services.ecosystem import adapters, links, siblings, signals
 from services.ecosystem.fetch import FETCH_ERRORS, cached_fetch, stale_value
 
 logger = logging.getLogger(__name__)
@@ -875,6 +875,24 @@ def _match_gold_gap_asset(code: str, summary: dict) -> dict | None:
     return None
 
 
+# 액션 보드 severity 의 고정 임계값. 자기 3년 백분위를 쓸 수 없을 때만 적용한다
+# (signals.history_severity). 고정값은 2026-11 기준 우선주 23/59, 지주사 28/48 종목이 항상 high 였다.
+_PREFERRED_FIXED_HIGH_PCT = 50
+_HOLDING_FIXED_HIGH_PCT = 150
+_BUYBACK_FIXED_HIGH_PCT = 20  # 자사주는 자기 역사가 없고 1,622개 중 54개만 걸려 고정값을 유지한다
+
+
+def _percentile_detail(detail: str, percentile: int | None) -> str:
+    return detail if percentile is None else f"{detail} · 자기 3년 백분위 {percentile}"
+
+
+async def _history_percentiles() -> dict[str, dict[str, int]]:
+    """액션 보드 severity 용 자기 역사 백분위. opportunities 가 이 모듈을 쓰므로 호출 시점에 import 한다."""
+    from services.ecosystem import opportunities
+
+    return await opportunities.history_percentiles()
+
+
 def _signal(kind: str, title: str, detail: str, url: str, *, severity: str = "info", metric=None, short_label: str = "") -> dict:
     return {
         "kind": kind,
@@ -892,6 +910,10 @@ async def fetch_portfolio_signals(codes: list[str]) -> dict[str, list[dict]]:
 
     This is intentionally best-effort. Each external dashboard is independent;
     one stale/failed source should not block the action board.
+
+    Preferred and holding severities use the stock's own 3-year percentile when
+    it is usable and the fixed thresholds otherwise. The response shape stays the
+    same (data-contract §7).
     """
     normalized = []
     for code in codes or []:
@@ -902,6 +924,7 @@ async def fetch_portfolio_signals(codes: list[str]) -> dict[str, list[dict]]:
         return {}
 
     out: dict[str, list[dict]] = {code: [] for code in normalized}
+    percentiles = await _history_percentiles()
 
     try:
         cur, cfg = await _load_pair("common_preferred_spread")
@@ -910,8 +933,10 @@ async def fetch_portfolio_signals(codes: list[str]) -> dict[str, list[dict]]:
             if not pref:
                 continue
             spread = _num(pref.get("spread"))
-            severity = "high" if spread is not None and spread >= 50 else "watch"
+            percentile = percentiles["preferred"].get(code)
+            severity = signals.history_severity(percentile, spread, _PREFERRED_FIXED_HIGH_PCT)
             detail = f"우선주 괴리율 {spread:.1f}%" if spread is not None else "우선주 괴리율 신호"
+            detail = _percentile_detail(detail, percentile)
             out[code].append(_signal(
                 "preferred",
                 f"{pref.get('name') or code} 우선주 괴리",
@@ -931,8 +956,10 @@ async def fetch_portfolio_signals(codes: list[str]) -> dict[str, list[dict]]:
             if not hold:
                 continue
             ratio = _num(hold.get("ratio"))
-            severity = "high" if ratio is not None and ratio >= 150 else "watch"
+            percentile = percentiles["holding"].get(code)
+            severity = signals.history_severity(percentile, ratio, _HOLDING_FIXED_HIGH_PCT)
             detail = f"보유지분가치/시총 {ratio:.1f}%" if ratio is not None else "지주사 NAV 신호"
+            detail = _percentile_detail(detail, percentile)
             out[code].append(_signal(
                 "holding",
                 f"{hold.get('name') or code} 지주사 NAV",
@@ -972,7 +999,7 @@ async def fetch_portfolio_signals(codes: list[str]) -> dict[str, list[dict]]:
                 continue
             name = buyback.get("name") or await _buyback_stock_name(code)
             ratio_pct = _num(buyback.get("treasuryRatioPct"))
-            severity = "high" if ratio_pct is not None and ratio_pct >= 20 else "watch"
+            severity = "high" if ratio_pct is not None and ratio_pct >= _BUYBACK_FIXED_HIGH_PCT else "watch"
             detail = f"자사주 보유비중 {ratio_pct:.1f}%" if ratio_pct is not None else "자사주 데이터 신호"
             if buyback.get("asOf"):
                 detail += f" · {buyback['asOf']} 기준"

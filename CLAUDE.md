@@ -10,7 +10,7 @@
 | 위치 | 역할 |
 |---|---|
 | `routes/` | HTTP/WS 핸들러. 기존 파일에 `@router.get` 추가는 그걸로 끝. **새 라우터 파일**을 만들면 `core/app_factory.py`에 include_router 등록 |
-| `services/` | 도메인 로직 — `portfolio/*`(NAV 정산 `nav_snapshot`·장중 `intraday_snapshot`·`benchmark_history` 포함), `market/*`(`indicators`·`daily`·`movers`·`economic_calendar`·`news`·`sessions`), `market/sources/*`(외부 provider: `finance_pi`·`close_price`·`kis_proxy`·`yahoo`·`yfinance_runner` — **새 외부 소스는 여기**), `ecosystem/*`(형제 도구: summary 로더 `siblings`·링크 `links`·`external_tools`·`integrations`·`linked_admin`), `dart/client`, `dividends/*`, `notifications/*`, `stock_price`·`stock_quotes` |
+| `services/` | 도메인 로직 — `portfolio/*`(NAV 정산 `nav_snapshot`·장중 `intraday_snapshot`·`benchmark_history` 포함), `market/*`(`indicators`·`daily`·`movers`·`economic_calendar`·`news`·`sessions`), `market/sources/*`(외부 provider: `finance_pi`·`close_price`·`kis_proxy`·`yahoo`·`yfinance_runner` — **새 외부 소스는 여기**), `ecosystem/*`(형제 도구: summary 로더 `siblings`·링크 `links`·`external_tools`·신호 정규화 `signals`·기회 보드/360° `opportunities`·`integrations`·`linked_admin`), `dart/client`, `dividends/*`, `notifications/*`, `stock_price`·`stock_quotes` |
 | `repositories/` | 테이블별 SQLite 접근. `db.py`=커넥션 싱글톤+`transaction()`, `schema.py`=스키마·마이그레이션, `bootstrap.py`=`init_db()`/`close_db()` |
 | `core/` | config(env 프로파일)·app_factory·lifespan·정적 라우트·http 클라이언트·errors·`ecosystem`(레지스트리 로더)·`logging_setup`(로그 비밀 마스킹) |
 | `config/ecosystem.json` | **생태계 도구 레지스트리 정본**(21개, 공개 15). URL·딥링크 템플릿·데이터 URL·벤더링 경로. 파생: integrations 기본 URL, handoff 목록, `APP_CONFIG.ecosystem`, `/go/{tool}`, `/api/ecosystem`, vc-shell 인라인 블록 |

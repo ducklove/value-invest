@@ -155,6 +155,25 @@ async def external_stock_links(code: str):
     return await external_tools.fetch_stock_links(code)
 
 
+@router.get("/api/external/opportunities")
+async def external_opportunities(request: Request):
+    """Public — 형제 도구 신호 기회 보드. 순위는 보유와 무관하고, 로그인하면 보유 표시용 코드를 함께 준다."""
+    from services.ecosystem import opportunities
+
+    board = await opportunities.fetch_opportunity_board()
+    user = await get_current_user(request)
+    board["heldCodes"] = await opportunities.held_codes(user["google_sub"]) if user else []
+    return board
+
+
+@router.get("/api/external/stock/{code}/360")
+async def external_stock_360(code: str):
+    """Public — 종목 360°: 이 종목에 걸린 형제 도구 신호의 수치와 기준일."""
+    from services.ecosystem import opportunities
+
+    return await opportunities.fetch_stock_360(code)
+
+
 @router.get("/api/settings/market-bar")
 async def get_market_bar_setting(request: Request):
     import json
