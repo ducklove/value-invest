@@ -1080,3 +1080,29 @@ def test_performance_tab_has_sticky_anchor_nav_covering_every_card():
     # 모바일 슬림 헤더(--m-header-h, 데스크톱에선 미정의라 0px 로 빠짐) 밑에 붙고,
     # 점프 대상은 헤더 + 이 바 높이만큼 scroll-margin 을 둬 제목이 가려지지 않는다.
     assert "top: var(--m-header-h, 0px);" in styles
+
+
+def test_portfolio_xray_card_structure():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
+    accounts = (JS / "portfolio-accounts.js").read_text(encoding="utf-8")
+    exposure = (JS / "portfolio-exposure.js").read_text(encoding="utf-8")
+    styles = _all_css()
+
+    # 리스크 카드 바로 뒤, 수익 분해 앞에 산다. 점프 내비로도 갈 수 있다.
+    assert html.find('id="pfRiskWrap"') < html.find('id="pfExposureWrap"') < html.find('id="pfAttributionWrap"')
+    assert 'href="#pfExposureWrap"' in html
+    assert 'id="pfExposureContent"' in html
+    # 심층 분석 진입 때 지연 로드하고, 리스크 스크립트 다음에 등록한다.
+    assert '<script data-feature="portfolio-performance" data-src="./js/portfolio-exposure.js"></script>' in html
+    assert html.find("./js/portfolio-risk.js") < html.find("./js/portfolio-exposure.js")
+    assert "if (typeof pfLoadExposurePanel === 'function') pfLoadExposurePanel();" in performance
+    # 탭이 열려 있는 동안 계좌를 바꾸면 다시 계산하고, 로그아웃하면 메모를 지운다.
+    assert "pfActiveTab === 'performance') pfLoadExposurePanel();" in accounts
+    assert "pfResetExposurePanel();" in accounts
+    # 기능 홈과 계좌 필터.
+    assert "async function pfLoadExposurePanel(" in exposure
+    assert "/api/portfolio/exposure" in exposure
+    assert "account_id=" in exposure
+    assert ".pf-xray-bar" in styles
+    assert ".pf-xray-heatmap" in styles

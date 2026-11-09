@@ -87,6 +87,8 @@ function pfSwitchTab(tab) {
     if (typeof pfLoadPeriodReportsPanel === 'function') pfLoadPeriodReportsPanel();
     // 리스크 카드도 성과 탭이 보일 때만 lazy 로드(portfolio-risk.js).
     if (typeof pfLoadRiskPanel === 'function') pfLoadRiskPanel();
+    // X-Ray 카드 동일 패턴(portfolio-exposure.js).
+    if (typeof pfLoadExposurePanel === 'function') pfLoadExposurePanel();
     // 리밸런싱 카드 동일 패턴(portfolio-rebalance.js).
     if (typeof pfLoadRebalancePanel === 'function') pfLoadRebalancePanel();
     // 배당 캘린더 카드 동일 패턴(portfolio-dividends-calendar.js).

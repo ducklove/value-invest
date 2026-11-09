@@ -486,6 +486,11 @@ async def _load_pair(repo: str) -> tuple[dict, list]:
     return await _sibling(repo, repo, lambda env: adapt(env["data"]), legacy)
 
 
+async def load_spread_pairs() -> tuple[dict, list]:
+    """우선주 괴리율 (current, config) — summary 우선·레거시 폴백. 다른 서비스용 공개 진입점."""
+    return await _load_pair("common_preferred_spread")
+
+
 async def _holding_summary() -> dict | None:
     cur, cfg = await _load_pair("holding_value")
     return _summarize_holding(cur, cfg)

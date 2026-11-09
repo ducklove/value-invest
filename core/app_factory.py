@@ -50,6 +50,7 @@ def _register_feature_routers(app: FastAPI) -> None:
     from routes.investment_insights import router as investment_insights_router
     from routes.journal import router as journal_router
     from routes.portfolio_distributions import router as portfolio_distributions_router
+    from routes.portfolio_exposure import router as portfolio_exposure_router
     from routes.portfolio_reports import router as portfolio_reports_router
     from routes.portfolio_risk import router as portfolio_risk_router
     from routes.portfolio_trades import router as portfolio_trades_router
@@ -72,6 +73,7 @@ def _register_feature_routers(app: FastAPI) -> None:
         broker_accounts_router,
         portfolio_reports_router,
         portfolio_risk_router,
+        portfolio_exposure_router,
         rebalance_router,
         quant_router,
         dividend_calendar_router,

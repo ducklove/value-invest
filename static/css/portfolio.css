@@ -3880,4 +3880,32 @@ body.pf-compact-rows .pf-pair-connector, body.pf-compact-rows .pf-row-position {
 @media (max-width: 600px) {
   .pf-tax-income-list { grid-template-columns: minmax(0, 1fr); }
   .pf-tax-table th, .pf-tax-table td { padding: 8px 4px; font-size: 11px; }
+
+/* 포트폴리오 X-Ray(심층 분석) — 타일·표는 리스크·수익 분해 카드의 클래스를 재사용한다.
+   막대는 값 크기만 나타내는 한 가지 색이고, 현금·미분류처럼 분류 밖 항목은 회색이다. */
+#pfExposureContent h4 { margin: 20px 0 8px; font-size: 14px; }
+#pfExposureContent .pf-chart-note { text-align: left; }
+#pfExposureContent .pf-risk-sub { white-space: normal; }
+#pfExposureContent h4 small { margin-left: 6px; font-size: 11px; font-weight: 400; color: var(--text-secondary); }
+.pf-xray-sources { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.pf-xray-source { padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.pf-xray-source.is-stale { border-color: var(--warning); color: var(--text); background: var(--warning-tint); }
+.pf-xray-split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; }
+.pf-xray-bar { display: grid; grid-template-columns: minmax(0, 150px) minmax(30px, 1fr) minmax(64px, auto); gap: 10px; align-items: center; margin: 7px 0; font-size: 12px; }
+.pf-xray-bar > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.pf-xray-bar strong { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pf-xray-bar strong small { display: block; font-size: 10px; font-weight: 400; color: var(--text-secondary); }
+.pf-xray-track { height: 8px; border-radius: 4px; background: var(--surface-muted); overflow: hidden; }
+.pf-xray-track i { display: block; height: 100%; border-radius: 0 4px 4px 0; background: var(--primary); }
+.pf-xray-bar.is-muted .pf-xray-track i { background: var(--text-secondary); }
+.pf-xray-bar.is-negative .pf-xray-track i { background: repeating-linear-gradient(135deg, var(--primary) 0 3px, transparent 3px 6px); }
+.pf-insight-table td.pf-xray-text, .pf-insight-table th.pf-xray-text { text-align: left; }
+.pf-insight-table td.pf-xray-text { white-space: normal; min-width: 180px; line-height: 1.5; }
+.pf-insight-table small { color: var(--text-secondary); font-weight: 400; }
+.pf-xray-heatmap { border-collapse: separate; border-spacing: 2px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.pf-xray-heatmap th { padding: 4px 6px; font-weight: 400; color: var(--text-secondary); white-space: nowrap; text-align: left; }
+.pf-xray-heatmap td { min-width: 40px; padding: 6px 4px; text-align: center; border-radius: 4px; color: var(--text); }
+@media (max-width: 760px) {
+  .pf-xray-split { grid-template-columns: minmax(0, 1fr); }
+  .pf-xray-bar { grid-template-columns: minmax(0, 104px) minmax(20px, 1fr) minmax(58px, auto); gap: 6px; font-size: 11px; }
 }

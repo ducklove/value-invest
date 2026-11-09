@@ -55,11 +55,13 @@ async function pfSelectAccount(id) {
   _pfAccountEl('pfAccountSelect').value = PfStore.accountId;
   await pfLoadAccounts(true);
   await loadPortfolio({ force: true });
+  if (typeof pfLoadExposurePanel === 'function' && typeof pfActiveTab !== 'undefined' && pfActiveTab === 'performance') pfLoadExposurePanel();
 }
 
 function pfResetAccounts() {
   if (typeof pfResetCashReviews === 'function') pfResetCashReviews();
   if (typeof pfResetActivity === 'function') pfResetActivity();
+  if (typeof pfResetExposurePanel === 'function') pfResetExposurePanel();
   clearTimeout(PfAccounts.refreshTimer); PfAccounts.refreshTimer = null;
   PfAccounts.generation = (PfAccounts.generation || 0) + 1;
   PfAccounts.rows = [];
