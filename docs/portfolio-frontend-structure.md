@@ -13,7 +13,7 @@
 파일별 콘텐츠 해시(`?v=` sha1 앞 10자, `core/runtime.AssetManifest`)를 붙이고, 현재 해시와
 같은 요청만 `immutable`로 캐시한다(2026-09-30).
 
-- 심층 분석 진입: 수익 분해, 논거, 보고서, 리스크, 리밸런싱, 배당, 투자일지 7개.
+- 심층 분석 진입: 수익 분해, 세금 추정, 논거, 보고서, 리스크, 리밸런싱, 배당, 투자일지 8개.
 - 가계부 진입: `portfolio-household.js`.
 - 매매 기록 열기: `portfolio-trades.js` (`trades` 그룹). 현금·현물의 원자적 변경과 재시도 계약은 [매매 기록](portfolio-trades.md)을 따른다.
 - 개별 등록의 초기 잔고 입력·보유분 정리 선택 창: `portfolio-add-search.js`. 초안은 창 안에서만 유지하고 저장 전 보유 목록에 넣지 않는다. 매수·매도는 같은 `trades` 그룹으로 종목과 입력 기본값을 전달한다.
@@ -165,6 +165,8 @@ CSS: 생태계 공통 토큰 `./static/ecosystem/vc-tokens.css`가 분할 CSS �
 ## 투자 판단 도구
 
 `portfolio-attribution.js`(수익 분해·배당 분류)와 `portfolio-theses.js`(논거 CRUD·변경 이력)를 `portfolio-reports.js` 앞에 로드한다. 심층 분석 탭에서 각각 독립 요청으로 불러오며, 기간 보고서는 같은 수익 분해 렌더러를 재사용한다. 투자일지의 연결 버튼과 액션 보드의 논거 항목은 해당 카드로 이동한다. 상세 계약은 [investment-insights.md](investment-insights.md)에 정리한다.
+
+`portfolio-tax.js`(실현손익·세금 추정)는 같은 `portfolio-performance` 그룹에서 `portfolio-attribution.js` 바로 뒤에 온다. 입력 없이 `GET /api/portfolio/realized-tax`만 읽고, 액션 보드의 세금 항목은 `#pfTaxWrap` 카드로 이동한다. 상세 계약은 [realized-tax.md](realized-tax.md)에 정리한다.
 
 ## 화면 폭별 보유종목 표시 (2026-09-23)
 

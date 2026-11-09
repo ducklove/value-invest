@@ -251,7 +251,9 @@ async def delete_account(google_sub: str, account_id: str) -> None:
         # 보유 종목을 default 계좌로 재귀속 (orphan NULL 방지).
         held = await (await db.execute("SELECT 1 FROM account_holdings WHERE google_sub=? AND account_id=? LIMIT 1", (google_sub, account_id))).fetchone()
         linked = await (await db.execute("SELECT 1 FROM broker_account_links WHERE google_sub=? AND account_id=?", (google_sub, account_id))).fetchone()
-        history = await (await db.execute("SELECT 1 FROM broker_transactions WHERE google_sub=? AND account_id=? LIMIT 1", (google_sub, account_id))).fetchone()
+        history = await (await db.execute("SELECT 1 FROM broker_transactions WHERE google_sub=? AND account_id=? "
+                                          "UNION ALL SELECT 1 FROM broker_realized_pnl WHERE google_sub=? AND account_id=? LIMIT 1",
+                                          (google_sub, account_id, google_sub, account_id))).fetchone()
         if history:
             raise AccountError("증권사 거래내역이 있는 계좌는 기록 보존을 위해 삭제할 수 없습니다.")
         if held or linked:

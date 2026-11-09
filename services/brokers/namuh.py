@@ -19,6 +19,9 @@ MARKET_DATA_PATHS = frozenset({"/krstock/quote/v1/currentPrice", "/krfuture/quot
 # 해외주식 일별거래내역은 배당 입금 가져오기 전용 조회다(거래 일련번호·적용환율 포함).
 READ_PATHS = frozenset({"/n2/acctinfo", "/common/inquiry/v1/totalTransaction", "/gbstock/inquiry/v1/dailyTransaction",
                         "/krstock/inquiry/v1/realizedPnl",
+                        # 기간 손익 조회는 실현손익 원장 전용이다(services/brokers/realized_pnl.py).
+                        "/gbstock/inquiry/v1/periodPnl", "/gbstock/inquiry/v1/periodPnlDetail",
+                        "/krstock/inquiry/v1/tradingPnl", "/krstock/inquiry/v1/dailyTradingPnl",
                         "/krstock/inquiry/v1/balance", "/gbstock/inquiry/v1/balance",
                         "/gbstock/inquiry/v1/margin", "/krstock/quote/v1/currentPrice", "/krfuture/quote/v1/day",
                         "/krgold/inquiry/v1/goldDepositAndBalance", "/krfuture/inquiry/v1/balance",

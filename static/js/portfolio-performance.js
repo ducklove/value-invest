@@ -79,6 +79,8 @@ function pfSwitchTab(tab) {
   if (tab === 'performance') {
     loadPerformanceData();
     if (typeof pfLoadAttribution === 'function') pfLoadAttribution();
+    // 실현손익·세금 추정 카드 동일 패턴(portfolio-tax.js).
+    if (typeof pfLoadTaxPanel === 'function') pfLoadTaxPanel();
     if (typeof pfLoadTheses === 'function') pfLoadTheses();
     _loadAiModels();
     // 기간 투자 보고서 카드도 성과 탭에서만 lazy 로드(portfolio-reports.js).

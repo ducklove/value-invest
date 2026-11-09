@@ -1,4 +1,4 @@
-"""사용자별 수익 분해와 투자 논거 관리 API."""
+"""사용자별 수익 분해·세금 추정과 투자 논거 관리 API."""
 
 from datetime import date, timedelta
 from typing import Annotated, Literal
@@ -10,8 +10,8 @@ from pydantic import BaseModel, Field, StrictBool, field_validator, model_valida
 from deps import get_current_user
 from repositories import investment_insights as repo
 from repositories import journal
-from routes.response_models import AttributionResponse, ThesesResponse
-from services.portfolio import attribution, theses
+from routes.response_models import AttributionResponse, RealizedTaxResponse, ThesesResponse
+from services.portfolio import attribution, realized_tax, theses
 from services.portfolio.time_windows import today_kst_date
 
 router = APIRouter()
@@ -99,6 +99,12 @@ async def get_attribution(request: Request, start: date | None = Query(None), en
         return await attribution.build_attribution(user, beginning.isoformat(), ending.isoformat())
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/api/portfolio/realized-tax", response_model=RealizedTaxResponse, response_model_exclude_unset=True)
+async def get_realized_tax(request: Request):
+    """입력 없이 저장된 NH 원장으로 계산한다. 이 요청은 NH를 호출하지 않는다."""
+    return await realized_tax.build_summary(await owner(request))
 
 
 @router.post("/api/portfolio/income-events", status_code=201)

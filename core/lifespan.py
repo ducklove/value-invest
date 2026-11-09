@@ -192,6 +192,13 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
             broker_stop = asyncio.Event()
             tasks.append((asyncio.create_task(adapter.run(broker_stop), name=f"{adapter.definition.id}-accounts"), broker_stop))
 
+        # NH 실현손익 원장은 화면 입력 없이 채운다. 0이면 수집만 멈추고 저장된 원장 조회는 유지한다.
+        from services.brokers import realized_pnl
+        realized_interval = float(os.environ.get("NH_REALIZED_PNL_INTERVAL_S", str(realized_pnl.DEFAULT_INTERVAL_SECONDS)))
+        if realized_interval > 0:
+            realized_stop = asyncio.Event()
+            tasks.append((asyncio.create_task(realized_pnl.run_loop(realized_stop, interval_seconds=realized_interval), name="nh-realized-pnl"), realized_stop))
+
         sd_notify("READY=1")
         from services.quant.service import run_loop as run_quant
 

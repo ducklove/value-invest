@@ -74,6 +74,7 @@ def test_core_response_schemas_are_reachable_from_openapi():
         ("/api/portfolio/prev-day-snapshot", "get"), ("/api/portfolio/month-end-value", "get"),
         ("/api/portfolio/year-start-value", "get"), ("/api/portfolio/nav-history", "get"),
         ("/api/portfolio/intraday", "get"), ("/api/portfolio/attribution", "get"), ("/api/portfolio/theses", "get"),
+        ("/api/portfolio/realized-tax", "get"),
     ]:
         schema = spec["paths"][path][method]["responses"]["200"]["content"]["application/json"]["schema"]
         assert "$ref" in str(schema), path
