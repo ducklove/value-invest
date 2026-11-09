@@ -182,6 +182,7 @@ async function initApp() {
   //   /nps                   → 도구 허브의 국민연금 대시보드 (직접 URL, 메인 탭 아님)
   //   /insights              → 도구 허브의 인사이트 보드 (직접 URL, 실험)
   //   /screener              → 도구 허브의 밸류 스크리너 (직접 URL)
+  //   /opportunities         → 도구 허브의 기회 보드 (직접 URL)
   //   /?code=005930          → (기존 호환) 분석 탭 + 자동 분석
   //   /portfolio?focus=005930 → 포트폴리오 탭 + 그 보유 행으로 스크롤·강조
   //   /bonds?view=fx         → 채권·금리 화면의 해당 bond-mate 탭 (market-bond-mate.js)

@@ -237,13 +237,7 @@ function _sxlPct(v) {
 // 이 코드를 받지 않으면 서버가 준 url 을 그대로 쓴다.
 function _sxlToolLink(toolId, fallbackUrl) {
   const code = typeof activeStockCode !== 'undefined' && activeStockCode ? String(activeStockCode) : '';
-  const href = code && toolId && typeof ecoLinkHref === 'function' && typeof ecoStockPath === 'function'
-    && ecoStockPath(toolId, code) ? ecoLinkHref('tool', toolId, { code }) : null;
-  if (!href) return { href: _sxlSafeUrl(fallbackUrl), attrs: '' };
-  return {
-    href,
-    attrs: ` data-vc-tool="${escapeHtml(toolId)}" data-vc-link="tool" data-vc-code="${escapeHtml(code)}"`,
-  };
+  return signalToolLink(toolId, code, fallbackUrl);
 }
 
 // links = {preferred?, holding?} → valuation-card(링크) HTML 배열.

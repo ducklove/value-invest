@@ -444,6 +444,8 @@ async function renderResult(data) {
   loadBeta(data.stock_code);
   // 외부 분석 도구(우선주 괴리율/지주사 NAV) deep-link 카드 — 해당 시 표시.
   loadStockExternalLinks(data.stock_code);
+  // 종목 360° 수치 패널 — 형제 도구 신호를 입력 없이 모아 보여 준다(analysis-360.js).
+  if (typeof loadStock360 === 'function') loadStock360(data.stock_code);
   // 해외 DR(예탁증서) 환산가 — 해당 종목에 DR 이 매핑돼 있으면 카드로 표시.
   loadStockDr(data.stock_code);
   // 투자 일지 — 이 종목의 판단 기록 폼/타임라인(portfolio-journal.js).

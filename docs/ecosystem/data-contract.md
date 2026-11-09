@@ -141,8 +141,8 @@ Python과 JS가 같은 파일을 만든다(`generatedAt`만 다를 수 있다).
 설계 원칙은 "허브가 지금 쓰는 필드만, 그러나 허브가 원본 파일 없이 기존 기능을 전부 재현할 수 있을
 만큼"이다. 기준이 된 허브 소비자는 `services/ecosystem/external_tools.py`(인사이트 카드 `_summarize_*`, 종목 딥링크
 `_match_*`, 액션보드 `fetch_portfolio_signals`, ETF `fetch_etf_universe`/`etf_link_for`, 스팩
-`fetch_spac_data`), `services/portfolio/spac.py`(청산가치 지표), `static/js/market-bond-mate.js`
-(브라우저 금리·환율 병합)다. 크기는 실데이터 기준 전체 발행 시 추정치(압축 전)다.
+`fetch_spac_data`), `services/portfolio/spac.py`(청산가치 지표), `services/ecosystem/opportunities.py`
+(기회 보드·종목 360°), `static/js/market-bond-mate.js`(브라우저 금리·환율 병합)다. 크기는 실데이터 기준 전체 발행 시 추정치(압축 전)다.
 
 ### 6.1 holding_value (≈ 9 KB)
 
@@ -157,8 +157,10 @@ Python과 JS가 같은 파일을 만든다(`generatedAt`만 다를 수 있다).
 | `pairs[].code` | 6자리 | 지주사 종목코드 (`.KS` 제거) |
 | `pairs[].ratio, ratioChange` | number\|null | 보유가치/조정시총 %, 전일 대비 %p |
 | `pairs[].holdingValue, marketCap` | number\|null | 억원 |
+| `pairs[].ratioPct1y, ratioPct3y` | int\|null (선택) | 현재 `ratio` 이하인 표본 비율(%). 분포는 `ratioPctEnd`에서 끝나는 365일·1,095일이고 표본 30개 미만이면 null. holding_value 카드 칩과 같은 식 |
+| `pairs[].ratioPctEnd` | date\|null (선택) | 일봉 분포의 마지막 날짜. 일봉 작업이 실패하면 envelope `asOf`보다 오래될 수 있다 |
 
-허브 유도: TOP 카드 = `ratio`가 있는 행을 내림차순으로 N개. 종목 매칭 = `code`가 같은 **첫** 행이고, 그 행의 `ratio`가 null이면 매칭 없음(`_match_holding`과 같은 의미).
+3년 분포의 730일 이전 구간은 주간 다운샘플이라 근사치다(holding_value README). 허브 유도: TOP 카드 = `ratio`가 있는 행을 내림차순으로 N개. 종목 매칭 = `code`가 같은 **첫** 행이고, 그 행의 `ratio`가 null이면 매칭 없음(`_match_holding`과 같은 의미).
 
 ### 6.2 common_preferred_spread (≈ 10 KB)
 
@@ -173,6 +175,10 @@ Python과 JS가 같은 파일을 만든다(`generatedAt`만 다를 수 있다).
 | `pairs[].spread, spreadChange` | number\|null | 괴리율 %, %p |
 | `pairs[].commonPrice, preferredPrice` | number\|null | 원 |
 | `pairs[].date` | date\|null | 시세 기준일 |
+| `pairs[].spreadPct1y, spreadPct3y` | int\|null (선택) | 현재 `spread` 이하인 표본 비율(%). 분포는 `spreadPctEnd`에서 끝나는 365일·1,095일이고 표본 30개 미만이면 null. cps 카드와 같은 식 |
+| `pairs[].spreadPctEnd` | date\|null (선택) | `data/summary.json` `spreadPercentiles.date`(일봉 분포의 마지막 날짜) |
+| `pairs[].attractiveness` | number\|null (선택) | `data/summary.json` `attractiveness.total`, 0~100 |
+| `pairs[].commonAvgTradedValue20, preferredAvgTradedValue20` | number\|null (선택) | 최근 20거래일 평균 거래대금(원) |
 
 허브 유도: TOP 카드 = `spread` 내림차순. 단, 같은 `commonCode`에서는 괴리율이 가장 큰 우선주 하나만 남긴다. 종목 매칭 = `commonCode` 또는 `preferredCode`가 같은 첫 행.
 
@@ -241,6 +247,12 @@ Python과 JS가 같은 파일을 만든다(`generatedAt`만 다를 수 있다).
 | `summary` | `{totalValue, nav, count, todayPct, mtdPct, ytdPct, asOf}` | totalValue는 원 |
 | `allocation` | `{asOf, estimated, classes[{key, label, pct, target?}]}` \| null | 기금 자산배분(추정 현재 비중). `target`이 있으면 허브 상수보다 우선한다 |
 | `top[]` (≤20, 권장 10) | | `{code, name, weight, marketValue, changePct, ownershipPct, sector}`, weight 내림차순 |
+| `positionsAsOf` | date\|null (선택) | `weights`·`ownership`이 근거한 연말 공시 기준일(가격 기준일 아님) |
+| `weights` | `{code: pct}` (선택) | 전 보유 종목의 포트폴리오 비중 %(소수 3자리). 추정 수량 기반 |
+| `ownership` | `{code: pct}` (선택) | 공시 지분율 %(소수 2자리). 값이 없는 종목은 뺀다 |
+| `ownershipChange` | `{from, to, comparable, changes}`\|null (선택) | 최신 연말 아카이브 두 개의 지분율 차이. `changes`는 달라진 종목만 `{code: %p}`. 거의 모든 종목의 지분율이 같으면 원천이 같은 파일을 다시 낸 것으로 보고 `comparable: false`, `changes: {}` |
+
+`weights`·`ownership`을 합쳐 약 35 KB라 권장 크기(16 KB)는 넘지만 예산(64 KB) 안이다. 허브는 임의 종목의 국민연금 보유 여부를 답해야 해서 상위 N으로 줄일 수 없다.
 
 ### 6.8 bond-mate (≈ 10 KB, data/current.json 112 KB 대체)
 
@@ -281,9 +293,10 @@ Python과 JS가 같은 파일을 만든다(`generatedAt`만 다를 수 있다).
 2. **캐시**: `MemoryTTLCache` 300초. TTL이 만료되면 조건부 GET(`If-None-Match`/ETag, Pages가 지원)을 보낸다. 304 응답이면 TTL만 연장한다. 404·계약 위반은 **900초 음성 캐시**한다(그동안 summary를 다시 시도하지 않고 바로 레거시로 간다). 사이블링이 아직 summary를 발행하지 않은 동안 요청이 두 배로 늘지 않게 하기 위해서다. 허브 카드의 가격 의존 값은 별도 120초 캐시의 공유 시세로 갱신한다([linked-projects](../linked-projects.md#서버-쪽-외부-인사이트)).
 3. **변경 감지(선택)**: 워치독이나 폴러는 `version.json`만 받는다. `files["summary.json"]`이 캐시한 `contentHash`와 같으면 본문을 다시 받지 않는다.
 4. **stale-while-error**: 새로 받는 데 실패하면 마지막으로 성공한 envelope를 `stale: true`로 표시해 1일까지 쓴다.
-5. **신선도**: `asOf`가 도구별 허용치(예: 장중 도구 1거래일, buybacks 분기, all-about-gold 월)를 넘으면 UI에 "기준일" 경고를 붙인다. 판정 기준은 `generatedAt`이 아니라 `asOf`다. no-op 규칙 때문에 `generatedAt`은 갱신되지 않을 수 있다.
-6. 허브 응답 모양(`/api/external/insights`, `fetch_stock_links`, `fetch_portfolio_signals`, `fetch_spac_data`)은 바꾸지 않는다. §6의 "허브 유도"대로 summary를 기존 모양으로 바꿔 돌려준다.
+5. **신선도**: `asOf`가 도구별 허용치(`services/ecosystem/signals.py` `FRESHNESS`: cps·holding_value·spac-hunter 2거래일, eiayn 5거래일, buybacks·nps-tracker 460일)를 넘으면 UI에 "기준일" 경고를 붙인다. buybacks와 nps-tracker는 연말 공시 기준이라 다음 해 공시가 나올 때까지 정상이다. 판정 기준은 `generatedAt`이 아니라 `asOf`다. no-op 규칙 때문에 `generatedAt`은 갱신되지 않을 수 있다. 일봉 분포(`ratioPctEnd`·`spreadPctEnd`)는 5거래일 넘게 밀리면 경고하고 90일이 지나면 백분위를 쓰지 않는다.
+6. 허브 응답 모양(`/api/external/insights`, `fetch_stock_links`, `fetch_portfolio_signals`, `fetch_spac_data`)은 바꾸지 않는다. §6의 "허브 유도"대로 summary를 기존 모양으로 바꿔 돌려준다. `fetch_portfolio_signals`의 `severity` 값은 우선주·지주사에서 자기 3년 백분위 90 이상이면 `high`이고, 백분위를 쓸 수 없으면 기존 고정 임계값(괴리 50%, 보유가치/시총 150%)을 쓴다. 자사주(20%)와 김프는 자기 역사가 없어 고정값을 유지한다. 키와 `metric`은 그대로다.
 7. URL은 레지스트리(`config/ecosystem.json`)의 도구 `url`에서 만든다. `raw.githubusercontent.com`과 브랜치 이름은 쓰지 않는다.
+8. **선택 필드 폴백**: 기회 보드와 종목 360°는 §6의 선택 필드(`spreadPct3y`, `ratioPct3y`, `weights`)가 summary에 없으면 이미 공개된 파일(레지스트리 `dashboard-summary` = cps·holding_value `data/summary.json`, nps-tracker `current`)에서 같은 값을 만든다. 형제가 발행하기 전이나 summary를 끈 상태에서도 동작하기 위해서다. 이 파일이 실패하면 백분위만 빠지고 현재 값은 표시된다. 저장된 `pctile*` 값은 일봉 작업과 함께 멈추므로 쓰지 않고 현재 값으로 다시 계산한다.
 
 ## 8. no-op 규칙과 GitHub Actions
 

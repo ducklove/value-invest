@@ -88,7 +88,8 @@ GA4(`analytics.js`)를 쓴다.
 | buybacks `holding_snapshots.json` | 약 1.2 MB | summary 실패 시, 종목별 인덱스로 캐시 | 최신 보통주 비율 |
 | eiayn `etfs.json` | 약 9 MB | summary 실패 시, 6시간 | `universe` |
 | gold_gap `data.json` | 약 560 KB | Pages, 마지막 값만 캐시 | 자산 4개의 마지막 갭 |
-| nps-tracker `current.json` | 약 310 KB | summary 실패 시, 900초 | 요약·상위 N |
+| nps-tracker `current.json` | 약 310 KB | summary 실패 시, 900초 | 요약·상위 N. summary에 `weights`가 없으면 기회 보드·360°도 300초 주기로 읽는다 |
+| cps·holding_value `data/summary.json` | 약 410 KB·530 KB | summary에 백분위 선택 필드가 없을 때만, 300초 | 3년 분포·매력도·20일 평균 거래대금(data-contract §7.8) |
 | bond-mate `data/current.json` | 약 110 KB | 서버 900초 + 브라우저 직접 병합 | 금리·FX 최신값 |
 
 액션보드 신호·종목 링크·인사이트가 같은 형제 파일을 TTL 안에서 한 번만 받는다(`tests/test_external_tools.py`).

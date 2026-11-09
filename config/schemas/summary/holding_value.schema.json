@@ -23,13 +23,17 @@
           "ratio": {"$ref": "#/$defs/num", "description": "Holding value / adjusted market cap, %. Higher = deeper discount."},
           "ratioChange": {"$ref": "#/$defs/num"},
           "holdingValue": {"$ref": "#/$defs/num", "description": "억원"},
-          "marketCap": {"$ref": "#/$defs/num", "description": "억원"}
+          "marketCap": {"$ref": "#/$defs/num", "description": "억원"},
+          "ratioPct1y": {"$ref": "#/$defs/pct", "description": "Optional. Share of samples at or below the current ratio in the trailing 365 days ending at ratioPctEnd (dashboard chip rule: integer, at least 30 samples, else null)."},
+          "ratioPct3y": {"$ref": "#/$defs/pct", "description": "Optional. Same for 1,095 days. The older part of the window is weekly-downsampled, so it is an approximation."},
+          "ratioPctEnd": {"type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "Optional. Last date of the daily distribution. It can lag envelope asOf when the daily job fails; the current ratio is always the snapshot value."}
         }
       }
     }
   },
   "$defs": {
     "num": {"type": ["number", "null"]},
+    "pct": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
     "krCode": {"type": "string", "pattern": "^[0-9A-Z]{6}$"}
   }
 }

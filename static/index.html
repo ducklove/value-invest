@@ -215,6 +215,8 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
       <div class="personalization-status" id="preferenceStatus" role="status" aria-live="polite"></div>
     </div>
     <div class="coverage" id="coverageNote"></div>
+    <!-- 종목 360°: 형제 도구 신호의 수치·기준일. 해당 도구가 없으면 숨는다(analysis-360.js). -->
+    <section class="stock360" id="stock360Panel" aria-labelledby="stock360Title" hidden></section>
 
     <!-- 위키 Q&A·투자 일지는 매번 쓰는 요소가 아니라 밸류에이션 차트보다 아래로
          우선순위를 낮췄다(UX 감사 P2⑦) — <details> 는 JS 없이도 접힘 상태로 시작하고,
@@ -861,6 +863,12 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
         </p>
       </div>
       <div class="lab-grid">
+        <a class="lab-card" href="/opportunities" onclick="event.preventDefault(); switchView('opportunities');">
+          <span class="lab-pill">교차 도구 · 입력 없음</span>
+          <h3>기회 보드</h3>
+          <p>우선주·지주사·스팩·자사주 신호를 같은 점수로 모아 보유 여부와 무관하게 순위를 매깁니다. 후보마다 거래대금과 기준일을 함께 보여 줍니다.</p>
+          <strong>열기 →</strong>
+        </a>
         <a class="lab-card" href="/quant" onclick="event.preventDefault(); switchView('quant');">
           <span class="lab-pill">전략 연구 · 신호 관찰</span>
           <h3>퀀트 운용실</h3>
@@ -907,6 +915,35 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
         </div>
         <div class="lab-eco-grid" id="labEcoGrid"></div>
       </section>
+    </div>
+  </div>
+
+  <div id="opportunitiesView" style="display:none;">
+    <div class="opportunity-page">
+      <div class="lab-inline-banner">
+        <span>도구</span>
+        <strong>형제 도구 신호를 같은 점수로 모은 순위입니다. 입력 없이 동작합니다.</strong>
+        <a href="/labs" onclick="event.preventDefault(); switchView('labs');">도구로 돌아가기</a>
+      </div>
+      <h2>기회 보드</h2>
+      <details class="opportunity-method">
+        <summary>점수 읽는 법</summary>
+        <p>점수는 0~100입니다. 우선주 괴리와 지주사 할인은 자기 3년 분포 안의 위치이고, 스팩·자사주·국민연금은 같은 도구 종목군 안의 순위입니다. 같은 10점 구간에서는 자기 분포 기준을 앞에 두고, 점수 80 이상만 도구별 상위 12개까지 보여 줍니다. 순위는 보유 여부와 무관합니다.</p>
+      </details>
+      <p class="opportunity-disclaimer">점수는 과거 분포나 종목군 안의 위치일 뿐 수익을 뜻하지 않습니다. 거래비용을 추정할 수 없어 비용을 뺀 수치는 표시하지 않습니다.</p>
+      <div class="opportunity-tools" id="opportunityTools" aria-label="도구별 데이터 상태"></div>
+      <div class="opportunity-controls">
+        <div class="opportunity-filters" id="opportunityFilters" role="group" aria-label="도구 필터"></div>
+        <label class="opportunity-min-liquidity">거래대금
+          <select id="opportunityMinLiquidity">
+            <option value="0">전체</option>
+            <option value="100000000">1억 이상</option>
+            <option value="1000000000">10억 이상</option>
+            <option value="10000000000">100억 이상</option>
+          </select>
+        </label>
+      </div>
+      <div id="opportunityBoard" aria-live="polite"></div>
     </div>
   </div>
 
@@ -1268,6 +1305,7 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
 <script src="./js/analysis-charts.js" defer></script>
 <script src="./js/analysis-filings.js" defer></script>
 <script src="./js/analysis-valuation.js" defer></script>
+<script src="./js/analysis-360.js" defer></script>
 <script src="./js/analysis.js" defer></script>
 <script src="./js/stock-alerts.js" defer></script>
 <script src="./js/market-bond-mate.js" defer></script>
@@ -1444,6 +1482,7 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
 <script src="./js/portfolio-events.js" defer></script>
 <script data-feature="insights" data-src="./js/insights.js"></script>
 <script data-feature="screener" data-src="./js/screener.js"></script>
+<script data-feature="opportunities" data-src="./js/opportunity-board.js"></script>
 <script data-feature="quant" data-src="./js/quant-research.js"></script>
 <script data-feature="quant" data-src="./js/quant-scanner.js"></script>
 <script data-feature="quant" data-src="./js/quant-basis.js"></script>

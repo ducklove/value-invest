@@ -323,3 +323,62 @@
 /* bond-mate 임베드가 vc:height/구 height 로 높이를 알려 오면(ecoApplyFrameHeight) 그 높이를 따른다 —
    고정 높이·최소 높이를 풀어 이중 스크롤을 없앤다. */
 .bonds-frame.vc-auto-height { min-height: 0; }
+
+/* 기회 보드 (/opportunities) — opportunity-board.js */
+.opportunity-page { max-width: 1120px; margin: 0 auto; padding: 12px 0 40px; }
+.opportunity-page h2 { font-size: 24px; margin: 14px 0 8px; }
+.opportunity-method, .opportunity-disclaimer { margin: 0 0 8px; max-width: 780px; font-size: 13px; line-height: 1.65; color: var(--text-secondary); }
+.opportunity-method summary { width: fit-content; font-weight: 600; color: var(--primary); cursor: pointer; }
+.opportunity-method p { margin: 6px 0 0; }
+.opportunity-disclaimer { color: var(--text); font-weight: 600; }
+.opportunity-tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin: 14px 0; }
+.opportunity-tool { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); font-size: 12px; color: var(--text-secondary); }
+.opportunity-tool strong { font-size: 13px; color: var(--text); }
+.opportunity-tool p { margin: 4px 0 0; line-height: 1.45; color: var(--warning); }
+.opportunity-tool.is-warning { border-color: color-mix(in srgb, var(--warning) 45%, var(--border)); }
+.opportunity-tool.is-failed { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+.opportunity-tool.is-failed p { color: var(--danger); }
+.opportunity-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 10px; }
+.opportunity-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.opportunity-filter { min-height: 32px; padding: 4px 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; }
+.opportunity-filter.is-active { border-color: var(--primary); background: var(--primary); color: #fff; }
+.opportunity-filter:focus-visible { outline: none; box-shadow: var(--ring); }
+.opportunity-min-liquidity { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.opportunity-min-liquidity select { min-height: 32px; padding: 2px 8px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--input-bg); color: var(--text); font-size: 12px; }
+.opportunity-table-wrap { border: 1px solid var(--border); border-radius: var(--radius-lg); overflow-x: auto; background: var(--surface); }
+.opportunity-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.opportunity-table th, .opportunity-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.opportunity-table th { font-size: 12px; font-weight: 700; color: var(--text-secondary); white-space: nowrap; }
+.opportunity-table tbody tr:last-child td { border-bottom: none; }
+.opportunity-table small { display: block; margin-top: 2px; font-size: 11px; font-weight: 400; color: var(--text-secondary); }
+.opportunity-rank { font-weight: 700; font-variant-numeric: tabular-nums; }
+.opportunity-stock { min-width: 220px; }
+.opportunity-stock > a[data-ob-stock] { font-weight: 700; color: var(--text); text-decoration: none; }
+.opportunity-stock > a[data-ob-stock]:hover { color: var(--primary); text-decoration: underline; }
+.opportunity-held { display: inline-block; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--primary) 14%, transparent); color: var(--primary); font-size: 11px; font-weight: 700; }
+.opportunity-tool-link { display: inline-block; margin-top: 4px; font-size: 12px; color: var(--primary); text-decoration: none; }
+.opportunity-tool-link:hover { text-decoration: underline; }
+.opportunity-contexts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.opportunity-context { padding: 1px 7px; border-radius: 999px; background: var(--surface-muted); font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
+.opportunity-warning { margin: 6px 0 0; font-size: 12px; line-height: 1.45; color: var(--warning); }
+.opportunity-score strong { display: block; font-size: 20px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.opportunity-metrics { min-width: 170px; }
+.opportunity-metric { display: block; }
+.opportunity-metric + .opportunity-metric { margin-top: 6px; }
+.opportunity-metric strong { font-variant-numeric: tabular-nums; }
+.opportunity-liquidity, .opportunity-asof { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.opportunity-liquidity.is-low { color: var(--warning); font-weight: 600; }
+.opportunity-empty, .opportunity-footnote { margin: 12px 0; font-size: 13px; color: var(--text-secondary); }
+@media (max-width: 720px) {
+  .opportunity-tools { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .opportunity-tool { padding: 8px 10px; }
+  .opportunity-tool.is-warning, .opportunity-tool.is-failed { grid-column: 1 / -1; }
+  .opportunity-table thead { display: none; }
+  .opportunity-table, .opportunity-table tbody, .opportunity-table tr, .opportunity-table td { display: block; width: 100%; }
+  .opportunity-table tr { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .opportunity-table tbody tr:last-child { border-bottom: none; }
+  .opportunity-table td { padding: 4px 0; border-bottom: none; white-space: normal; }
+  .opportunity-table td[data-label]:not(.opportunity-stock):not(.opportunity-rank)::before { content: attr(data-label); display: block; font-size: 11px; font-weight: 700; color: var(--text-secondary); }
+  .opportunity-rank::before { content: "순위 "; font-size: 11px; font-weight: 700; color: var(--text-secondary); }
+  .opportunity-stock, .opportunity-metrics { min-width: 0; }
+}

@@ -181,3 +181,17 @@ def test_analysis_header_has_ecosystem_chip_slot_and_url_rewrite():
     assert "history.replaceState({ pfView: 'analysis' }, '', next)" in analysis
     css = (CSS / "analysis.css").read_text(encoding="utf-8")
     assert ".analysis-eco-links[hidden] { display: none; }" in css
+
+
+def test_stock_360_panel_sits_below_the_valuation_grid_and_loads_with_the_stock():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    analysis = (JS / "analysis.js").read_text(encoding="utf-8")
+    panel = (JS / "analysis-360.js").read_text(encoding="utf-8")
+    css = (CSS / "analysis.css").read_text(encoding="utf-8")
+
+    assert '<section class="stock360" id="stock360Panel" aria-labelledby="stock360Title" hidden></section>' in html
+    assert html.index('id="coverageNote"') < html.index('id="stock360Panel"') < html.index('id="wikiQaDetails"')
+    assert "if (typeof loadStock360 === 'function') loadStock360(data.stock_code);" in analysis
+    assert "async function loadStock360(" in panel
+    assert "/api/external/stock/${encodeURIComponent(stockCode)}/360" in panel
+    assert ".stock360[hidden] { display: none; }" in css

@@ -58,4 +58,7 @@ def _reset_short_lived_quote_caches():
     foreign = sys.modules.get("services.portfolio.foreign")
     if foreign is not None:
         foreign.reset_resolution_state()
+    opportunities = sys.modules.get("services.ecosystem.opportunities")
+    if opportunities is not None:
+        opportunities.reset()
     yield

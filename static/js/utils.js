@@ -673,6 +673,43 @@ function fmtPct(n, signed = true, decimals = 2) {
   return prefix + n.toFixed(decimals) + '%';
 }
 
+// 형제 도구 신호의 수치 — 기회 보드(opportunity-board.js)·종목 360°(analysis-360.js) 공용.
+// 서버(services/ecosystem/signals.py metric)가 {label, value, unit} 로 준다. 모르는 값은 서버가 뺀다.
+function fmtSignalMetric(item) {
+  if (!item) return '-';
+  if (item.unit === 'text') return String(item.value ?? '-');
+  const n = Number(item.value);
+  if (item.value === null || item.value === undefined || !Number.isFinite(n)) return '-';
+  if (item.unit === '%') return fmtPct(n, false, n !== 0 && Math.abs(n) < 1 ? 3 : 2);
+  if (item.unit === '%p') return `${n > 0 ? '+' : ''}${n.toFixed(2)}%p`;
+  if (item.unit === 'pctile') return String(Math.round(n));
+  if (item.unit === '원') return `${fmtKrw(n)}원`;
+  return `${n.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}${item.unit || ''}`;
+}
+
+// 후보의 거래대금 문구. 값을 모르면 0이 아니라 미확인으로 표시한다.
+function fmtSignalLiquidity(liquidity) {
+  const value = liquidity ? liquidity.value : null;
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '거래대금 미확인';
+  const basis = liquidity.basis === 'avg20d' ? '20일 평균' : '당일 누적';
+  return `${basis} ${fmtKrw(Number(value))}원`;
+}
+
+// 도구 딥링크. 레지스트리(ecosystem-links.js)가 이 코드를 받으면 지금 테마·보유 경유 링크를 만들고,
+// data-vc-* 는 테마 전환 때 ecoRefreshLinks 가 href 를 다시 계산하는 표식이다. 아니면 서버가 준 URL 을 쓴다.
+function signalToolLink(toolId, code, fallbackUrl) {
+  const href = code && toolId && typeof ecoLinkHref === 'function' && typeof ecoStockPath === 'function'
+    && ecoStockPath(toolId, code) ? ecoLinkHref('tool', toolId, { code }) : null;
+  if (href) {
+    return {
+      href,
+      attrs: ` data-vc-tool="${escapeHtml(toolId)}" data-vc-link="tool" data-vc-code="${escapeHtml(code)}"`,
+    };
+  }
+  const url = String(fallbackUrl || '');
+  return { href: /^https?:\/\//.test(url) ? portfolioIntegrationHref(url) : '#', attrs: '' };
+}
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
