@@ -16,6 +16,8 @@ Behavior is preserved verbatim from the original router implementation.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import Any
 
 from domain.broker_assets import is_futures_contract, is_futures_value
@@ -34,9 +36,17 @@ from services.portfolio.identifiers import (
     is_special_asset as _is_special_asset,
 )
 
+logger = logging.getLogger(__name__)
+
 # How fresh a cached WebSocket quote must be to satisfy a quote request before
 # falling back to a REST/polling fetch.
 WS_QUOTE_MAX_AGE_SECONDS = 90
+
+#: 시세가 존재하지 않는 참조용 행 (지수/환율). 보유가 아니므로 미확보로 세지 않는다.
+NON_QUOTABLE_PREFIXES = ("IDX_", "FX_")
+
+_COMPLETE_QUOTES_CONCURRENCY = 2
+_COMPLETE_QUOTES_ITEM_TIMEOUT = 20.0
 
 
 async def fetch_cash_quote(stock_code: str) -> dict:
@@ -122,6 +132,54 @@ async def fetch_quote(
 
 def cached_quote_for_code(code: str) -> dict:
     return stock_quotes.stock_to_quote(stock_quotes.get_stock_cached(code, allow_stale=False))
+
+
+async def complete_quotes(codes: list[str]) -> dict[str, dict]:
+    """웹의 /api/asset-quotes 와 같은 순서로 시세를 채운다.
+
+    국내 벌크 조회 → 개별 조회 → stale 캐시 폴백. 서버에서 평가액을 접는 호출부
+    (기기 요약, X-Ray)가 웹 화면과 같은 금액을 내도록 한 곳에 둔다.
+    """
+    results: dict[str, dict] = {}
+    domestic = [c for c in codes if _is_korean_stock(c)]
+    if domestic:
+        try:
+            results.update(
+                await asyncio.wait_for(
+                    stock_quotes.get_bulk_quote_snapshots(domestic), timeout=_COMPLETE_QUOTES_ITEM_TIMEOUT
+                )
+            )
+        except Exception as exc:
+            logger.warning("complete_quotes: 벌크 시세 실패, 개별 조회로 폴백: %s", exc)
+
+    remaining = [c for c in codes if not results.get(c)]
+    if not remaining:
+        return results
+
+    sem = asyncio.Semaphore(_COMPLETE_QUOTES_CONCURRENCY)
+
+    async def one(code: str) -> tuple[str, dict]:
+        if code.startswith(NON_QUOTABLE_PREFIXES):
+            return code, {}
+        try:
+            async with sem:
+                quote = await asyncio.wait_for(
+                    fetch_quote(code), timeout=_COMPLETE_QUOTES_ITEM_TIMEOUT
+                )
+            if quote:
+                return code, quote
+        except Exception as exc:
+            logger.warning("complete_quotes: %s 시세 실패: %s", code, exc)
+        # 낡은 값이라도 있으면 쓴다 — 빈 값으로 두면 그 종목이 총액에서 통째로
+        # 빠져 화면의 총 평가액이 조용히 작아진다.
+        stale = stock_quotes.stock_to_quote(stock_quotes.get_stock_cached(code, allow_stale=True))
+        if stale:
+            stale["_stale"] = True
+        return code, stale or {}
+
+    for code, quote in await asyncio.gather(*(one(c) for c in remaining)):
+        results[code] = quote
+    return results
 
 
 async def enrich_with_cached_quotes(items: list[dict]) -> list[dict]:

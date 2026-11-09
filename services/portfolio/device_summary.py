@@ -32,15 +32,13 @@
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import date, timedelta
 
 from repositories import market_brief as market_brief_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
-from services import stock_quotes
-from services.portfolio import identifiers, quote_service, time_windows
+from services.portfolio import quote_service, time_windows
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +48,7 @@ DEFAULT_TOP_N = 12
 #: 화면 아래쪽 '움직인 종목' 칸에 들어가는 최대 행 수.
 DEFAULT_MOVERS_N = 12
 
-#: 시세가 존재하지 않는 참조용 행 (지수/환율). 보유가 아니므로 미확보로 세지 않는다.
-NON_QUOTABLE_PREFIXES = ("IDX_", "FX_")
+NON_QUOTABLE_PREFIXES = quote_service.NON_QUOTABLE_PREFIXES
 
 #: 그룹이 지정되지 않은 종목이 모이는 이름.
 UNGROUPED = "기타"
@@ -61,9 +58,6 @@ UNGROUPED = "기타"
 MARKET_BRIEF_SUB = "public"
 #: 기기 화면의 코멘트 한 칸을 쓰는 재료다. 원문을 통째로 실어 보낼 이유가 없다.
 MARKET_BRIEF_CHARS = 1800
-
-_QUOTE_CONCURRENCY = 2
-_QUOTE_ITEM_TIMEOUT = 20.0
 
 
 def _safe_float(value) -> float | None:
@@ -201,50 +195,6 @@ def _movers(rows: list[dict], limit: int) -> list[dict]:
     ]
 
 
-async def _complete_quotes(codes: list[str]) -> dict[str, dict]:
-    """웹의 /api/asset-quotes 와 같은 순서로 시세를 채운다."""
-    results: dict[str, dict] = {}
-    domestic = [c for c in codes if identifiers.is_korean_stock(c)]
-    if domestic:
-        try:
-            results.update(
-                await asyncio.wait_for(
-                    stock_quotes.get_bulk_quote_snapshots(domestic), timeout=_QUOTE_ITEM_TIMEOUT
-                )
-            )
-        except Exception as exc:
-            logger.warning("device summary: 벌크 시세 실패, 개별 조회로 폴백: %s", exc)
-
-    remaining = [c for c in codes if not results.get(c)]
-    if not remaining:
-        return results
-
-    sem = asyncio.Semaphore(_QUOTE_CONCURRENCY)
-
-    async def one(code: str) -> tuple[str, dict]:
-        if code.startswith(NON_QUOTABLE_PREFIXES):
-            return code, {}
-        try:
-            async with sem:
-                quote = await asyncio.wait_for(
-                    quote_service.fetch_quote(code), timeout=_QUOTE_ITEM_TIMEOUT
-                )
-            if quote:
-                return code, quote
-        except Exception as exc:
-            logger.warning("device summary: %s 시세 실패: %s", code, exc)
-        # 낡은 값이라도 있으면 쓴다 — 빈 값으로 두면 그 종목이 총액에서 통째로
-        # 빠져 화면의 총 평가액이 조용히 작아진다.
-        stale = stock_quotes.stock_to_quote(stock_quotes.get_stock_cached(code, allow_stale=True))
-        if stale:
-            stale["_stale"] = True
-        return code, stale or {}
-
-    for code, quote in await asyncio.gather(*(one(c) for c in remaining)):
-        results[code] = quote
-    return results
-
-
 async def _market_brief() -> dict | None:
     """오늘(없으면 어제) 만들어진 시황 브리프. **여기서 새로 만들지는 않는다.**
 
@@ -357,7 +307,7 @@ async def build_summary(
     if not items:
         return _empty_summary()
 
-    quotes = await _complete_quotes([item["stock_code"] for item in items])
+    quotes = await quote_service.complete_quotes([item["stock_code"] for item in items])
 
     total_value = 0.0
     unpriced = 0
