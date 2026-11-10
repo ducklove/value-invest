@@ -127,6 +127,8 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                 now = datetime.now(timezone.utc).isoformat()
                 await broker_cash_reviews.observe(db, user, current, rows, previous, fx_rates=review_fx,
                                                   trades=trades, settling=review_trades)
+                if isinstance(entries, activity.ActivityBatch):
+                    await broker_cash_reviews.reconcile_related(db, user)
                 created = {r["stock_code"]: r["created_at"] for r in previous}
                 await db.execute("DELETE FROM account_holdings WHERE google_sub=? AND account_id=?", (user, aid))
                 for row in rows:

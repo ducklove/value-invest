@@ -54,6 +54,10 @@ async def store_evidence(db, user: str, link: dict, batch):
     for row in batch.cash_summaries:
         await db.execute("INSERT INTO broker_cash_review_evidence VALUES (?,?,?,?,?,?,?,?)",
                          (user, link["account_id"], fp, row["booked_date"], row["date"], row["currency"], row["kind"], row["amount"]))
+        if row.get("parts"):
+            await db.execute("INSERT INTO broker_cash_review_evidence_details VALUES (?,?,?,?,?,?,?,?)",
+                             (user, link["account_id"], fp, row["booked_date"], row["date"], row["currency"], row["kind"],
+                              json.dumps(row["parts"])))
 
 
 async def store_trades(db, user: str, link: dict, rows: list[dict]):
@@ -62,6 +66,48 @@ async def store_trades(db, user: str, link: dict, rows: list[dict]):
         await db.execute("INSERT INTO broker_cash_review_evidence VALUES (?,?,?,?,?,?,?,?) "
                          "ON CONFLICT DO UPDATE SET amount=excluded.amount",
                          (user, link["account_id"], _fingerprint(link), row["booked_date"], row["date"], row["currency"], row["kind"], row["amount"]))
+
+
+async def _transfer_sources(db, user: str) -> dict[tuple, int]:
+    """양쪽의 명시적 대체 입출금 원장과 유일한 관측 구간을 대조한다."""
+    sources = await (await db.execute(
+        "SELECT e.*,d.parts_json,l.provider,l.account_fingerprint,l.environment,l.product,l.include_overseas "
+        "FROM broker_cash_review_evidence e "
+        "JOIN broker_cash_review_evidence_details d USING(google_sub,account_id,fingerprint,booked_date,date,currency,kind) "
+        "JOIN broker_cash_review_state s USING(google_sub,account_id,fingerprint) "
+        "JOIN broker_account_links l USING(google_sub,account_id) "
+        "WHERE e.google_sub=? AND e.kind IN ('transfer_in','transfer_out') AND l.provider='namuh' "
+        "AND l.environment='live' AND l.last_sync_at IS NOT NULL",
+        (user,))).fetchall()
+    observations = await (await db.execute(
+        "SELECT r.* FROM broker_cash_reviews r JOIN broker_cash_review_state s USING(google_sub,account_id,fingerprint) "
+        "WHERE r.google_sub=?", (user,))).fetchall()
+    groups = defaultdict(list)
+    for source in sources:
+        if source["fingerprint"] != _fingerprint(dict(source)):
+            continue
+        parts = json.loads(source["parts_json"])
+        for index, part in enumerate(parts):
+            amount = _decimal(part["amount"])
+            if not part.get("party") or not amount:
+                continue
+            matches = [row for row in observations if row["account_id"] == source["account_id"]
+                       and row["currency"] == source["currency"]
+                       and row["from_at"][:10] <= source["date"] <= row["to_at"][:10]
+                       and _decimal(row["amount"]) - _decimal(row["trade_amount"]) == amount]
+            if matches:
+                key = (source["account_id"], source["booked_date"], source["date"], source["currency"], source["kind"], index)
+                groups[source["date"], source["currency"], abs(amount), part["party"]].append((key, amount, matches))
+    verified = {}
+    for candidates in groups.values():
+        if len(candidates) != 2:
+            continue
+        (left, amount, before), (right, opposite, after) = candidates
+        overlaps = [(a, b) for a in before for b in after
+                    if max(a["from_at"], b["from_at"]) <= min(a["to_at"], b["to_at"])]
+        if left[0] != right[0] and amount == -opposite and len(overlaps) == 1:
+            verified[left], verified[right] = overlaps[0][0]["id"], overlaps[0][1]["id"]
+    return verified
 
 
 async def _evidence(db, user: str, aid: str, fp: str) -> dict:
@@ -84,16 +130,30 @@ async def _evidence(db, user: str, aid: str, fp: str) -> dict:
         result[str(row["id"])] = {"date": data["date"], "effects": effects}
         if effects:
             ledger_groups.add((data["date"], data["currency"], kind))
-    summaries = await (await db.execute("SELECT * FROM broker_cash_review_evidence WHERE google_sub=? AND account_id=? AND fingerprint=?",
+    summaries = await (await db.execute("SELECT e.*,d.parts_json FROM broker_cash_review_evidence e "
+                                       "LEFT JOIN broker_cash_review_evidence_details d USING(google_sub,account_id,fingerprint,booked_date,date,currency,kind) "
+                                       "WHERE google_sub=? AND account_id=? AND fingerprint=?",
                                        (user, aid, fp))).fetchall()
+    transfers = await _transfer_sources(db, user) if any(row["kind"].startswith("transfer_") for row in summaries) else {}
     previous_mmw = {}
     for row in sorted(summaries, key=lambda row: (row["date"], row["booked_date"], row["kind"])):
         if row["kind"] in {"trade_buy", "trade_sell", "trade_charges"} and is_trading_day(date.fromisoformat(row["date"])) is not True:
             continue  # 휴장일 조회에서 전 거래일 합계가 반복된 기존 자료도 사용하지 않는다.
-        if (row["date"], row["currency"], row["kind"]) in ledger_groups:
+        ledger_kind = "interest" if row["kind"] == "foreign_interest" else row["kind"]
+        if (row["date"], row["currency"], ledger_kind) in ledger_groups:
             continue  # 같은 수입이 기존 확정 원장에도 있으면 합계로 다시 설명하지 않는다.
         key = ":".join(("summary", row["booked_date"], row["date"], row["currency"], row["kind"]))
+        parts = json.loads(row["parts_json"]) if row["parts_json"] else []
+        if row["kind"].startswith("transfer_") and (not parts or not all(
+                (aid, row["booked_date"], row["date"], row["currency"], row["kind"], index) in transfers
+                for index in range(len(parts)))):
+            continue
+        if row["kind"].startswith("transfer_"):
+            for index, part in enumerate(parts):
+                part["review_id"] = transfers[aid, row["booked_date"], row["date"], row["currency"], row["kind"], index]
         result[key] = {"date": row["date"], "effects": {row["currency"]: row["amount"]}, "summary": True}
+        if parts:
+            result[key]["parts"] = parts
         if row["kind"] == "mmw_interest":
             previous = previous_mmw.get(row["currency"])
             # MMW는 휴일 평가이자를 다음 상환일에 합산한다. 원문 금액을 날짜별로 추정 배분하지 않는다.
@@ -103,7 +163,82 @@ async def _evidence(db, user: str, aid: str, fp: str) -> dict:
     return result
 
 
-def _mmw_allocations(rows, pools: dict, evidence: dict) -> dict:
+def _source_allocations(rows, pools: dict, evidence: dict) -> tuple[dict, dict]:
+    """검증된 개별 금액(연속 행의 합 포함)과 관측 전액이 일치할 때만 먼저 배정한다."""
+    allocations = {}
+    proofs = {}
+    for key, original in list(pools.items()):
+        if key[2].endswith(":mmw_interest") or not evidence[key[2]].get("parts"):
+            continue
+        source_parts = evidence[key[2]]["parts"]
+        parts = [_decimal(part["amount"]) for part in source_parts]
+        # 추적 시작 전 금액은 일별 합계의 앞부분에서만 제거한다. 중간 조각을 임의로 고르지 않는다.
+        before = sum(parts, Decimal(0)) - original
+        offset = 0
+        while offset < len(parts) and before and parts[offset] * before > 0 and abs(parts[offset]) <= abs(before):
+            before -= parts[offset]
+            offset += 1
+        pools[key] = Decimal(0)  # 남은 개별 근거를 다른 방향 변동과 순액으로 섞지 않는다.
+        if before or not original or len(parts) > 200:
+            continue
+        pending = {index: parts[index] for index in range(offset, len(parts))}
+        def compatible(row, indices):
+            return all(source_parts[index].get("review_id", row["id"]) == row["id"] for index in indices)
+        def proof(indices):
+            return {"key": key[2], "indices": list(indices),
+                    "parts": [{k: v for k, v in source_parts[index].items() if k != "review_id"} for index in indices]}
+        for row in rows:
+            saved = json.loads(row["source_json"])
+            indices = saved.get("indices", [])
+            if (row["id"] not in allocations and saved.get("key") == key[2] and indices
+                    and all(index in pending for index in indices) and saved == proof(indices)
+                    and row["currency"] == key[1] and compatible(row, indices)
+                    and sum((pending[index] for index in indices), Decimal(0)) == _decimal(row["amount"]) - _decimal(row["trade_amount"])):
+                allocations[row["id"]] = sum(pending.pop(index) for index in indices)
+                proofs[row["id"]] = saved
+        while pending:
+            proposals = defaultdict(list)
+            for start in pending:
+                total = Decimal(0)
+                for end in range(start, len(parts)):
+                    if end not in pending:
+                        break
+                    total += pending[end]
+                    proposals[total].append(tuple(range(start, end + 1)))
+            progress = False
+            for amount, ranges in proposals.items():
+                if not amount:
+                    continue
+                if len(ranges) > 1:
+                    # 같은 금액의 원문과 관측이 여러 건이어도 양쪽 건수가 같아야 전부 확인한다.
+                    matches = [row for row in rows if row["id"] not in allocations and row["currency"] == key[1]
+                               and row["from_at"][:10] <= key[0] <= row["to_at"][:10]
+                               and _decimal(row["amount"]) - _decimal(row["trade_amount"]) == amount]
+                    if (not all(len(indices) == 1 for indices in ranges) or len(matches) != len(ranges)
+                            or not all(compatible(row, indices) for row, indices in zip(matches, ranges))):
+                        continue
+                    for row, indices in zip(matches, ranges):
+                        allocations[row["id"]], proofs[row["id"]] = amount, proof(indices)
+                        del pending[indices[0]]
+                    progress = True
+                    break
+                matches = [row for row in rows if row["id"] not in allocations and row["currency"] == key[1]
+                           and row["from_at"][:10] <= key[0] <= row["to_at"][:10]
+                           and compatible(row, ranges[0])
+                           and _decimal(row["amount"]) - _decimal(row["trade_amount"]) == amount]
+                if len(matches) == 1:
+                    allocations[matches[0]["id"]] = amount
+                    proofs[matches[0]["id"]] = proof(ranges[0])
+                    for index in ranges[0]:
+                        del pending[index]
+                    progress = True
+                    break
+            if not progress:
+                break
+    return allocations, proofs
+
+
+def _mmw_allocations(rows, pools: dict, evidence: dict, receipts: dict) -> dict:
     """MMW 상환 사이의 순수 입금 관측 합계가 API 평가이자와 정확히 맞을 때만 배정한다."""
     allocations = {}
     residuals = {row["id"]: _decimal(row["amount"]) - _decimal(row["trade_amount"]) for row in rows}
@@ -120,7 +255,7 @@ def _mmw_allocations(rows, pools: dict, evidence: dict) -> dict:
         candidates = [row for row in rows if row["currency"] == key[1] and 0 < residuals[row["id"]] <= amount
                       and (not row["positions_changed"] or row["trade_amount"] is not None)
                       and start <= row["to_at"][:10] <= key[0]
-                      and row["id"] not in allocations and row["id"] not in other_receipts]
+                      and row["id"] not in allocations and row["id"] not in other_receipts and row["id"] not in receipts]
         if amount > 0 and sum((residuals[row["id"]] for row in candidates), Decimal(0)) == amount:
             allocations.update({row["id"]: residuals[row["id"]] for row in candidates})
     return allocations
@@ -207,21 +342,25 @@ async def _reconcile(db, user: str, aid: str, state: dict, evidence: dict, now: 
     rows = await (await db.execute(
         "SELECT * FROM broker_cash_reviews WHERE google_sub=? AND account_id=? AND fingerprint=? ORDER BY id",
         (user, aid, state["fingerprint"]))).fetchall()
-    mmw = _mmw_allocations(rows, pools, evidence)
+    receipts, proofs = _source_allocations(rows, pools, evidence)
+    mmw = {**receipts, **_mmw_allocations(rows, pools, evidence, receipts)}
     # MMW 공제·분배금 등 정확히 맞는 별도 내역은 매매 관측 그룹에서 분리한다.
     has_trades = any(key[2].startswith("summary:") and key[2].rsplit(":", 1)[-1] in TRADE_KINDS and amount
                      for key, amount in pools.items())
     for key, amount in pools.items():
         if not has_trades or not amount or key[2].rsplit(":", 1)[-1] in TRADE_KINDS:
             continue
-        exact = [row for row in rows if row["id"] not in mmw and row["trade_amount"] is None
-                 and row["currency"] == key[1] and _decimal(row["amount"]) == amount
+        exact = [row for row in rows if row["id"] not in mmw
+                 and row["currency"] == key[1] and _decimal(row["amount"]) - _decimal(row["trade_amount"]) == amount
                  and row["from_at"][:10] <= key[0] <= row["to_at"][:10]]
         if len(exact) == 1:
             mmw[exact[0]["id"]] = amount
             pools[key] = Decimal(0)
     recovered = _legacy_trade_allocations(rows, pools, mmw)
     for index, row in enumerate(rows):
+        source = json.dumps(proofs.get(row["id"], {}))
+        if source != row["source_json"]:
+            await db.execute("UPDATE broker_cash_reviews SET source_json=? WHERE id=?", (source, row["id"]))
         trade = recovered.get(row["id"], _decimal(row["trade_amount"]))
         if row["id"] in recovered and trade != _decimal(row["trade_amount"]):
             await db.execute("UPDATE broker_cash_reviews SET trade_amount=? WHERE id=?", (float(trade), row["id"]))
@@ -305,6 +444,19 @@ async def observe(db, user: str, link: dict, positions: list[dict], previous: li
     await db.execute("UPDATE broker_cash_review_state SET cash_json=?,last_at=? WHERE google_sub=? AND account_id=?", (json.dumps(cash), now, user, aid))
 
 
+async def reconcile_related(db, user: str):
+    """후속 계좌 조회로 이체 한 쌍이 완성·정정되면 양쪽 기존 관측도 다시 대조한다."""
+    states = await (await db.execute(
+        "SELECT s.*,l.provider,l.account_fingerprint,l.environment,l.product,l.include_overseas "
+        "FROM broker_cash_review_state s JOIN broker_account_links l USING(google_sub,account_id) WHERE s.google_sub=?",
+        (user,))).fetchall()
+    for state in states:
+        if state["fingerprint"] != _fingerprint(dict(state)):
+            continue
+        await _reconcile(db, user, state["account_id"], dict(state),
+                         await _evidence(db, user, state["account_id"], state["fingerprint"]), stamp())
+
+
 def _recover_cash_bases(rows: list[dict], states: dict) -> dict[int, float]:
     """마지막 현금에서 원래 순변동을 역산한다. 현재 잔고를 과거 잔고로 대체하지 않는다."""
     recovered = {}
@@ -372,7 +524,7 @@ async def history(user: str, *, pending: bool = True, offset: int = 0, fx_rates:
                 automatic, required = "checking", False
             if pending and (not row["is_current"] or not required):
                 continue
-            item = {k: value for k, value in row.items() if k not in {"google_sub", "fingerprint", "is_current"}}
+            item = {k: value for k, value in row.items() if k not in {"google_sub", "fingerprint", "is_current", "source_json"}}
             items.append({**item, "auto_resolution": automatic, "review_required": required,
                           "minor_limit": float(limits.get(key, 0))})
         count = len(items)

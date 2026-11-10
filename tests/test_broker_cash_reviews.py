@@ -614,3 +614,113 @@ class CashReviewTests(TempDbMixin):
         with patch.object(broker_cash_reviews, "stamp", return_value="2026-10-26T05:00:00"):
             await self.sync(cash(20009002), entries=batch)
         self.assertEqual((await self.pending())[0]["unexplained"], 6002)
+
+    async def test_split_lending_weekend_mmw_foreign_interest_and_transfer_reconcile_and_stay_resolved(self):
+        def batch(*specs):
+            summaries = []
+            for day, kind, amounts in specs:
+                parts = [{"amount": amount, **({"party": "verified-party"} if kind.startswith("transfer_") else {})}
+                         for amount in amounts]
+                summaries.append({"booked_date": day, "date": day, "currency": "USD" if kind == "foreign_interest" else "KRW",
+                                  "kind": kind, "amount": sum(amounts), "parts": parts})
+            return activity.ActivityBatch([], summaries, date(2026, 11, 6), date(2026, 11, 10))
+
+        baseline = batch(("2026-11-06", "mmw_interest", [610]))
+        balance, dollars = 100000000, 7000
+        with patch.object(broker_cash_reviews, "stamp", return_value="2026-11-06T18:00:00"):
+            await self.sync(cash(balance), cash(dollars, "USD"), entries=baseline)
+        gold_aid = (await accounts.create_account("u1", name="금 계좌"))["account_id"]
+        await brokers.link_account("u1", gold_aid, self.link["credential_id"], "12345678902", "live", product="gold")
+        with patch.object(broker_cash_reviews, "stamp", return_value="2026-11-06T18:00:00"), \
+             patch.object(sync, "fetch_snapshot", AsyncMock(return_value=([cash(88960019)], {}))):
+            await sync.sync_account("u1", gold_aid)
+        for when, delta, usd_delta in [
+            ("2026-11-07T00:46:00", 610, 0), ("2026-11-08T00:43:00", 611, 0),
+            ("2026-11-09T00:45:00", 610, 0), ("2026-11-09T04:40:00", -327, 0),
+            ("2026-11-09T12:21:00", 0, 8.3), ("2026-11-09T15:06:00", 816, 0),
+            ("2026-11-09T15:20:00", 64, 0), ("2026-11-10T00:47:00", 610, 0),
+            ("2026-11-10T03:06:00", 340423, 0), ("2026-11-10T04:37:00", -99, 0),
+            ("2026-11-10T09:26:00", 88960019, 0), ("2026-11-10T14:35:00", 43, 0),
+            ("2026-11-10T14:55:00", 890, 0),
+        ]:
+            balance += delta
+            dollars += usd_delta
+            with patch.object(broker_cash_reviews, "stamp", return_value=when):
+                await self.sync(cash(balance), cash(dollars, "USD"))
+        async with transaction() as db:
+            # 운영처럼 매매 누계 확인이 끝난 비매매 구간도 trade_amount=0이다.
+            await db.execute("UPDATE broker_cash_reviews SET trade_amount=0 WHERE currency='KRW'")
+        gold_batch = batch(("2026-11-10", "transfer_out", [-88960019]))
+        with patch.object(broker_cash_reviews, "stamp", return_value="2026-11-10T09:26:10"), \
+             patch.object(sync, "fetch_snapshot", AsyncMock(return_value=([cash(0)], {}))), \
+             patch.object(activity, "fetch", AsyncMock(return_value=gold_batch)):
+            await sync.sync_account("u1", gold_aid, include_activity=True)
+        verified = batch(
+            ("2026-11-06", "mmw_interest", [610]), ("2026-11-09", "mmw_interest", [1831]),
+            ("2026-11-09", "mmw_charges", [-327]), ("2026-11-09", "other_income", [816, 64]),
+            ("2026-11-09", "foreign_interest", [8.3]), ("2026-11-10", "mmw_interest", [610]),
+            ("2026-11-10", "mmw_charges", [-99]), ("2026-11-10", "other_income", [340423, 30, 13, 890]),
+            ("2026-11-10", "transfer_in", [88960019]))
+        for _ in range(2):
+            with patch.object(broker_cash_reviews, "stamp", return_value="2026-11-10T18:00:00"):
+                await self.sync(cash(balance), cash(dollars, "USD"), entries=verified)
+            rows = (await broker_cash_reviews.history("u1", pending=False))["items"]
+            self.assertTrue(all(row["unexplained"] == 0 for row in rows), rows)
+            self.assertEqual(await self.pending(), [])
+        # 반대 원장의 상대/의뢰인 지문이 다르면 금액이 같아도 이체로 확정하지 않는다.
+        gold_batch.cash_summaries[0]["parts"][0]["party"] = "different-party"
+        async with transaction() as db:
+            await broker_cash_reviews.store_evidence(db, "u1", await brokers.get_link("u1", gold_aid), gold_batch)
+            await broker_cash_reviews.reconcile_related(db, "u1")
+        self.assertEqual(sorted(row["unexplained"] for row in await self.pending()), [-88960019, 88960019])
+        gold_batch.cash_summaries[0]["parts"][0]["party"] = "verified-party"
+        async with transaction() as db:
+            await broker_cash_reviews.store_evidence(db, "u1", await brokers.get_link("u1", gold_aid), gold_batch)
+            await broker_cash_reviews.reconcile_related(db, "u1")
+        self.assertEqual(await self.pending(), [])
+        # 확인된 입금 근거를 이후 외부 입금에 재사용하지 않는다.
+        with patch.object(broker_cash_reviews, "stamp", return_value="2026-11-10T18:01:00"):
+            await self.sync(cash(balance + 50000), cash(dollars, "USD"), entries=verified)
+        self.assertEqual([row["unexplained"] for row in await self.pending()], [50000])
+        with patch.object(broker_cash_reviews, "stamp", return_value="2026-11-10T18:02:00"):
+            await self.sync(cash(balance + 50000 + 88960019), cash(dollars, "USD"), entries=verified)
+        self.assertEqual(sorted(row["unexplained"] for row in await self.pending()), [50000, 88960019])
+        self.assertEqual(await snapshots.get_cashflows("u1"), [])
+
+    async def test_granular_income_never_offsets_an_unrelated_fee_or_large_transfer(self):
+        await self.trade_sync(10000000)
+        await self.trade_sync(9999673)  # -327원 비용
+        await self.trade_sync(9999673 + 88960019)  # 수입보다 훨씬 큰 입금
+        day = stamp()[:10]
+        batch = self.income_batch(880, kind="other_income")
+        batch.cash_summaries[0]["parts"] = [{"amount": 816}, {"amount": 64}]
+        await self.trade_sync(9999673 + 88960019, entries=batch)
+        rows = (await broker_cash_reviews.history("u1", pending=False))["items"]
+        self.assertEqual([row["unexplained"] for row in rows], [88960019, -327])
+        self.assertEqual(day, rows[0]["to_at"][:10])
+
+    async def test_source_proof_survives_equal_external_receipt_but_source_corrections_reopen(self):
+        await self.trade_sync(10000000)
+        await self.trade_sync(10008000)
+        batch = self.income_batch(8000)
+        batch.cash_summaries[0]["parts"] = [{"amount": 8000}]
+        await self.sync(cash(10008000), entries=batch)
+        self.assertEqual(await self.pending(), [])
+        await self.sync(cash(10016000), entries=batch)
+        self.assertEqual([row["unexplained"] for row in await self.pending()], [8000])
+        await self.sync(cash(10016000), entries=batch)
+        self.assertEqual([row["unexplained"] for row in await self.pending()], [8000])
+        # 증권사 원본 정정으로 근거가 사라지면 저장한 확인 정보도 무효가 된다.
+        await self.sync(cash(10016000), entries=self.income_batch(None))
+        self.assertEqual([row["unexplained"] for row in await self.pending()], [8000, 8000])
+
+    async def test_equal_source_amounts_require_matching_observation_counts(self):
+        await self.sync(cash(10000000))
+        await self.sync(cash(10008000))
+        await self.sync(cash(10016000))
+        batch = self.income_batch(16000)
+        batch.cash_summaries[0]["parts"] = [{"amount": 8000}, {"amount": 8000}]
+        await self.sync(cash(10016000), entries=batch)
+        self.assertEqual(await self.pending(), [])
+        await self.sync(cash(10024000), entries=batch)
+        self.assertEqual([row["unexplained"] for row in await self.pending()], [8000])

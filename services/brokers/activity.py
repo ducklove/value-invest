@@ -203,6 +203,44 @@ def mmw_cash_summaries(row: dict, link: dict, previous: dict | None) -> list[dic
             {**context, "kind": "mmw_charges", "amount": -float(tax + fee) if valid else None}]
 
 
+def cash_source_summary(row: dict, link: dict, previous: dict | None) -> dict | None:
+    """외화 이용료와 대체 입출금의 명시적 금액만 사유 대조에 사용한다."""
+    label = _compact(row.get("sps_cd_krl_anm"))
+    currency = str(row.get("cur_cd") or "KRW").strip().upper() or "KRW"
+    if label not in {"외화예탁금이용료", "대체입금", "대체출금"}:
+        return None
+    if row.get("act_no") not in (None, "", link["account_no"]):
+        raise BrokerError("NH 거래내역의 계좌를 확인할 수 없습니다.")
+    booked, actual = _ymd(row, "trd_dt"), _ymd(row, "ral_trd_dt")
+    if not booked:
+        raise BrokerError("NH 현금 내역의 날짜를 확인할 수 없습니다.")
+    amount, fee, tax = (_lenient(row, key) for key in ("trd_amt", "trd_orn_fee", "tax_sum"))
+    if amount is None or amount <= 0 or fee != 0 or tax is None or tax < 0:
+        return None
+    result = {"booked_date": booked, "date": actual if actual and actual <= booked else booked,
+              "currency": currency, "amount": float(amount)}
+    if label == "외화예탁금이용료":
+        if not re.fullmatch(r"[A-Z]{3}", currency) or currency == "KRW":
+            return None
+        # trd_amt는 외화 입금, tax_sum은 원화 세금이다. 서로 빼거나 환산하지 않는다.
+        # 전후 외화 잔액이 없는 응답은 실제 관측 전액과 정확히 일치할 때만 사용한다.
+        before, after = (_lenient(row, key) for key in ("trd_bf_fc_dca", "trd_af_fc_dca"))
+        if before is not None and after is not None and after - before != amount:
+            return None
+        return {**result, "kind": "foreign_interest"}
+    if currency != "KRW" or tax != 0:
+        return None
+    sign = 1 if label == "대체입금" else -1
+    before, after = _lenient(previous or {}, "trd_af_dca"), _lenient(row, "trd_af_dca")
+    previous_currency = str((previous or {}).get("cur_cd") or "KRW").strip().upper() or "KRW"
+    names = [_compact(row.get(key)) for key in ("opi_cus_fnm", "cli_pe_fnm")]
+    if before is None or after is None or previous_currency != "KRW" or after - before != sign * amount or not all(names):
+        return None
+    # 개인 이름 원문은 저장하지 않는다. 양쪽 원장의 상대/의뢰인 조합을 대조하는 지문이다.
+    return {**result, "kind": "transfer_in" if sign > 0 else "transfer_out", "amount": float(sign * amount),
+            "party": digest(sorted(names))}
+
+
 def _compact(value) -> str:
     return re.sub(r"\s+", "", str(value or ""))
 
@@ -375,7 +413,8 @@ def _put(collected: dict, data: dict):
     collected[data["source_key"]] = data
 
 
-async def _domestic_dividends(user: str, link: dict, start: date, end: date, collected: dict, cash_summaries: dict | None = None):
+async def _domestic_dividends(user: str, link: dict, start: date, end: date, collected: dict,
+                              cash_summaries: dict | None = None, cash_parts: dict | None = None):
     ordinals: dict[tuple, int] = {}
     while start <= end:
         # 운영에서 365일 한 번 조회(연속 조회 포함)를 확인했다. 빈 구간 호출 수를 줄인다.
@@ -399,7 +438,8 @@ async def _domestic_dividends(user: str, link: dict, start: date, end: date, col
                 if not isinstance(row, dict):
                     raise BrokerError("NH 거래내역 형식이 올바르지 않습니다.")
                 if cash_summaries is not None:
-                    incomes = [cash_income_summary(row, link, previous), *mmw_cash_summaries(row, link, previous)]
+                    incomes = [cash_income_summary(row, link, previous), *mmw_cash_summaries(row, link, previous),
+                               cash_source_summary(row, link, previous)]
                     for income in filter(None, incomes):
                         if not start.isoformat() <= income["booked_date"] <= until.isoformat():
                             raise BrokerError("NH 조회 기간 밖의 수입이 반환되었습니다.")
@@ -407,6 +447,11 @@ async def _domestic_dividends(user: str, link: dict, start: date, end: date, col
                         old = cash_summaries.get(key, 0)
                         # 같은 일자·분류 중 검산 실패가 하나라도 있으면 부분 합계를 확정하지 않는다.
                         cash_summaries[key] = None if old is None or income["amount"] is None else old + Decimal(str(income["amount"]))
+                        if cash_parts is not None and income["amount"] is not None:
+                            part = {"amount": income["amount"]}
+                            if income.get("party"):
+                                part["party"] = income["party"]
+                            cash_parts.setdefault(key, []).append(part)
                 if is_domestic_dividend_label(row.get("sps_cd_krl_anm")):
                     group = (str(row.get("trd_dt")), _compact(row.get("sps_cd_krl_anm")), str(row.get("iem_cd") or "").strip())
                     ordinals[group] = ordinals.get(group, 0) + 1
@@ -456,9 +501,10 @@ async def fetch(user: str, link: dict, start: date, end: date) -> list[dict]:
         raise BrokerError("거래내역 조회 기간은 오늘까지 최대 1년으로 지정해 주세요.")
     collected: dict[str, dict] = {}
     cash_summaries = {}
-    await _domestic_dividends(user, link, start, end, collected, cash_summaries)
+    cash_parts = {}
+    await _domestic_dividends(user, link, start, end, collected, cash_summaries, cash_parts)
     if link.get("product", "stocks") == "stocks":
         await _overseas_dividends(user, link, start, end, collected)
-    summaries = [dict(zip(("booked_date", "date", "currency", "kind"), key), amount=float(amount))
+    summaries = [dict(zip(("booked_date", "date", "currency", "kind"), key), amount=float(amount), parts=cash_parts[key])
                  for key, amount in cash_summaries.items() if amount is not None]
     return ActivityBatch(collected.values(), summaries, start, end)

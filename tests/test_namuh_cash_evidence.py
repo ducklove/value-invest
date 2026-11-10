@@ -107,3 +107,34 @@ async def test_mmw_income_and_charges_flow_through_existing_activity_query():
         batch = await activity.fetch("user", LINK, date(2026, 10, 21), date(2026, 10, 21))
     assert list(batch) == []
     assert {row["kind"]: row["amount"] for row in batch.cash_summaries} == {"mmw_interest": 5000, "mmw_charges": -1000}
+
+
+async def test_cash_source_parts_survive_daily_aggregation_without_personal_names():
+    rows = [income(sps_cd_krl_anm="대여수수료입금", trd_amt=1036, int_amt=0, tax_sum=220, trd_af_dca=816),
+            income(sps_cd_krl_anm="대여수수료입금", trd_amt=74, int_amt=0, tax_sum=10, trd_af_dca=880)]
+    with patch.object(activity.namuh, "pages", AsyncMock(return_value=[{"Output_0": rows}])):
+        batch = await activity.fetch("user", LINK, date(2026, 10, 21), date(2026, 10, 21))
+    assert batch.cash_summaries[0]["parts"] == [{"amount": 816}, {"amount": 64}]
+    assert batch.cash_summaries[0]["amount"] == 880
+
+
+def test_foreign_interest_keeps_native_receipt_and_does_not_subtract_krw_tax():
+    row = income(sps_cd_krl_anm="외화예탁금이용료", cur_cd="USD", trd_amt=8.3, tax_sum=2040,
+                 trd_orn_fee=0, int_amt=0)
+    result = activity.cash_source_summary(row, LINK, None)
+    assert result["amount"] == 8.3 and result["currency"] == "USD" and result["kind"] == "foreign_interest"
+    assert activity.cash_source_summary({**row, "trd_bf_fc_dca": 100, "trd_af_fc_dca": 200}, LINK, None) is None
+    assert activity.cash_source_summary({**row, "cur_cd": ""}, LINK, None) is None
+    assert activity.cash_source_summary({**row, "trd_orn_fee": 1}, LINK, None) is None
+
+
+def test_transfer_requires_explicit_label_verified_balance_and_hashed_parties():
+    row = income(sps_cd_krl_anm="대체출금", trd_amt=100000, tax_sum=0, trd_af_dca=0,
+                 opi_cus_fnm="private-recipient", cli_pe_fnm="private-sender")
+    result = activity.cash_source_summary(row, LINK, {"trd_af_dca": 100000})
+    assert result["kind"] == "transfer_out" and result["amount"] == -100000
+    assert len(result["party"]) == 64 and "private" not in str(result)
+    assert activity.cash_source_summary(row, LINK, None) is None
+    assert activity.cash_source_summary({**row, "trd_af_dca": 10}, LINK, {"trd_af_dca": 100000}) is None
+    assert activity.cash_source_summary({**row, "cli_pe_fnm": ""}, LINK, {"trd_af_dca": 100000}) is None
+    assert activity.cash_source_summary({**row, "sps_cd_krl_anm": "대체출금취소"}, LINK, {"trd_af_dca": 100000}) is None

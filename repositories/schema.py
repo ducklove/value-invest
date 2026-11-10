@@ -937,6 +937,20 @@ CREATE TABLE IF NOT EXISTS broker_cash_review_evidence (
     amount REAL NOT NULL,
     PRIMARY KEY (google_sub,account_id,fingerprint,booked_date,date,currency,kind)
 );
+-- 사유 대조 합계의 구성 금액. 증권사 거래번호를 만들거나 수익 원장을 생성하지 않는다.
+CREATE TABLE IF NOT EXISTS broker_cash_review_evidence_details (
+    google_sub TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    booked_date TEXT NOT NULL,
+    date TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    parts_json TEXT NOT NULL,
+    PRIMARY KEY (google_sub,account_id,fingerprint,booked_date,date,currency,kind),
+    FOREIGN KEY (google_sub,account_id,fingerprint,booked_date,date,currency,kind)
+        REFERENCES broker_cash_review_evidence ON DELETE CASCADE
+);
 -- NH 기간 손익 응답의 정규화 사본. 계좌번호 원문을 넣지 않으며 잔고·현금·NAV를 바꾸지 않는다.
 -- 일자·국가·통화(해외)와 종목(국내) 묶음 group_key 단위로 교체해 재조회가 멱등이다.
 CREATE TABLE IF NOT EXISTS broker_realized_pnl (
@@ -1176,6 +1190,7 @@ CREATE INDEX IF NOT EXISTS idx_distributions_user_date ON portfolio_distribution
 # the list here makes init_db's migration surface explicit while the larger
 # table-creation script is still being split out of cache.py.
 CORE_COLUMN_MIGRATIONS: tuple[ColumnSpec, ...] = (
+    ("broker_cash_reviews", "source_json", "TEXT NOT NULL DEFAULT '{}'"),
     ("broker_cash_review_state", "trade_json", "TEXT NOT NULL DEFAULT '{}'"),
     ("broker_cash_reviews", "trade_amount", "REAL"),
     ("broker_cash_reviews", "review_after", "TEXT"),
