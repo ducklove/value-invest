@@ -6,7 +6,7 @@ from decimal import Decimal
 from domain.timeutil import now_kst
 from repositories.broker_secrets import BrokerError
 from services.brokers import namuh
-from services.brokers.futures_contracts import contract_terms
+from services.brokers.futures_contracts import contract_terms, display_name
 from services.brokers.parsing import number, object_block, record_block
 
 
@@ -71,7 +71,7 @@ async def fetch_derivatives(user: str, link: dict) -> tuple[list[dict], dict]:
                 code = contract_code(row, "fno_iem_cd" if night else "iem_cd")
                 name = str(row.get("iem_nm") or code).strip()
                 terms = await contract_terms(user, link, code, name)
-                positions.append({**terms, "code": code, "name": name, "stock_code": "KRFUT_" + code,
+                positions.append({**terms, "code": code, "name": display_name(name), "stock_code": "KRFUT_" + code,
                                   "side": side, "quantity": qty, "currency": "KRW",
                                   "average_price": number(row, "avg_pr"), "current_price": number(row, "now_pr"),
                                   "pnl": number(row, "eal_pls_amt")})
@@ -140,7 +140,7 @@ def domestic_holdings(positions: list[dict], equity: float) -> tuple[list[dict],
         qty, position = value["quantity"], value["position"]
         if not qty:
             continue
-        rows.append({"stock_code": code, "stock_name": position["name"], "quantity": float(qty),
+        rows.append({"stock_code": code, "stock_name": display_name(position["name"]), "quantity": float(qty),
                      "avg_price": float(value["cost"] / qty), "avg_price_currency": "KRW", "currency": "KRW",
                      "memo": "만기일 " + position["expiry_date"]})
     # 선물매도 평가액 - 선물매수 평가액 + 평가기준액 + 평가손익.

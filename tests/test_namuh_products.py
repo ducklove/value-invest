@@ -7,13 +7,16 @@ from domain.timeutil import KST
 from repositories import account_holdings, accounts, brokers, portfolio
 from repositories.broker_secrets import BrokerError
 from routes import broker_accounts
-from services.brokers import derivatives, futures_contracts, namuh, sync
+from services.brokers import derivatives, futures_contracts, futures_underlyings, namuh, sync
 from services.portfolio import quote_service
 
 
 class NamuhProductsTests(TempDbMixin):
     async def seed(self):
         futures_contracts._expiries.clear()
+        master = patch.object(futures_underlyings, "underlying_codes", AsyncMock(return_value={}))
+        master.start()
+        self.addCleanup(master.stop)
         await seed_user()
         await account_holdings.ensure("u1")
         self.aid = (await accounts.create_account("u1", name="NH 전용계좌"))["account_id"]
@@ -270,6 +273,7 @@ class NamuhProductsTests(TempDbMixin):
         shorts = [r for code, r in items.items() if code.startswith("KRFUT_")]
         self.assertEqual(sorted(r["quantity"] for r in shorts), [-4000, -1000, -400, -100])
         self.assertTrue(all(r["memo"] == "만기일 2026-11-12" for r in shorts))
+        self.assertTrue(all("(" not in r["stock_name"] for r in shorts))
         self.assertFalse(any(code.startswith("FUTURES_") for code in items))
         self.assertEqual(items["CASH_KRW"]["quantity"], 469780000)
         self.assertEqual(sum(items["KRFUT_"+r["iem_cd"]]["quantity"] * r["now_pr"] for r in page["Output_0"])

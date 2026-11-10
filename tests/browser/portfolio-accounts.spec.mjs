@@ -37,6 +37,7 @@ test('금현물·국내·해외선물의 연결 종류와 계약·평가액 표�
     await expect(page.locator('#pfDerivativeBalances')).toHaveCount(0);
     if (product === 'krfuture') {
       const row = page.locator('#pfBody [data-code="KRFUT_KA486B000"]');
+      await expect(row.getByRole('link', {name: '미래에셋증 F 202611', exact: true})).toBeVisible();
       for (const column of ['target', 'buyprice', 'achiev', 'return']) {
         await expect(row.locator(`.pf-col-${column}`)).toHaveText('-');
       }

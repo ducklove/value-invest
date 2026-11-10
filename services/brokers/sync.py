@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 from domain.broker_assets import is_futures_value
 from domain.portfolio_order import initial_order_key
 from repositories import account_holdings as holdings
-from repositories import broker_activity, broker_cash_reviews, brokers, portfolio_order
+from repositories import broker_activity, broker_cash_reviews, brokers, futures_pairs, portfolio_order
 from repositories.broker_secrets import BrokerError
 from repositories.db import transaction
 from services.brokers import activity, cash_trades
@@ -82,6 +82,10 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                     # 일부만 저장하지 않고, 독립적으로 검증한 잔고 조회는 계속한다.
                     activity_error = str(exc)
             rows, balances = await fetch_snapshot(user, link)
+            futures_mapping = {}
+            if link.get("product") == "krfuture":
+                from services.brokers.futures_underlyings import underlying_codes
+                futures_mapping = await underlying_codes()
             trades = None
             review_trades = (include_activity and link.get("provider", "namuh") == "namuh" and link["environment"] == "live"
                     and link.get("product", "stocks") == "stocks"
@@ -101,6 +105,8 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                 if any(current.get(key) != link.get(key) for key in ("credential_id", "account_fingerprint", "product", "provider", "environment")):
                     raise BrokerError("동기화 중 계좌 연결이 변경되었습니다. 다시 시도해 주세요.")
                 await holdings.initialize(db, user)
+                if futures_mapping:
+                    await futures_pairs.capture(user, futures_mapping)
                 if entries is not None:
                     await broker_activity.store(user, link, entries)
                     if isinstance(entries, activity.ActivityBatch):
@@ -137,6 +143,8 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                         notes = [line for line in str(old["memo"] or "").splitlines() if not line.startswith("만기일 ")] if old else []
                         metadata["memo"] = "\n".join([imported["memo"], *notes])
                     await holdings.rebuild(user, code, **metadata)
+                if futures_mapping:
+                    await futures_pairs.apply(user, futures_mapping)
                 if current["last_sync_at"] is None:
                     await portfolio_order.reset(user, aid)
                 snapshot = {**balances.get("_snapshot", {}), "synced_at": now} if "_snapshot" in balances else {}

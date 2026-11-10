@@ -11,6 +11,11 @@ from services.brokers.parsing import number, object_block
 _expiries = MemoryTTLCache("namuh.futures_expiry", 6 * 3600)
 
 
+def display_name(name: str) -> str:
+    """NH 종목명 끝의 거래승수는 표시명에서만 제거한다."""
+    return re.sub(r"\s*\(\s*[0-9]+(?:\.[0-9]+)?\s*\)\s*$", "", name).strip()
+
+
 async def contract_terms(user: str, link: dict, code: str, name: str) -> dict:
     # NH 종목명 끝의 괄호는 거래승수다. 운영 주식선물 응답 예: F 202611 (  10).
     match = re.search(r"\(\s*([0-9]+(?:\.[0-9]+)?)\s*\)\s*$", name)

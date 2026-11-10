@@ -1062,7 +1062,15 @@ async def update_portfolio_pair(stock_code: str, request: Request, payload: dict
         if long_item.get("pair_long_code"):
             raise HTTPException(status_code=400, detail="이미 다른 페어의 숏인 종목은 롱으로 지정할 수 없습니다.")
 
-    result = await portfolio_repo.set_portfolio_pair(user["google_sub"], stock_code, long_code)
+    underlying = None
+    if stock_code.startswith("KRFUT_"):
+        from services.brokers.futures_underlyings import underlying_codes
+        underlying = (await underlying_codes()).get(stock_code.removeprefix("KRFUT_"))
+    from repositories import futures_pairs
+    async with db_repo.transaction():
+        result = await portfolio_repo.set_portfolio_pair(user["google_sub"], stock_code, long_code)
+        if result is not None and stock_code.startswith("KRFUT_"):
+            await futures_pairs.remember(user["google_sub"], stock_code, underlying, long_code)
     if result is None:
         raise HTTPException(status_code=404, detail="페어를 저장하지 못했습니다.")
     return {"ok": True, "stock_code": stock_code, **result}

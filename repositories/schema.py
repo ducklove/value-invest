@@ -26,6 +26,13 @@ ColumnSpec = tuple[str, str, str]
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 CORE_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS futures_pair_choices (
+    google_sub TEXT NOT NULL REFERENCES users(google_sub) ON DELETE CASCADE,
+    stock_code TEXT NOT NULL,
+    underlying_code TEXT NOT NULL,
+    long_code TEXT,
+    PRIMARY KEY (google_sub, stock_code)
+);
 CREATE TABLE IF NOT EXISTS quant_paper_accounts (
     google_sub TEXT PRIMARY KEY REFERENCES users(google_sub) ON DELETE CASCADE,
     state_json TEXT NOT NULL
