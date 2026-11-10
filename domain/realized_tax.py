@@ -10,9 +10,9 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from domain.dividend_entitlement import holding_identity
 
-# NH 기간 손익 응답의 필드 의미(원화 기준 금액의 단위·환율, 실현손익 산식)를 운영 응답으로 확인하면 True로 바꾼다.
-# False인 동안 화면과 액션 보드는 세액을 미검증 어림값으로만 표시한다. True여도 신고용 확정값은 아니다.
-NH_PNL_FIELDS_VERIFIED = False
+# NH 기간 손익 응답의 필드 의미(원화 기준 금액의 단위·환율, 실현손익 산식). 2026-11-10 운영 응답과 NH 앱 대조로 확인했다
+# (docs/realized-tax.md). False면 화면과 액션 보드는 세액을 미검증 어림값으로만 표시한다. True여도 신고용 확정값은 아니다.
+NH_PNL_FIELDS_VERIFIED = True
 RULES_REVIEWED_THROUGH = 2026
 # 2,000만원 근접 판단 비율. 넘으면 액션 보드에 올린다.
 NEAR_THRESHOLD_RATIO = Decimal("0.8")

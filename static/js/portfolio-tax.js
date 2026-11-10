@@ -170,7 +170,7 @@ function pfTaxHtml(data) {
   const banner = verified
     ? '<strong>신고용이 아닌 추정입니다.</strong> 실제 세액은 증권사 양도세 자료로 확인하세요.'
     : '<strong>신고용이 아닌 미검증 추정입니다.</strong> NH 손익 응답의 필드 의미를 실제 응답으로 확인하기 전이라 해외 금액은 어림값이고 세액은 확정값이 아닙니다.';
-  return `<p class="pf-insight-notice pf-tax-banner" role="note">${banner} NH 손익 산식과 세법의 선입선출·취득 시 환율 기준은 다를 수 있습니다.</p>
+  return `<p class="pf-insight-notice pf-tax-banner" role="note">${banner} ${verified ? 'NH 원화 손익에는 취득 시 환율이 반영되지만, 원가 산정이 세법의 선입선출·기준환율과 다를 수 있습니다.' : 'NH 손익 산식과 세법의 선입선출·취득 시 환율 기준은 다를 수 있습니다.'}</p>
     ${_pfTaxTiles(data, verified)}
     ${_pfTaxYearNotices(data, verified)}
     ${_pfTaxIncome(data.financial_income)}

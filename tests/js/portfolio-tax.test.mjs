@@ -65,6 +65,7 @@ test('필드를 검증한 뒤에도 추정 표시는 유지하고 금액만 정�
   assert.match(text, /신고용이 아닌 추정/);
   assert.match(text, /추정 세액/);
   assert.equal(text.includes('미검증'), false);
+  assert.match(text, /취득 시 환율이 반영되지만/);
   dom.window.close();
 });
 

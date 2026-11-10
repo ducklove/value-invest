@@ -1,8 +1,8 @@
 """NH 기간 손익 조회를 입력 없는 실현손익 원장으로 옮긴다. 주문 API는 쓰지 않는다.
 
 연도 합계 응답을 먼저 반영하고 바뀐 일자·종목만 상세 조회한다. 그래서 상세가 늦거나 합계와 맞지 않아도 연도 합계는
-NH 기간 합계와 같다. 호출은 namuh.pages의 앱키 잠금·호출 간격을 공유한다. 필드 의미는 공개 명세 기준이며
-운영 응답 확인 전이다(docs/realized-tax.md, domain.realized_tax.NH_PNL_FIELDS_VERIFIED).
+NH 기간 합계와 같다. 호출은 namuh.pages의 앱키 잠금·호출 간격을 공유한다. 필드 의미는 2026-11-10 운영 응답으로
+확인했다(docs/realized-tax.md, domain.realized_tax.NH_PNL_FIELDS_VERIFIED).
 """
 
 import asyncio

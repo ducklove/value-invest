@@ -460,7 +460,7 @@ class SummaryTests(CollectionBase):
         with self._calendar() as calendar:
             summary = await service.build_summary("u1", today=date(2026, 11, 8))
         calendar.assert_awaited_once_with("u1", months_back=0, months_forward=1, today=date(2026, 11, 8))
-        self.assertIs(summary["fields_verified"], False)
+        self.assertIs(summary["fields_verified"], service.rules.NH_PNL_FIELDS_VERIFIED)
         current = summary["current"]
         self.assertEqual(current["year"], 2026)
         self.assertEqual(current["overseas"]["realized_krw"], 9_779_000)
@@ -651,8 +651,10 @@ class SummaryTests(CollectionBase):
             self.assertEqual(keys, ["tax:financial-income:2026:near", "tax:overseas:2026:exhausted"])
             exhausted = next(item for item in board["actions"] if item["key"] == "tax:overseas:2026:exhausted")
             self.assertEqual(exhausted["url"], "#pfTaxWrap")
-            self.assertEqual(exhausted["title"], "해외 양도세 추정 약 160만원")
-            self.assertIn("최대 약 18만원", exhausted["detail"])
+            verified = service.rules.NH_PNL_FIELDS_VERIFIED
+            self.assertEqual(exhausted["title"], "해외 양도세 추정 " + ("1,601,380원" if verified else "약 160만원"))
+            self.assertIn("최대 184,800원" if verified else "최대 약 18만원", exhausted["detail"])
+            self.assertEqual("미검증" in exhausted["detail"], not verified)
             await action_reviews.set_review_status("u1", "tax:overseas:2026:exhausted", "done")
             board = await action_board.build_action_board("u1")
         reviewed = next(item for item in board["actions"] if item["key"] == "tax:overseas:2026:exhausted")
@@ -690,6 +692,6 @@ class RouteTests(CollectionBase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertIs(payload["available"], True)
-        self.assertIs(payload["fields_verified"], False)
+        self.assertIs(payload["fields_verified"], service.rules.NH_PNL_FIELDS_VERIFIED)
         self.assertEqual(payload["current"]["overseas"]["realized_krw"], 9_779_000)
         self.assertEqual(self.nh.calls, [])
