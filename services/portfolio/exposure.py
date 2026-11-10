@@ -37,14 +37,24 @@ DB/네트워크 의존이 없다. services.portfolio.exposure_service 가 보유
 * 위험 기여율 ``RC_i = w_i × Cov(r_i, r_p) / Var(r_p) × 100``. 합은 100%이고 헤지는 음수다.
 * 수익률 표본이 ``min_returns`` 미만이거나 공통 구간을 ``min_history_ratio`` 아래로 줄이는
   포지션은 0 이 아니라 null 이다.
+
+해외 일봉(:func:`krw_asof_closes`, NAV 정산 ``services/portfolio/regular_close`` 와 같은 기준):
+
+* 원화 수익률이다. 해외 종가 × 그 거래소 날짜의 환율(없으면 직전 영업일).
+* 국내 거래일 T 의 값은 T 의 국내 정규장 마감(15:30) 전에 끝난 가장 최근 해외 정규장 종가다.
+  미국 종목은 전날 종가, 도쿄·시드니는 같은 날, 홍콩·유럽은 전날 종가가 들어간다.
+* 국내 일봉이 있으면 그 거래일 위에, 없으면 해외 종가가 알려진 날들 위에 마지막 값을 이어 쓴다.
+  ``ASOF_MAX_GAP_DAYS`` 보다 묵은 값은 잇지 않고, 표본 끝까지 닿지 못하는 시리즈는 뺀다(stale_rows).
 """
 
 from __future__ import annotations
 
 import math
 import re
-from datetime import date, datetime
-from typing import Any, Iterable, Mapping
+from bisect import bisect_right
+from datetime import date, datetime, time, timedelta
+from typing import Any, Iterable, Mapping, Sequence
+from zoneinfo import ZoneInfo
 
 from domain.broker_assets import is_futures_contract
 from domain.portfolio_codes import (
@@ -56,6 +66,7 @@ from domain.portfolio_codes import (
     normalize_portfolio_code,
     yahoo_symbol,
 )
+from domain.timeutil import KST
 from services.portfolio import risk
 
 TOP_N_LEVELS = (1, 3, 5, 10)
@@ -68,6 +79,14 @@ CORRELATION_TOP_K = 10
 MIN_HISTORY_RATIO = 1 / 2
 # 레버리지 판정 여유 — 일반 ETF 도 반올림·현금으로 합이 100을 조금 넘는다.
 LEVERAGE_THRESHOLD_PCT = 105.0
+# 해외 종가를 국내 거래일에 맞추는 기준 시각(KRX 정규장 마감, NAV 정산과 같다).
+KRX_CLOSE = time(15, 30)
+# 해외 휴장(설 연휴 등)이 길어도 이보다 묵은 종가는 이어 쓰지 않는다.
+ASOF_MAX_GAP_DAYS = 10
+# 환율이 빈 날(현지 공휴일)에 직전 환율을 쓰는 한도.
+FX_MAX_GAP_DAYS = 5
+# Yahoo 보조 통화 단위(펜스·센트) → 환율 통화. 수익률은 단위와 무관하다.
+_MINOR_CURRENCY_UNITS = {"GBX": "GBP", "ZAC": "ZAR", "ILA": "ILS"}
 
 SECTOR_UNCLASSIFIED = "미분류"
 SECTOR_SPAC = "스팩"
@@ -132,7 +151,8 @@ METHOD_NOTES = (
     "통화는 거래 통화 기준입니다. 국내 상장 해외 ETF는 원화로 잡힙니다.",
     "업종은 KIND 상장법인목록의 표준산업분류입니다. 해외 종목과 목록에 없는 종목은 '미분류'로 둡니다.",
     "HHI는 상위 구성만 아는 ETF의 나머지를 완전 분산으로 보므로 하한입니다.",
-    "위험 기여는 finance-pi 국내 일봉 최근 1년에 현재 비중을 곱한 과거 추정치입니다. 해외·금·가상자산은 일봉이 없어 빠지고, 선물은 기초자산 일봉으로 대신합니다.",
+    "위험 기여는 최근 1년 일봉에 현재 비중을 곱한 과거 추정치입니다. 국내는 finance-pi 일봉, 해외는 Yahoo 배당 조정 종가를 그 거래일 환율로 원화 환산해 씁니다. 금·가상자산은 일봉이 없어 빠지고, 선물은 기초자산 일봉으로 대신합니다.",
+    "해외 종가는 NAV 정산처럼 국내 장 마감(15:30) 전에 끝난 가장 최근 정규장 종가를 그날 값으로 둡니다. 미국·유럽 종목은 전날 종가가 들어가므로, 장 시간이 달라 생기는 국내·해외 사이 상관의 과소 추정을 줄이지만 없애지는 못합니다.",
 )
 
 
@@ -330,6 +350,146 @@ def concentration_metrics(values: Iterable[float], *, residual: float = 0.0) -> 
 # 위험 모델
 # ---------------------------------------------------------------------------
 
+def normalize_currency(value: Any) -> str:
+    """Yahoo 통화 표기 → 환율 통화(GBp → GBP). 없으면 빈 문자열."""
+    code = str(value or "").strip().upper()
+    return _MINOR_CURRENCY_UNITS.get(code, code)
+
+
+def fx_symbols(currency: Any) -> tuple[str, ...]:
+    """원화 환산에 필요한 Yahoo 환율 심볼. 달러는 ``KRW=X``, 그 밖은 달러 교차용 ``KRW=X``·``{통화}=X``.
+
+    Yahoo 의 직접 원화 쌍은 쓰지 않는다 — ``CNYKRW=X`` 는 이력이 하루치, ``VNDKRW=X`` 는 404 이고,
+    ``HKDKRW=X``·``JPYKRW=X`` 는 연초에 튀었다 돌아오는 값이 있다(교차와 중앙값 차이는 0.01% 미만).
+    원화·미상은 빈 튜플.
+    """
+    code = normalize_currency(currency)
+    if not code or code == "KRW":
+        return ()
+    return ("KRW=X",) if code == "USD" else ("KRW=X", f"{code}=X")
+
+
+def _positive_points(rows: Iterable[Sequence[Any]] | None) -> dict[str, float]:
+    points: dict[str, float] = {}
+    for row in rows or []:
+        value = _as_float(row[1]) if len(row) >= 2 else None
+        if value is not None and value > 0:
+            points[str(row[0])[:10]] = value
+    return points
+
+
+def krw_fx_rows(currency: Any, rows_by_symbol: Mapping[str, Iterable[Sequence[Any]]]) -> list[list] | None:
+    """통화 1단위의 원화 환율 [[날짜, 원]]. 달러는 ``KRW=X``, 그 밖은 같은 날짜의 ``KRW=X ÷ {통화}=X``.
+
+    ``rows_by_symbol``: {Yahoo 심볼: [[날짜, 값]]}. 원화이거나 필요한 시리즈가 없으면 None.
+    """
+    symbols = fx_symbols(currency)
+    if not symbols:
+        return None
+    krw_per_usd = _positive_points(rows_by_symbol.get(symbols[0]))
+    if len(symbols) == 1:
+        return [[day, krw_per_usd[day]] for day in sorted(krw_per_usd)] or None
+    per_usd = _positive_points(rows_by_symbol.get(symbols[1]))
+    common = sorted(krw_per_usd.keys() & per_usd.keys())
+    return [[day, krw_per_usd[day] / per_usd[day]] for day in common] or None
+
+
+def _is_foreign_listing(code: str) -> bool:
+    """해외 상장 종목·ETF 인가 — 국내 코드·현금·금·가상자산·선물·지수·환율 코드가 아니다."""
+    return bool(code) and not (
+        is_korean_stock(code) or is_special_asset(code) or code.startswith(_NON_QUOTABLE_PREFIXES)
+    )
+
+
+def foreign_series_codes(positions: Iterable[Mapping[str, Any]]) -> list[str]:
+    """위험 모델에 Yahoo 일봉이 필요한 해외 상장 보유 코드."""
+    codes: dict[str, None] = {}
+    for position in positions:
+        code = normalize_portfolio_code(position.get("code"))
+        if _is_foreign_listing(code):
+            codes[code] = None
+    return list(codes)
+
+
+def _clock(value: Any) -> time | None:
+    try:
+        hour, minute = (int(part) for part in str(value).split(":", 1))
+        return time(hour, minute)
+    except (TypeError, ValueError):
+        return None
+
+
+def krw_asof_closes(
+    rows: Iterable[Sequence[Any]],
+    *,
+    timezone: str,
+    close_time: str,
+    fx_rows: Iterable[Sequence[Any]] | None = None,
+    now: datetime | None = None,
+) -> list[dict]:
+    """해외 정규장 종가 [[거래소 날짜, 종가]] → 국내 거래일 기준 원화 종가 [{date, close, session_date}].
+
+    * ``fx_rows`` [[날짜, 원화 환율]] 로 같은 날짜(없으면 ``FX_MAX_GAP_DAYS`` 안의 직전) 환율을 곱한다.
+      None 이면 원화 표시 종목이다. 환율이 없는 날은 뺀다.
+    * ``date`` 는 그 종가가 국내 정규장 마감(15:30) 전에 처음 알려지는 날이다. 거래소 시간대의
+      ``close_time`` 에 장이 끝난다고 보고, 주말이면 다음 월요일로 민다(국내 휴장일은 이어 쓰기가 맡는다).
+    * ``now`` 뒤에 끝나는 세션(진행 중인 봉)은 뺀다. 한 날짜에 둘이 오면 뒤의 세션이 이긴다.
+    """
+    clock = _clock(close_time)
+    try:
+        zone = ZoneInfo(str(timezone))
+    except (KeyError, ValueError):  # ZoneInfoNotFoundError 는 KeyError 다.
+        return []
+    if clock is None:
+        return []
+    fx_points: list[tuple[str, float]] | None = None
+    if fx_rows is not None:
+        fx_points = sorted(
+            (str(row[0])[:10], rate) for row in fx_rows
+            if len(row) >= 2 and (rate := _as_float(row[1])) is not None and rate > 0
+        )
+    fx_dates = [day for day, _ in fx_points or []]
+    out: dict[str, dict] = {}
+    for row in sorted((row for row in rows if len(row) >= 2), key=lambda item: str(item[0])):
+        close = _as_float(row[1])
+        if close is None or close <= 0:
+            continue
+        try:
+            session = date.fromisoformat(str(row[0])[:10])
+        except ValueError:
+            continue
+        closed_at = datetime.combine(session, clock, tzinfo=zone)
+        if now is not None and closed_at > now:
+            continue
+        rate = 1.0
+        if fx_points is not None:
+            index = bisect_right(fx_dates, session.isoformat()) - 1
+            if index < 0 or (session - date.fromisoformat(fx_dates[index])).days > FX_MAX_GAP_DAYS:
+                continue
+            rate = fx_points[index][1]
+        seoul = closed_at.astimezone(KST)
+        day = seoul.date() if seoul.time() <= KRX_CLOSE else seoul.date() + timedelta(days=1)
+        if day.weekday() >= 5:
+            day += timedelta(days=7 - day.weekday())
+        out[day.isoformat()] = {"date": day.isoformat(), "close": close * rate, "session_date": session.isoformat()}
+    return [out[key] for key in sorted(out)]
+
+
+def _sample_asof(points: list[tuple[str, float]], grid: list[str], max_gap_days: int) -> list[tuple[str, float]]:
+    """grid 날짜마다 그날까지 알려진 마지막 값. ``max_gap_days`` 보다 묵은 값은 잇지 않는다."""
+    sampled: list[tuple[str, float]] = []
+    index = -1
+    for day in grid:
+        while index + 1 < len(points) and points[index + 1][0] <= day:
+            index += 1
+        if index < 0:
+            continue
+        known, value = points[index]
+        if (date.fromisoformat(day[:10]) - date.fromisoformat(known[:10])).days <= max_gap_days:
+            sampled.append((day, value))
+    return sampled
+
+
 def _mean(values: list[float]) -> float:
     return sum(values) / len(values)
 
@@ -369,6 +529,7 @@ def compute_risk_model(
     positions: list[dict],
     closes: Mapping[str, list[dict]] | None,
     *,
+    foreign_closes: Mapping[str, list[dict]] | None = None,
     min_returns: int = risk.MIN_BENCHMARK_RETURNS,
     min_history_ratio: float = MIN_HISTORY_RATIO,
     top_k: int = CORRELATION_TOP_K,
@@ -376,8 +537,12 @@ def compute_risk_model(
 ) -> dict:
     """포지션별 위험 기여·변동성과 종목 간 상관.
 
-    ``positions``: {code, name, value, series_code}. series_code 가 None 이면 일봉이 없는
-    자산이다. ``closes``: {series_code: [{date, close}]}. 응답이 통째로 없으면 available=False.
+    ``positions``: {code, name, value, series_code, foreign?}. series_code 가 None 이면 일봉이 없는
+    자산이다. ``closes``: 국내 {series_code: [{date, close}]}(finance-pi 응답이 통째로 없으면 None).
+    ``foreign_closes``: 해외 {code: :func:`krw_asof_closes` 결과}. 둘 다 없으면 available=False.
+
+    해외 시리즈는 국내 일봉의 거래일(국내 일봉이 없으면 해외 종가가 알려진 날들) 위에 마지막
+    값을 이어 붙인 뒤 국내 시리즈와 같은 날짜 교집합에 들어간다.
     """
     rows: list[dict] = []
     gross_all = invested_gross if invested_gross is not None else sum(abs(p["value"]) for p in positions)
@@ -391,21 +556,35 @@ def compute_risk_model(
         "end_date": None,
         "coverage_pct": None,
         "modeled_count": 0,
+        "foreign_count": 0,
         "excluded_count": len(positions),
         "rows": [],
         "excluded": [],
         "correlation": None,
     }
-    if closes is None:
+    if closes is None and not foreign_closes:
         return empty
 
     series: dict[str, list[tuple[str, float]]] = {}
+    asof: dict[str, list[tuple[str, float]]] = {}
     for position in positions:
         code = position.get("series_code")
-        if code and code not in series:
-            cleaned = risk.clean_series(closes.get(code), "close")
-            if cleaned:
-                series[code] = cleaned
+        if not code or code in series or code in asof:
+            continue
+        foreign = bool(position.get("foreign"))
+        cleaned = risk.clean_series(((foreign_closes if foreign else closes) or {}).get(code), "close")
+        if cleaned:
+            (asof if foreign else series)[code] = cleaned
+    stale: set[str] = set()
+    if asof:
+        grid = sorted({day for points in (series or asof).values() for day, _ in points})
+        for code, points in asof.items():
+            sampled = _sample_asof(points, grid, ASOF_MAX_GAP_DAYS)
+            # 끝이 묵은 시리즈 하나가 공통 구간 전체를 과거로 끌어당기지 않게 뺀다.
+            if sampled and sampled[-1][0] == grid[-1]:
+                series[code] = sampled
+            else:
+                stale.add(code)
     modeled_codes, dates = _pick_common_sample(series, min_returns, min_history_ratio)
     modeled_set = set(modeled_codes)
 
@@ -418,6 +597,8 @@ def compute_risk_model(
             continue
         if not code:
             reason = "no_series"
+        elif code in stale:
+            reason = "stale_rows"
         elif code not in series:
             reason = "no_rows"
         else:
@@ -426,7 +607,7 @@ def compute_risk_model(
             "code": position["code"],
             "name": position.get("name") or position["code"],
             "reason": reason,
-            "sample_points": len(series.get(code) or []) if code else 0,
+            "sample_points": len(series.get(code) or asof.get(code) or []) if code else 0,
         })
 
     result = {**empty, "excluded": excluded[:MAX_RISK_ROWS], "excluded_count": len(excluded)}
@@ -482,6 +663,7 @@ def compute_risk_model(
         "end_date": dates[-1],
         "coverage_pct": _pct(sum(abs(p["value"]) for p in modeled), gross_all),
         "modeled_count": len(modeled),
+        "foreign_count": sum(1 for p in modeled if p.get("foreign")),
         "rows": rows[:MAX_RISK_ROWS],
         "correlation": _correlation_matrix(rows, modeled, position_returns, top_k),
     })
@@ -562,7 +744,7 @@ def foreign_symbols_needing_type(
     symbols: dict[str, None] = {}
     for position in positions:
         code = normalize_portfolio_code(position.get("code"))
-        if not code or is_special_asset(code) or is_korean_stock(code) or code.startswith(_NON_QUOTABLE_PREFIXES):
+        if not _is_foreign_listing(code):
             continue
         symbol = etf_lookup_key(code)
         if (etfs and symbol in etfs) or _ETF_NAME_RE.search(str(position.get("name") or "")):
@@ -622,7 +804,7 @@ def _derivative_series_code(position: Mapping[str, Any], preferred_pairs: Mappin
 
 
 def required_series_codes(positions: Iterable[Mapping[str, Any]], preferred_pairs: Mapping[str, str] | None = None) -> list[str]:
-    """위험 모델에 필요한 finance-pi 일봉 코드(국내만 — 해외는 일봉이 없다)."""
+    """위험 모델에 필요한 finance-pi 일봉 코드(국내만 — 해외는 :func:`foreign_series_codes`)."""
     codes: dict[str, None] = {}
     for position in positions:
         code = normalize_portfolio_code(position.get("code"))
@@ -700,6 +882,7 @@ def build_exposure_report(
     preferred_pairs: Mapping[str, str] | None = None,
     companies: Mapping[str, Mapping[str, Any]] | None = None,
     closes: Mapping[str, list[dict]] | None = None,
+    foreign_closes: Mapping[str, list[dict]] | None = None,
     sub_prices: Mapping[str, float | None] | None = None,
     sources: list[dict] | None = None,
     holdco_as_of: str | None = None,
@@ -711,7 +894,8 @@ def build_exposure_report(
 
     ``positions``: {code, name, quantity, value(원화, 시세 없으면 None), currency,
     underlying_code?, pair_long_code?, instrument_type?, stale?}. 형제 데이터가 None 이면
-    그 자료 없이 계산하고, 화면이 ``sources`` 로 이유를 보여 준다.
+    그 자료 없이 계산하고, 화면이 ``sources`` 로 이유를 보여 준다. ``closes`` 는 국내 일봉,
+    ``foreign_closes`` 는 해외 보유 코드별 :func:`krw_asof_closes` 결과다.
     """
     etf_source_ok = etfs is not None
     etfs = etfs or {}
@@ -792,7 +976,7 @@ def build_exposure_report(
         asset_slot["count"] += 1
 
         member = {"code": code, "name": name, "value": _money(value)}
-        series_code = code if is_korean_stock(code) else None
+        series_code = code if is_korean_stock(code) or _is_foreign_listing(code) else None
 
         if kind == "etf":
             flat = None
@@ -870,7 +1054,10 @@ def build_exposure_report(
             line["members"].append(member)
             sector_extra[SECTOR_NON_EQUITY] += value
 
-        risk_inputs.append({"code": code, "name": name, "value": value, "series_code": series_code})
+        risk_inputs.append({
+            "code": code, "name": name, "value": value, "series_code": series_code,
+            "foreign": bool(series_code) and not is_korean_stock(series_code),
+        })
 
     invested_value = total_value - cash_value
 
@@ -1040,6 +1227,7 @@ def build_exposure_report(
     risk_model = compute_risk_model(
         risk_inputs,
         closes,
+        foreign_closes=foreign_closes,
         min_returns=min_returns,
         min_history_ratio=min_history_ratio,
         invested_gross=sum(abs(v) for v in direct_values),

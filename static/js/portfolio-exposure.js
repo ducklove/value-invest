@@ -18,7 +18,7 @@ const PF_XRAY_ETF_STATUS = {
   not_in_universe: 'EIAYN 미수록',
   no_source: 'ETF 자료 수신 실패',
 };
-const PF_XRAY_RISK_REASON = { no_series: '일봉 없음', no_rows: '일봉 없음', short_history: '표본 부족' };
+const PF_XRAY_RISK_REASON = { no_series: '일봉 없음', no_rows: '일봉 없음', stale_rows: '일봉 지연', short_history: '표본 부족' };
 
 function _pfExposureEl() { return document.getElementById('pfExposureContent'); }
 
@@ -185,7 +185,7 @@ function _pfXrayHeatmap(correlation) {
 function _pfXrayRisk(data) {
   const risk = data.risk || {};
   if (!risk.available) {
-    return '<p class="pf-chart-note">일봉 표본이 부족하거나 finance-pi 일봉을 받지 못해 위험 기여를 계산하지 못했습니다.</p>';
+    return '<p class="pf-chart-note">일봉 표본이 부족하거나 일봉을 받지 못해 위험 기여를 계산하지 못했습니다.</p>';
   }
   const row = item => `<tr><th scope="row">${escapeHtml(item.name)} <small>${escapeHtml(item.code)}</small></th><td><strong>${_pfXrayPct(item.risk_contribution_pct, { signed: true })}</strong></td><td>${_pfXrayPct(item.weight_pct)}</td><td>${_pfXrayPct(item.volatility_pct)}</td></tr>`;
   const reasons = {};
@@ -194,7 +194,11 @@ function _pfXrayRisk(data) {
     reasons[label] = (reasons[label] || 0) + 1;
   });
   const excluded = Object.entries(reasons).map(([label, count]) => `${escapeHtml(label)} ${count}개`).join(' · ');
-  return `<p class="pf-chart-note">${escapeHtml(risk.start_date)} ~ ${escapeHtml(risk.end_date)} · 수익률 표본 ${Number(risk.sample_returns)}일 · 분산 비율 ${_pfXrayNum(risk.diversification_ratio)} · 가중 평균 상관 ${_pfXrayNum(risk.implied_avg_correlation)}${excluded ? ` · 제외 ${excluded}` : ''}</p>
+  const foreignCount = Number(risk.foreign_count) || 0;
+  const foreignNote = foreignCount
+    ? `<p class="pf-chart-note" id="pfXrayRiskForeign">해외 ${foreignCount}종목은 원화로 환산했고, 국내 장 마감 전에 끝난 마지막 종가를 그날 값으로 씁니다(미국·유럽은 전날 종가).</p>`
+    : '';
+  return `<p class="pf-chart-note">${escapeHtml(risk.start_date)} ~ ${escapeHtml(risk.end_date)} · 수익률 표본 ${Number(risk.sample_returns)}일 · 분산 비율 ${_pfXrayNum(risk.diversification_ratio)} · 가중 평균 상관 ${_pfXrayNum(risk.implied_avg_correlation)}${excluded ? ` · 제외 ${excluded}` : ''}</p>${foreignNote}
     ${_pfXrayTable('pfXrayRiskTable', '<th>포지션</th><th>위험 기여</th><th>모델 비중</th><th>변동성</th>', risk.rows || [], row, { total: risk.modeled_count || (risk.rows || []).length })}${_pfXrayHeatmap(risk.correlation)}`;
 }
 

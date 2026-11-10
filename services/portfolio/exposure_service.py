@@ -3,6 +3,7 @@
 계산은 services.portfolio.exposure, 자료 수집은 services.portfolio.exposure_data 몫이다.
 보유 수량은 선택한 계좌 기준(``account_id``)이고, 없으면 전체 계좌 합산이다.
 결과는 사용자·계좌별로 10분 캐시한다(시세는 그 안에서 고정된다).
+일봉은 국내가 finance-pi, 해외가 Yahoo(원화 환산)다. 한쪽이 실패해도 다른 쪽으로 계산한다.
 """
 
 from __future__ import annotations
@@ -12,11 +13,14 @@ import logging
 from typing import Any
 
 from cache_layer import MemoryTTLCache, cached_fetch, now_iso
+from domain.portfolio_codes import normalize_portfolio_code
+from domain.timeutil import now_kst
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
 from services import stock_quotes
 from services.market.sources import close_price
-from services.portfolio import exposure, exposure_data, futures_quotes, quote_service, risk
+from services.portfolio import exposure, exposure_data, foreign, futures_quotes, quote_service, risk
+from services.portfolio.identifiers import static_foreign_ticker
 from services.portfolio.time_windows import today_kst_date
 
 logger = logging.getLogger(__name__)
@@ -26,7 +30,9 @@ REPORT_TTL_SECONDS = 600
 QUOTE_BUDGET_SECONDS = 45.0
 
 # 자료별로 낡았다고 볼 기준일수. eiayn 은 일배치, 지주사 지분은 분기 공시 주기다.
-_MAX_AGE_DAYS = {"eiayn": 3, "holding_value": 120, "common_preferred_spread": 7, "kind": 45, "finance_pi": 5}
+_MAX_AGE_DAYS = {
+    "eiayn": 3, "holding_value": 120, "common_preferred_spread": 7, "kind": 45, "finance_pi": 5, "yahoo": 5,
+}
 
 _report_cache = MemoryTTLCache("portfolio.exposure.report", REPORT_TTL_SECONDS, evict_expired_after=0)
 
@@ -121,6 +127,59 @@ async def _load_closes(codes: list[str]) -> tuple[dict[str, list[dict]] | None, 
     return rows, latest
 
 
+async def _yahoo_symbols(codes: list[str]) -> dict[str, str]:
+    """보유 코드 → Yahoo 심볼. 해외 시세·자산 인사이트와 같은 순서(고정 표 → 티커 맵 → 코드 그대로)."""
+    if not codes:
+        return {}
+    await foreign.ensure_ticker_map()
+    symbols: dict[str, str] = {}
+    for code in codes:
+        static = static_foreign_ticker(code)
+        ticker = static["ticker"] if static else (foreign._ticker_map.get(code) or code)
+        symbols[code] = foreign.yfinance_direct_ticker(ticker)
+    return symbols
+
+
+async def _load_foreign_closes(positions: list[dict]) -> tuple[dict[str, list[dict]], dict | None]:
+    """해외 보유 종목의 Yahoo 일봉 → 원화·국내 거래일 기준 종가. 해외 종목이 없으면 (빈 dict, None).
+
+    환율은 보유 통화로 먼저 함께 받고, 시세 제공자가 다른 통화를 알려 주면 그 환율을 더 받는다.
+    통화를 모르거나 환율을 못 받은 종목은 빠진다(원화가 아닌 수익률을 섞지 않는다).
+    """
+    codes = exposure.foreign_series_codes(positions)
+    if not codes:
+        return {}, None
+    symbols = await _yahoo_symbols(codes)
+    currency_of = {normalize_portfolio_code(p.get("code")): p.get("currency") for p in positions}
+    held_fx = {fx for code in symbols for fx in exposure.fx_symbols(currency_of.get(code))}
+    wanted = [*symbols.values(), *sorted(held_fx)]
+    loaded = await exposure_data.load_daily_series(wanted)
+    extra = {fx for series in loaded.values() for fx in exposure.fx_symbols(series.get("currency"))} - set(wanted)
+    if extra:
+        loaded.update(await exposure_data.load_daily_series(sorted(extra)))
+    fx_rows_by_symbol = {symbol: series["rows"] for symbol, series in loaded.items()}
+
+    now = now_kst()
+    out: dict[str, list[dict]] = {}
+    latest: str | None = None
+    for code, symbol in symbols.items():
+        series = loaded.get(symbol)
+        currency = exposure.normalize_currency((series or {}).get("currency") or currency_of.get(code))
+        if not series or not currency:
+            continue
+        fx_rows = None if currency == "KRW" else exposure.krw_fx_rows(currency, fx_rows_by_symbol)
+        if currency != "KRW" and not fx_rows:
+            continue
+        rows = exposure.krw_asof_closes(
+            series["rows"], timezone=series["timezone"], close_time=series["close_time"],
+            fx_rows=fx_rows, now=now,
+        )
+        if rows:
+            out[code] = rows
+            latest = max(latest or "", rows[-1]["session_date"])
+    return out, {"requested": len(codes), "loaded": len(out), "as_of": latest}
+
+
 def _sources(
     etf: dict,
     holdco: dict,
@@ -128,6 +187,7 @@ def _sources(
     company: dict,
     closes_as_of: str | None,
     closes_ok: bool,
+    foreign_meta: dict | None = None,
 ) -> list[dict]:
     today = today_kst_date()
 
@@ -137,7 +197,7 @@ def _sources(
             available=bool(payload.get("available")), detail=detail,
         )
 
-    return [
+    rows = [
         row("eiayn", "ETF 구성", etf, "EIAYN"),
         row("holding_value", "지주사 지분(설정값)", holdco, "지주사 지분가치"),
         row("common_preferred_spread", "우선주 쌍", pairs, "우선주 괴리율"),
@@ -147,6 +207,12 @@ def _sources(
             available=closes_ok, detail="finance-pi",
         ),
     ]
+    if foreign_meta is not None:  # 해외 종목이 없는 계좌에는 보이지 않는다.
+        rows.append(exposure.source_freshness(
+            "yahoo", "해외 일봉", foreign_meta.get("as_of"), today=today, max_age_days=_MAX_AGE_DAYS["yahoo"],
+            available=bool(foreign_meta.get("loaded")), detail="Yahoo Finance",
+        ))
+    return rows
 
 
 async def _build_report(google_sub: str, account_id: str | None) -> dict:
@@ -171,8 +237,9 @@ async def _build_report(google_sub: str, account_id: str | None) -> dict:
     series_codes = exposure.required_series_codes(positions, pair_map)
     sub_codes = exposure.holdco_subsidiary_codes(positions, holdco_map, pair_map, company_map)
     missing_subs = [code for code in sub_codes if code not in quotes]
-    (closes, closes_as_of), sub_quotes, instrument_types = await asyncio.gather(
+    (closes, closes_as_of), (foreign_closes, foreign_meta), sub_quotes, instrument_types = await asyncio.gather(
         _load_closes(series_codes),
+        _load_foreign_closes(positions),
         _quotes_for(missing_subs),
         exposure_data.load_instrument_types(exposure.foreign_symbols_needing_type(positions, etf_map)),
     )
@@ -189,8 +256,9 @@ async def _build_report(google_sub: str, account_id: str | None) -> dict:
         preferred_pairs=pair_map,
         companies=company_map,
         closes=closes,
+        foreign_closes=foreign_closes,
         sub_prices=sub_prices,
-        sources=_sources(etf, holdco, pairs, company, closes_as_of, closes is not None),
+        sources=_sources(etf, holdco, pairs, company, closes_as_of, closes is not None, foreign_meta),
         holdco_as_of=holdco.get("as_of"),
         account_id=account_id,
     )

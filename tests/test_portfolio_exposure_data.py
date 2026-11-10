@@ -1,7 +1,9 @@
 """X-Ray 데이터 로더·KIND 파서·조립·라우트 테스트."""
 
 import json
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -9,11 +11,12 @@ from _harness import TempDbMixin, seed_user
 from fastapi import HTTPException
 from starlette.requests import Request
 
+from domain.timeutil import KST
 from repositories import accounts as accounts_repo
 from repositories import cache_values
 from repositories import db as db_repo
 from routes import portfolio_exposure as exposure_route
-from services.market.sources import kind
+from services.market.sources import kind, yahoo
 from services.portfolio import exposure_data, exposure_service
 
 ETF_PAYLOAD = {
@@ -55,6 +58,18 @@ CORP_LIST_HTML = """
   <tr><td>짧은 행</td></tr>
 </table></body></html>
 """
+
+
+def _stamp(text: str, zone: str) -> int:
+    return int(datetime.fromisoformat(text).replace(tzinfo=ZoneInfo(zone)).timestamp())
+
+
+def _chart(meta: dict, timestamps: list, closes: list, adjcloses: list | None = None) -> dict:
+    """Yahoo v8 chart 응답 모양."""
+    indicators = {"quote": [{"close": closes}]}
+    if adjcloses is not None:
+        indicators["adjclose"] = [{"adjclose": adjcloses}]
+    return {"chart": {"result": [{"meta": meta, "timestamp": timestamps, "indicators": indicators}], "error": None}}
 
 
 def _response(status: int, *, content: bytes = b"", etag: str | None = None) -> httpx.Response:
@@ -135,6 +150,33 @@ def test_parse_corp_list_survives_column_reorder_and_rejects_other_pages():
     assert kind.parse_corp_list("<html>로그인 페이지</html>") == {}
     assert kind.parse_corp_list("<table><tr><th>전혀</th><th>다른</th></tr></table>") == {}
     assert kind.parse_corp_list("") == {}
+
+
+def test_normalize_daily_chart_prefers_adjusted_close_and_keeps_the_last_bar_of_a_day():
+    zone = "Australia/Sydney"
+    payload = _chart(
+        {"currency": "AUD", "exchangeTimezoneName": zone,
+         "currentTradingPeriod": {"regular": {"end": _stamp("2026-11-10T16:12", zone)}}},
+        # 시드니는 장 마감 직후 같은 날짜의 실시간 봉이 하나 더 붙는다(앞 봉은 값이 비어 있다).
+        [_stamp("2026-11-09T10:00", zone), _stamp("2026-11-10T10:00", zone), _stamp("2026-11-10T16:10:23", zone)],
+        [150.8, None, 152.75],
+        [150.0, None, 152.75],
+    )
+    assert exposure_data.normalize_daily_chart(yahoo.parse_chart(payload)) == {
+        "currency": "AUD", "timezone": zone, "close_time": "16:12",
+        "rows": [["2026-11-09", 150.0], ["2026-11-10", 152.75]],
+    }
+
+
+def test_normalize_daily_chart_falls_back_to_close_and_default_clock():
+    zone = "America/New_York"
+    payload = _chart({"currency": "USD", "exchangeTimezoneName": zone}, [_stamp("2026-11-09T09:30", zone)], [99.5])
+    series = exposure_data.normalize_daily_chart(yahoo.parse_chart(payload))
+    assert series["rows"] == [["2026-11-09", 99.5]]
+    assert series["close_time"] == "16:00"
+    unknown_zone = _chart({"exchangeTimezoneName": "Mars/Base"}, [], [])
+    assert exposure_data.normalize_daily_chart(yahoo.parse_chart(unknown_zone)) is None
+    assert exposure_data.normalize_daily_chart(None) is None
 
 
 class KindFetchTests(TempDbMixin):
@@ -269,6 +311,41 @@ class PersistedLoaderTests(TempDbMixin):
             value = await exposure_data.load_preferred_pairs()
         self.assertFalse(value["available"])
 
+    async def test_daily_series_are_cached_and_failed_symbols_left_out(self):
+        zone = "America/New_York"
+        good = _chart({"currency": "USD", "exchangeTimezoneName": zone}, [_stamp("2026-11-09T09:30", zone)], [99.5])
+
+        async def fetch(symbol, **kwargs):
+            self.assertEqual((kwargs["range_"], kwargs["interval"]), ("1y", "1d"))
+            if symbol == "NOPE":
+                raise httpx.HTTPStatusError("404", request=httpx.Request("GET", "https://x/"),
+                                            response=httpx.Response(404))
+            return good
+
+        fetch_mock = AsyncMock(side_effect=fetch)
+        with patch.object(exposure_data.yahoo, "fetch_chart_json", new=fetch_mock):
+            first = await exposure_data.load_daily_series(["AAPL", "NOPE", "AAPL", ""])
+            again = await exposure_data.load_daily_series(["AAPL", "NOPE"])
+        self.assertEqual(set(first), {"AAPL"})
+        self.assertEqual(first["AAPL"]["rows"], [["2026-11-09", 99.5]])
+        self.assertEqual(set(again), {"AAPL"})
+        # 받은 심볼은 3시간 보관하고, 실패한 심볼만 다시 묻는다.
+        self.assertEqual([call.args[0] for call in fetch_mock.await_args_list], ["AAPL", "NOPE", "NOPE"])
+        self.assertEqual(await exposure_data.load_daily_series([]), {})
+
+    async def test_daily_series_serve_the_last_value_when_refresh_fails(self):
+        zone = "America/New_York"
+        good = _chart({"currency": "USD", "exchangeTimezoneName": zone}, [_stamp("2026-11-09T09:30", zone)], [99.5])
+        with patch.object(exposure_data.yahoo, "fetch_chart_json", new=AsyncMock(return_value=good)):
+            await exposure_data.load_daily_series(["AAPL"])
+        stored = exposure_data._daily_cache.get("AAPL")
+        exposure_data._daily_cache.set("AAPL", stored, ttl_seconds=-1)  # TTL 만료
+        failing = AsyncMock(side_effect=exposure_data.yahoo.YahooRateLimitedError("429"))
+        with patch.object(exposure_data.yahoo, "fetch_chart_json", new=failing):
+            value = await exposure_data.load_daily_series(["AAPL"])
+        self.assertEqual(failing.await_count, 1)
+        self.assertEqual(value["AAPL"]["rows"], [["2026-11-09", 99.5]])
+
 
 # ---------------------------------------------------------------------------
 # 조립·계좌 필터·라우트
@@ -338,10 +415,12 @@ class ExposureServiceTests(TempDbMixin):
             )
         await db.commit()
 
-    def _patches(self, quotes=None, closes=None):
+    def _patches(self, quotes=None, closes=None, daily=None, types=None):
         patches = [
             patch.object(exposure_data, name, new=AsyncMock(return_value=value)) for name, value in SOURCES.items()
         ]
+        if types is not None:  # 해외 종목 유형 조회(Yahoo)를 막는다. 유형 경로 자체를 보는 테스트는 넘기지 않는다.
+            patches.append(patch.object(exposure_data, "load_instrument_types", new=AsyncMock(return_value=types)))
 
         async def complete_quotes(codes):
             source = PRICES if quotes is None else quotes
@@ -351,7 +430,24 @@ class ExposureServiceTests(TempDbMixin):
         closes_mock = AsyncMock(return_value={} if closes is None else closes)
         patches.append(patch.object(exposure_service.close_price, "get_daily_prices_batch", new=closes_mock))
         self.closes_mock = closes_mock
+        series = daily or {}
+        daily_mock = AsyncMock(side_effect=lambda symbols: {s: series[s] for s in symbols if s in series})
+        patches.append(patch.object(exposure_data, "load_daily_series", new=daily_mock))
+        self.daily_mock = daily_mock
         return patches
+
+    async def _add_holding(self, code, name, quantity, currency, account="acc-a"):
+        db = await db_repo.get_db()
+        await db.execute(
+            "INSERT INTO account_holdings VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (SUB, account, code, name, quantity, 1.0, currency, currency, "2026-01-01", "2026-01-01"),
+        )
+        await db.execute(
+            "INSERT OR REPLACE INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, "
+            "created_at, updated_at, currency, avg_price_currency) VALUES (?,?,?,?,?,?,?,?,?)",
+            (SUB, code, name, quantity, 1.0, "2026-01-01", "2026-01-01", currency, currency),
+        )
+        await db.commit()
 
     async def _report(self, account_id=None, **kwargs):
         patches = self._patches(**kwargs)
@@ -380,6 +476,8 @@ class ExposureServiceTests(TempDbMixin):
         self.assertEqual(ids["eiayn"]["as_of"], "2026-09-30")
         self.assertTrue(ids["eiayn"]["stale"])
         self.assertFalse(ids["finance_pi"]["available"])  # 일봉 없음은 숨기지 않는다.
+        self.assertNotIn("yahoo", ids)  # 해외 종목이 없으면 해외 일봉 줄도 없다.
+        self.daily_mock.assert_not_awaited()
         self.assertFalse(report["risk"]["available"])
 
     async def test_account_filter_uses_that_accounts_quantities_and_caches_separately(self):
@@ -419,18 +517,72 @@ class ExposureServiceTests(TempDbMixin):
         ids = {row["id"]: row for row in report["sources"]}
         self.assertEqual(ids["finance_pi"]["as_of"], "2026-03-25")
 
+    async def test_foreign_holdings_are_converted_to_krw_and_feed_risk(self):
+        await self._add_holding("AAPL", "애플", 2, "USD")
+        days = [f"2026-03-{day:02d}" for day in range(2, 32) if datetime(2026, 3, day).weekday() < 5]
+        days += ["2026-04-01", "2026-04-02", "2026-04-03"]  # 국내·미국 모두 평일 25일
+        closes = {
+            code: [{"date": d, "close": base + (i % 3)} for i, d in enumerate(days)]
+            for code, base in (("005935", 100.0), ("069500", 200.0), ("000670", 50.0))
+        }
+        daily = {
+            "AAPL": {"currency": "USD", "timezone": "America/New_York", "close_time": "16:00",
+                     "rows": [[d, 100.0 + (i % 4)] for i, d in enumerate(days)]},
+            "KRW=X": {"currency": "KRW", "timezone": "Europe/London", "close_time": "23:59",
+                      "rows": [[d, 1400.0 + i] for i, d in enumerate(days)]},
+        }
+        with patch.object(exposure_service, "now_kst", return_value=datetime(2026, 4, 30, 12, 0, tzinfo=KST)):
+            report = await self._report(quotes=dict(PRICES, AAPL=140000.0), closes=closes, daily=daily, types={})
+        self.assertEqual(self.daily_mock.await_args_list[0].args[0], ["AAPL", "KRW=X"])
+        risk_block = report["risk"]
+        self.assertTrue(risk_block["available"])
+        self.assertEqual(risk_block["foreign_count"], 1)
+        self.assertIn("AAPL", {row["code"] for row in risk_block["rows"]})
+        # 미국 세션 D 는 다음 국내 거래일의 값이라 첫 국내 거래일에는 값이 없다 → 공통 24일, 수익률 23개.
+        self.assertEqual(risk_block["sample_returns"], 23)
+        self.assertEqual(risk_block["start_date"], "2026-03-03")
+        ids = {row["id"]: row for row in report["sources"]}
+        self.assertEqual(ids["yahoo"]["as_of"], "2026-04-03")  # 마지막 해외 세션 날짜
+        self.assertTrue(ids["yahoo"]["available"])
+
+    async def test_non_dollar_holdings_convert_through_the_dollar_cross(self):
+        positions = [{"code": "83188.HK", "currency": "CNY"}, {"code": "005930", "currency": "KRW"}]
+        daily = {
+            "83188.HK": {"currency": "CNY", "timezone": "Asia/Hong_Kong", "close_time": "16:10",
+                         "rows": [["2026-11-05", 40.0], ["2026-11-06", 42.0]]},
+            "KRW=X": {"currency": "KRW", "timezone": "Europe/London", "close_time": "23:59",
+                      "rows": [["2026-11-05", 1400.0], ["2026-11-06", 1410.0]]},
+            "CNY=X": {"currency": "CNY", "timezone": "Europe/London", "close_time": "23:59",
+                      "rows": [["2026-11-05", 7.0], ["2026-11-06", 7.05]]},
+        }
+        load = AsyncMock(side_effect=lambda symbols: {s: daily[s] for s in symbols if s in daily})
+        with patch.object(exposure_data, "load_daily_series", new=load), \
+                patch.object(exposure_service, "now_kst", return_value=datetime(2026, 11, 10, 12, 0, tzinfo=KST)):
+            closes, meta = await exposure_service._load_foreign_closes(positions)
+        # 위안 쌍(CNYKRW=X)은 이력이 없어 달러 교차로 환산한다. 한 번에 함께 받는다.
+        self.assertEqual(load.await_args_list[0].args[0], ["83188.HK", "CNY=X", "KRW=X"])
+        self.assertEqual(load.await_count, 1)
+        rows = closes["83188.HK"]
+        # 홍콩 16:10 마감 = 서울 17:10 → 다음 국내 거래일 값(금요일 종가는 월요일). 원/위안 = 200.
+        self.assertEqual([(r["date"], r["session_date"]) for r in rows],
+                         [("2026-11-06", "2026-11-05"), ("2026-11-09", "2026-11-06")])
+        self.assertAlmostEqual(rows[0]["close"], 8000.0)
+        self.assertAlmostEqual(rows[1]["close"], 8400.0)
+        self.assertEqual(meta, {"requested": 1, "loaded": 1, "as_of": "2026-11-06"})
+
+    async def test_foreign_series_without_fx_are_left_out_not_mixed_in(self):
+        await self._add_holding("AAPL", "애플", 2, "USD")
+        daily = {"AAPL": {"currency": "USD", "timezone": "America/New_York", "close_time": "16:00",
+                          "rows": [["2026-03-02", 100.0], ["2026-03-03", 101.0]]}}
+        report = await self._report(quotes=dict(PRICES, AAPL=140000.0), daily=daily, types={})
+        # 환율을 못 받으면 달러 수익률을 원화 모델에 섞지 않는다. 같은 환율을 다시 묻지도 않는다.
+        self.assertEqual(self.daily_mock.await_count, 1)
+        self.assertFalse(report["risk"]["available"])
+        ids = {row["id"]: row for row in report["sources"]}
+        self.assertFalse(ids["yahoo"]["available"])
+
     async def test_foreign_instrument_type_reaches_classification(self):
-        db = await db_repo.get_db()
-        await db.execute(
-            "INSERT INTO account_holdings VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (SUB, "acc-a", "VWO", "신흥국 주식", 2, 1.0, "USD", "USD", "2026-01-01", "2026-01-01"),
-        )
-        await db.execute(
-            "INSERT OR REPLACE INTO user_portfolio (google_sub, stock_code, stock_name, quantity, avg_price, "
-            "created_at, updated_at, currency, avg_price_currency) VALUES (?,?,?,?,?,?,?,?,?)",
-            (SUB, "VWO", "신흥국 주식", 2, 1.0, "2026-01-01", "2026-01-01", "USD", "USD"),
-        )
-        await db.commit()
+        await self._add_holding("VWO", "신흥국 주식", 2, "USD")
         fetch = AsyncMock(return_value={"meta": {"instrumentType": "ETF"}})
         with patch.object(exposure_data.yahoo, "fetch_close_series", new=fetch):
             report = await self._report(quotes=dict(PRICES, VWO=70000.0))

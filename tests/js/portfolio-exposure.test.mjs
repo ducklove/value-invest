@@ -226,6 +226,21 @@ test("위험 기여·상관을 그리고 표본 부족은 제외 사유로 드�
   assert.match(content().querySelector("#pfXrayHeatmap tbody th").textContent, /^1\. 에이$/);
 });
 
+test("해외 종목이 모델에 들면 원화 환산·종가 기준을 알리고 묵은 일봉은 제외 사유로 보인다", async () => {
+  const risk = { ...PAYLOAD.risk, foreign_count: 3, excluded: [{ code: "OLD", reason: "stale_rows" }] };
+  const { w, content } = load(() => ok({ ...PAYLOAD, risk }));
+  await w.pfLoadExposurePanel();
+  const note = content().querySelector("#pfXrayRiskForeign");
+  assert.match(note.textContent, /해외 3종목은 원화로 환산/);
+  assert.match(note.textContent, /미국·유럽은 전날 종가/);
+  assert.match(content().textContent, /제외 일봉 지연 1개/);
+
+  // 해외 종목이 없으면 안내를 붙이지 않는다.
+  const domestic = load(() => ok(PAYLOAD));
+  await domestic.w.pfLoadExposurePanel();
+  assert.equal(domestic.content().querySelector("#pfXrayRiskForeign"), null);
+});
+
 test("긴 표는 앞 10행만 펼치고 접힌 행 수와 전체 개수를 정확히 알려 준다", async () => {
   const rows = Array.from({ length: 12 }, (_, i) => ({
     code: `C${i}`, name: `종목${i}`, direct_value: 1000 - i, derivative_value: 0, etf_value: 0, net_pct: 10 - i, holdco_pct: null,

@@ -1,4 +1,4 @@
-"""X-Ray 입력 데이터 로더 — ETF 구성·지주사 지분·우선주 쌍·상장법인 업종.
+"""X-Ray 입력 데이터 로더 — ETF 구성·지주사 지분·우선주 쌍·상장법인 업종·해외 일봉.
 
 요청 경로에서 큰 파일을 받지 않도록 메모리 → DB(``cache_values``) → 네트워크 순으로 읽는다.
 재시작이 잦아도(배포마다) 다시 내려받지 않고, 원천이 실패하면 마지막 값을 낡은 채로 쓴다.
@@ -18,13 +18,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Awaitable, Callable
+from zoneinfo import ZoneInfo
 
 import httpx
 
-from cache_layer import MemoryTTLCache, now_iso
+from cache_layer import MemoryTTLCache, cached_fetch, now_iso
+from core.errors import AppError
 from core.http import get_http_client
 from domain.timeutil import KST
 from repositories import cache_values
@@ -58,6 +61,12 @@ _INSTRUMENT_TTL_SECONDS = 90 * 24 * 3600  # 종목 유형은 거의 바뀌지 �
 _INSTRUMENT_TIMEOUT_SECONDS = 6.0
 _INSTRUMENT_CONCURRENCY = 3
 _instrument_cache = MemoryTTLCache("portfolio.exposure.instrument", None)
+# 해외 일봉: 하루 한 번 바뀌므로 3시간 보관하고, 갱신이 실패하면 사흘 안의 직전 값을 쓴다.
+_DAILY_TTL_SECONDS = 3 * 3600
+_DAILY_STALE_SECONDS = 3 * 24 * 3600
+_DAILY_CONCURRENCY = 3
+_DEFAULT_CLOSE_TIME = "16:00"
+_daily_cache = MemoryTTLCache("portfolio.exposure.daily", _DAILY_TTL_SECONDS)
 
 
 def _unavailable(error: str) -> dict:
@@ -302,9 +311,91 @@ async def load_instrument_types(symbols: list[str]) -> dict[str, str]:
     return {symbol: known[symbol] for symbol in symbols if symbol in known}
 
 
+def _positive(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) and number > 0 else None
+
+
+def normalize_daily_chart(chart: yahoo.ChartResult | None) -> dict | None:
+    """Yahoo 일봉 → {currency, timezone, close_time, rows: [[거래소 날짜, 종가]]}.
+
+    배당·분할 조정 종가(adjclose)를 쓰고, 그 열이 없을 때만 종가를 쓴다(한 시리즈 안에서 섞지
+    않는다). 같은 날 봉이 둘이면(시드니 등 장 마감 직후의 실시간 봉) 뒤의 값이 이긴다. 정규장
+    마감 시각은 ``currentTradingPeriod.regular.end`` 에서 읽고, 없으면 16:00 으로 본다.
+    """
+    if chart is None:
+        return None
+    zone_name = chart.meta.get("exchangeTimezoneName")
+    try:
+        zone = ZoneInfo(str(zone_name))
+    except (KeyError, ValueError):  # ZoneInfoNotFoundError 는 KeyError 다.
+        return None
+    adjusted = len(chart.adjcloses) == len(chart.timestamps) and any(v is not None for v in chart.adjcloses)
+    by_day: dict[str, float] = {}
+    for stamp, raw in zip(chart.timestamps, chart.adjcloses if adjusted else chart.closes):
+        value = _positive(raw)
+        if value is None:
+            continue
+        try:
+            day = datetime.fromtimestamp(int(stamp), tz=zone).date().isoformat()
+        except (TypeError, ValueError, OverflowError, OSError):
+            continue
+        by_day[day] = round(value, 6)
+    close_time = _DEFAULT_CLOSE_TIME
+    end = ((chart.meta.get("currentTradingPeriod") or {}).get("regular") or {}).get("end")
+    if end:
+        try:
+            close_time = datetime.fromtimestamp(int(end), tz=zone).strftime("%H:%M")
+        except (TypeError, ValueError, OverflowError, OSError):
+            pass
+    return {
+        "currency": chart.currency,
+        "timezone": str(zone_name),
+        "close_time": close_time,
+        "rows": [[day, by_day[day]] for day in sorted(by_day)],
+    }
+
+
+async def _fetch_daily(symbol: str) -> dict:
+    payload = await yahoo.fetch_chart_json(symbol, range_="1y", interval="1d", include_pre_post=False)
+    series = normalize_daily_chart(yahoo.parse_chart(payload))
+    if not series or not series["rows"]:
+        raise ValueError(f"Yahoo 일봉 없음: {symbol}")
+    return series
+
+
+async def load_daily_series(symbols: list[str]) -> dict[str, dict]:
+    """{Yahoo 심볼: :func:`normalize_daily_chart` 결과} — 해외 보유 종목과 원화 환율의 최근 1년 일봉.
+
+    끝내 받지 못한 심볼은 결과에서 빠지고(위험 모델에서 '일봉 없음'), 다음 계산 때 다시 시도한다.
+    """
+    unique = list(dict.fromkeys(symbol for symbol in symbols if symbol))
+    if not unique:
+        return {}
+    semaphore = asyncio.Semaphore(_DAILY_CONCURRENCY)
+
+    async def one(symbol: str) -> tuple[str, dict | None]:
+        async with semaphore:
+            try:
+                return symbol, await cached_fetch(
+                    _daily_cache, symbol, lambda: _fetch_daily(symbol), stale_ttl=_DAILY_STALE_SECONDS,
+                )
+            except (httpx.HTTPError, ValueError, AppError) as exc:
+                logger.info("X-Ray Yahoo daily unavailable (%s): %s", symbol, exc)
+                return symbol, None
+
+    return {symbol: series for symbol, series in await asyncio.gather(*map(one, unique)) if series}
+
+
 def reset() -> None:
     """테스트용 — 메모리 캐시를 비운다."""
     for source in (_ETF_SOURCE, _HOLDCO_SOURCE, _COMPANY_SOURCE):
         source.cache.clear()
     _pair_cache.clear()
     _instrument_cache.clear()
+    _daily_cache.clear()

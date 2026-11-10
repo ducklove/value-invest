@@ -6,10 +6,11 @@ HHI = Σ w² 등)을 바꾸면 여기 값도 의도적으로 함께 바꿔야 �
 
 import json
 import math
-from datetime import date
+from datetime import date, datetime, timedelta
 
 import pytest
 
+from domain.timeutil import KST
 from services.portfolio import exposure
 
 EPS = 1e-3
@@ -301,6 +302,164 @@ def test_risk_model_hedge_leg_has_negative_contribution_and_sums_to_100():
     assert by_code["KRFUT_S"]["risk_contribution_pct"] == approx(-100.0)
     assert by_code["KRFUT_S"]["proxy_code"] == "X"
     assert by_code["LONG"]["weight_pct"] == approx(200.0)
+
+
+# ---------------------------------------------------------------------------
+# 해외 일봉 — 원화 환산과 국내 거래일 정렬
+# ---------------------------------------------------------------------------
+
+def test_fx_symbols_use_the_dollar_rate_and_dollar_crosses():
+    assert exposure.fx_symbols("USD") == ("KRW=X",)
+    assert exposure.fx_symbols("jpy") == ("KRW=X", "JPY=X")
+    assert exposure.fx_symbols("GBp") == ("KRW=X", "GBP=X")  # 펜스 표기도 파운드 환율이다(수익률은 단위와 무관).
+    assert exposure.fx_symbols("ZAc") == ("KRW=X", "ZAR=X")
+    assert exposure.fx_symbols("KRW") == ()
+    assert exposure.fx_symbols(None) == ()
+
+
+def test_krw_fx_rows_hand_calculated_cross_rate():
+    rows = {
+        "KRW=X": [["2026-11-05", 1400.0], ["2026-11-06", 1410.0], ["2026-11-09", 1420.0]],
+        "CNY=X": [["2026-11-05", 7.0], ["2026-11-06", 7.05]],  # 11-09 가 비면 교차도 그날은 없다.
+    }
+    # 원/위안 = (원/달러) ÷ (위안/달러): 1400 ÷ 7 = 200, 1410 ÷ 7.05 = 200
+    assert exposure.krw_fx_rows("CNY", rows) == [["2026-11-05", approx(200.0)], ["2026-11-06", approx(200.0)]]
+    assert exposure.krw_fx_rows("USD", rows) == rows["KRW=X"]
+    assert exposure.krw_fx_rows("VND", rows) is None  # VND=X 를 못 받았다.
+    assert exposure.krw_fx_rows("USD", {}) is None
+    assert exposure.krw_fx_rows("KRW", rows) is None
+
+
+def test_foreign_series_codes_cover_only_foreign_listings():
+    positions = [
+        {"code": "aapl"}, {"code": "005930"}, {"code": "VWO"}, {"code": "CASH_USD"}, {"code": "KRX_GOLD"},
+        {"code": "CRYPTO_BTC"}, {"code": "KRFUT_A"}, {"code": "IDX_SP500"}, {"code": "AAPL"}, {"code": ""},
+    ]
+    assert exposure.foreign_series_codes(positions) == ["AAPL", "VWO"]
+
+
+def test_krw_asof_closes_hand_calculated_for_a_us_listing():
+    # 2026-11-01 서머타임 종료 뒤라 뉴욕 16:00 = 서울 다음 날 06:00 이다.
+    rows = [["2026-11-05", 100.0], ["2026-11-06", 110.0], ["2026-11-09", 99.0], ["2026-11-10", 120.0]]
+    fx = [["2026-11-05", 1400.0], ["2026-11-06", 1410.0], ["2026-11-09", 1420.0], ["2026-11-10", 1430.0]]
+    now = datetime(2026, 11, 10, 12, 0, tzinfo=KST)
+    result = exposure.krw_asof_closes(rows, timezone="America/New_York", close_time="16:00", fx_rows=fx, now=now)
+    assert result == [
+        # 목요일 종가는 금요일 06:00 에 알려져 금요일 국내 마감 기준 값이다. 100 × 1400.
+        {"date": "2026-11-06", "close": 140_000.0, "session_date": "2026-11-05"},
+        # 금요일 종가는 토요일 06:00 → 다음 국내 거래일(월)의 값. 110 × 1410.
+        {"date": "2026-11-09", "close": 155_100.0, "session_date": "2026-11-06"},
+        {"date": "2026-11-10", "close": 140_580.0, "session_date": "2026-11-09"},
+        # 11-10 세션은 서울 11-11 06:00 에 끝난다 — now(11-10 12:00)에는 진행 중이라 뺀다.
+    ]
+
+
+def test_krw_asof_closes_aligns_asian_closes_and_bridges_fx_gaps():
+    # 도쿄는 서울과 같은 15:30 에 끝나 같은 날, 홍콩은 서울 17:10 에 끝나 다음 거래일 값이다.
+    tokyo = exposure.krw_asof_closes(
+        [["2026-11-06", 3000.0], ["2026-11-09", 3100.0]], timezone="Asia/Tokyo", close_time="15:30",
+        fx_rows=[["2026-11-06", 9.0]],  # 11-09 환율이 비어 3일 전 환율을 쓴다.
+    )
+    assert tokyo == [
+        {"date": "2026-11-06", "close": 27_000.0, "session_date": "2026-11-06"},
+        {"date": "2026-11-09", "close": 27_900.0, "session_date": "2026-11-09"},
+    ]
+    hong_kong = exposure.krw_asof_closes([["2026-11-09", 140.0]], timezone="Asia/Hong_Kong", close_time="16:10")
+    assert hong_kong == [{"date": "2026-11-10", "close": 140.0, "session_date": "2026-11-09"}]
+    # 환율이 FX_MAX_GAP_DAYS 보다 오래 비면 그 날을 뺀다(원화가 아닌 값을 섞지 않는다).
+    assert exposure.krw_asof_closes(
+        [["2026-11-20", 50.0]], timezone="Asia/Tokyo", close_time="15:30", fx_rows=[["2026-11-09", 9.0]],
+    ) == []
+
+
+def test_krw_asof_closes_rejects_unknown_timezone_or_clock():
+    rows = [["2026-11-09", 1.0]]
+    assert exposure.krw_asof_closes(rows, timezone="Mars/Base", close_time="16:00") == []
+    assert exposure.krw_asof_closes(rows, timezone="America/New_York", close_time="late") == []
+
+
+def test_risk_model_carries_foreign_closes_onto_domestic_trading_days():
+    # 국내 거래일 11-02~11-05. 해외 값은 11-02·11-04 에만 새로 알려져 11-03·11-05 는 직전 값을 잇는다.
+    days = ["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05"]
+    closes = {"005930": _rows([100.0, 110.0, 99.0, 99.0], days)}
+    foreign = {"AAPL": [{"date": "2026-11-02", "close": 1000.0}, {"date": "2026-11-04", "close": 1100.0}]}
+    positions = [
+        {"code": "005930", "name": "삼성전자", "value": 100.0, "series_code": "005930"},
+        {"code": "AAPL", "name": "애플", "value": 100.0, "series_code": "AAPL", "foreign": True},
+    ]
+    result = exposure.compute_risk_model(
+        positions, closes, foreign_closes=foreign, min_returns=2, min_history_ratio=0.5,
+    )
+    assert result["available"] is True
+    assert result["sample_returns"] == 3
+    assert (result["start_date"], result["end_date"]) == ("2026-11-02", "2026-11-05")
+    assert result["foreign_count"] == 1
+    # 국내 r = (+10%, -10%, 0), 해외 r = (0, +10%, 0), w = (0.5, 0.5) → r_p = (5%, 0, 0)
+    # Var_p = 1/1200, Cov(국내, p) = 1/400 → RC 150%, Cov(해외, p) = -1/1200 → RC -50%
+    by_code = {row["code"]: row for row in result["rows"]}
+    assert by_code["005930"]["risk_contribution_pct"] == approx(150.0)
+    assert by_code["AAPL"]["risk_contribution_pct"] == approx(-50.0)
+    assert by_code["AAPL"]["volatility_pct"] == approx(math.sqrt(1 / 300) * math.sqrt(252) * 100)
+    assert by_code["AAPL"]["proxy_code"] is None
+    assert result["portfolio_volatility_pct"] == approx(math.sqrt(1 / 1200) * math.sqrt(252) * 100)
+    # 상관 = Cov(-1/200) / (0.1 × sqrt(1/300)) = -sqrt(3)/2
+    assert result["correlation"]["matrix"][0][1] == approx(-math.sqrt(3) / 2)
+
+
+def test_risk_model_drops_stale_foreign_series_instead_of_shortening_the_sample():
+    dates = [(date(2026, 3, 2) + timedelta(days=i)).isoformat() for i in range(30)]
+    closes = {"005930": [{"date": d, "close": 100.0 + (i % 3)} for i, d in enumerate(dates)]}
+    # 해외 값이 표본 끝보다 열흘 넘게 묵었다 — 이어 쓰지 않고, 공통 구간을 과거로 끌지도 않는다.
+    foreign = {"OLD": [{"date": d, "close": 50.0 + (i % 2)} for i, d in enumerate(dates[:15])]}
+    positions = [
+        {"code": "005930", "value": 100.0, "series_code": "005930"},
+        {"code": "OLD", "value": 100.0, "series_code": "OLD", "foreign": True},
+        {"code": "NONE", "value": 100.0, "series_code": "NONE", "foreign": True},
+    ]
+    result = exposure.compute_risk_model(positions, closes, foreign_closes=foreign)
+    assert result["sample_returns"] == 29
+    assert result["end_date"] == dates[-1]
+    assert result["foreign_count"] == 0
+    assert {row["code"]: row["reason"] for row in result["excluded"]} == {"OLD": "stale_rows", "NONE": "no_rows"}
+
+
+def test_risk_model_runs_on_foreign_series_alone():
+    # 국내 일봉이 없으면(해외 전용 계좌·finance-pi 장애) 해외 종가가 알려진 날들이 표본 날짜다.
+    dates = [f"2026-03-{day:02d}" for day in range(2, 28)]
+    foreign = {
+        "AAPL": [{"date": d, "close": 100.0 + (i % 3)} for i, d in enumerate(dates)],
+        "7203.T": [{"date": d, "close": 50.0 + (i % 2)} for i, d in enumerate(dates[1:])],
+    }
+    positions = [
+        {"code": "AAPL", "value": 100.0, "series_code": "AAPL", "foreign": True},
+        {"code": "7203.T", "value": 100.0, "series_code": "7203.T", "foreign": True},
+        {"code": "005930", "value": 100.0, "series_code": "005930"},
+    ]
+    result = exposure.compute_risk_model(positions, None, foreign_closes=foreign)
+    assert result["available"] is True
+    assert result["foreign_count"] == 2
+    assert result["sample_returns"] == len(dates) - 2  # 7203.T 는 첫날 값이 없다.
+    assert {row["code"]: row["reason"] for row in result["excluded"]} == {"005930": "no_rows"}
+    assert exposure.compute_risk_model(positions, None, foreign_closes={})["available"] is False
+
+
+def test_report_sends_foreign_listings_to_the_foreign_series():
+    dates = [f"2026-03-{day:02d}" for day in range(2, 28)]
+    positions = [
+        {"code": "005930", "name": "삼성전자", "quantity": 1, "value": 300.0, "currency": "KRW"},
+        {"code": "AAPL", "name": "애플", "quantity": 1, "value": 100.0, "currency": "USD"},
+        {"code": "KRX_GOLD", "name": "금", "quantity": 1, "value": 100.0, "currency": "KRW"},
+    ]
+    result = exposure.build_exposure_report(
+        positions,
+        closes={"005930": [{"date": d, "close": 100.0 + (i % 3)} for i, d in enumerate(dates)]},
+        foreign_closes={"AAPL": [{"date": d, "close": 1000.0 + (i % 4)} for i, d in enumerate(dates)]},
+    )
+    block = result["risk"]
+    assert {row["code"] for row in block["rows"]} == {"005930", "AAPL"}
+    assert block["foreign_count"] == 1
+    assert block["excluded"] == [{"code": "KRX_GOLD", "name": "금", "reason": "no_series", "sample_points": 0}]
+    assert block["coverage_pct"] == approx(80.0)  # (300 + 100) / 500
 
 
 # ---------------------------------------------------------------------------
