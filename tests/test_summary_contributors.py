@@ -75,6 +75,23 @@ async def test_snapshot_responses_keep_position_and_trade_details_on_the_same_ba
             assert response["stock_trade_flows"] == serialized["stock_trade_flows"]
 
 
+async def test_exchange_rows_in_the_trade_ledger_do_not_break_stock_flows(temp_db):
+    # 운영 원장의 환전 행: currency 키 없이 from/to_currency만 가진다.
+    exchange = {"side": "exchange", "stock_code": "CASH_KRW", "stock_name": "KRW → USD",
+                "from_currency": "KRW", "to_currency": "USD", "amount": 1000.0, "units_change": 0}
+    await seed_user()
+    await insert_trade("u1", "buy", "2026-09-30T07:00:00+00:00")
+    async with transaction() as db:
+        await db.execute(
+            "INSERT INTO portfolio_trades (google_sub, request_id, stock_code, fingerprint, result_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("u1", "fx", "CASH_KRW", "fx", json.dumps(exchange), "2026-09-30T07:01:00+00:00"),
+        )
+    result = await summary_contributors.baseline_details("u1", {"date": "2026-09-30"}, [])
+    assert set(result["stock_trade_flows"]) == {"005930"}
+    assert result["stock_trade_flows"]["005930"]["cash_change"] == -310
+
+
 async def test_currency_change_in_one_position_is_not_silently_combined(temp_db):
     await seed_user()
     await insert_trade("u1", "krw", "2026-09-30T07:00:00+00:00")

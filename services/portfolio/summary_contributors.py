@@ -16,6 +16,10 @@ async def baseline_details(user: str, snapshot: dict, stocks: list[dict]) -> dic
     trades = await portfolio_trades.trades_since(user, dt.astimezone(timezone.utc).isoformat())
     flows = {}
     for trade in trades:
+        # 환전 원장(side="exchange")도 같은 테이블에 저장되지만 종목 수량·손익과 무관하고
+        # 단일 currency 대신 from/to_currency를 가진다.
+        if trade.get("side") not in ("buy", "sell"):
+            continue
         code = trade["stock_code"]
         row = flows.setdefault(code, {
             "stock_name": trade["stock_name"], "currency": trade["currency"],
