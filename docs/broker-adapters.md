@@ -24,9 +24,9 @@
 
 출처: [NH 공식 주간·야간 잔고 명세](https://www.nhplug.com/openapi-docs/krfuture/openapi.json).
 
-- 주간 `/krfuture/inquiry/v1/balance`의 계약 수는 `bf_dd_ny_stl_qty`(전일 미결제수량)에 `bnc_ind_qty`(잔고 증감수량)를 더한다. 야간 전용 `tdy_ny_stl_qty`를 요구하지 않는다. 청산가능수량 `lqd_pbl_qty`를 보유 수량으로 대신하지 않는다.
+- 주간 `/krfuture/inquiry/v1/balance`는 `sby_dit_nm2`의 방향을 적용한 `bf_dd_ny_stl_qty`(전일 미결제수량)에 `byn_cns_qty`(매수체결수량)를 더하고 `sll_cns_qty`(매도체결수량)를 뺀다. 결과가 양수면 매수, 음수면 매도, 0이면 청산된 종목이다. 운영에서 전일 매도 100계약을 매수 100계약으로 청산한 행의 `bnc_ind_qty`도 양수 100이고 `sby_dit_nm`은 당일 매수 방향이었다. 이를 전일 수량에 단순히 더하거나 잔고 방향으로 해석하지 않는다. 야간 전용 `tdy_ny_stl_qty`를 요구하지 않으며 청산가능수량 `lqd_pbl_qty`도 보유 수량으로 대신하지 않는다.
 - 야간 `/krfuture/inquiry/v1/nightBalance`에는 `ost_dit_cd=9`(전체 상품), `ost_dit_cd1=1`(보유)를 보낸다. 종목코드는 `fno_iem_cd`, 계약 수는 `tdy_ny_stl_qty`다. 주간 종목코드는 `iem_cd`다.
-- 수량은 음수가 아닌 정수여야 하고 당일 증감에는 음수를 허용한다. 필수 수량·합계 누락이나 잘못된 값은 기존 잔고를 보존한다. 순자산은 `nas_tal`, 평가손익은 `tot_eal_pls`를 사용한다.
+- 원본 전일·체결·미결제 수량은 음수가 아닌 정수여야 한다. 필수 수량·전일 방향·합계 누락이나 잘못된 값은 기존 잔고를 보존한다. 순자산은 `nas_tal`, 평가손익은 `tot_eal_pls`를 사용한다.
 
 - 국내선물은 일반 종목 표에 `KRFUT_<NH 계약코드>`로 저장한다. 같은 주식의 현물·다른 만기와 구별된다. 수량은 계약 수×NH 종목명에 명시된 거래단위(현재 주식선물 10), 매도는 음수, 평균가격·현재가격은 NH 가격 단위를 유지한다.
 - 예수금은 **선물매도 평가액 − 선물매수 평가액 + 평가기준액 + 평가손익**, 즉 `nas_tal − Σ(부호 있는 환산 수량×now_pr)`다. 체결금액이 아닌 조회 시점의 평가액을 사용한다. 종목 평가액과 예수금 합계가 NH 순자산과 일치하고 종전 `FUTURES_BASE_KRW`·`FUTURES_PNL_KRW`는 국내계좌 동기화에서 제거된다. 해외계좌의 기존 평가 항목은 유지한다.

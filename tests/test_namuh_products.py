@@ -34,15 +34,16 @@ class NamuhProductsTests(TempDbMixin):
     @staticmethod
     def domestic(pnl=30, equity=1030, *, night=False):
         page = {"Output_0": [
-            {"iem_cd": "KA486B000", "iem_nm": "미래에셋증 F 202611 (  10)", "sby_dit_nm": "매수",
-             "bf_dd_ny_stl_qty": 3, "bnc_ind_qty": -1, "lqd_pbl_qty": 1,
+            {"iem_cd": "KA486B000", "iem_nm": "미래에셋증 F 202611 (  10)", "sby_dit_nm": "매도", "sby_dit_nm2": "매수",
+             "bf_dd_ny_stl_qty": 3, "bnc_ind_qty": 1, "byn_cns_qty": 0, "sll_cns_qty": 1, "lqd_pbl_qty": 1,
              "avg_pr": 350, "now_pr": 351, "eal_pls_amt": 20},
             {"iem_cd": "KAC96B000", "iem_nm": "한화 F 202611 (  10)", "sby_dit_nm": "매도",
-             "bf_dd_ny_stl_qty": 0, "bnc_ind_qty": 1, "lqd_pbl_qty": 0,
+             "bf_dd_ny_stl_qty": 0, "bnc_ind_qty": 1, "byn_cns_qty": 0, "sll_cns_qty": 1, "lqd_pbl_qty": 0,
              "avg_pr": 352, "now_pr": 351, "eal_pls_amt": 10}],
             "Output_1": {"nas_tal": equity, "tot_eal_pls": pnl, "dsg_csh": 1000, "dsg_sba_amt": 0}}
         if night:
             for row, qty in zip(page["Output_0"], (2, 1)):
+                row["sby_dit_nm"] = "매수" if qty == 2 else "매도"
                 row["fno_iem_cd"] = row.pop("iem_cd")
                 row.pop("bf_dd_ny_stl_qty")
                 row.pop("bnc_ind_qty")
@@ -126,11 +127,53 @@ class NamuhProductsTests(TempDbMixin):
         self.assertIsNone(detached["broker"])
         self.assertEqual(detached["broker_snapshot"], item["broker_snapshot"])
 
+    async def test_live_rollover_closes_november_and_preserves_december_short_on_repeated_sync(self):
+        # 2026-11-10 운영 응답의 핵심 필드: 청산 매수도 bnc_ind_qty가 +100이다.
+        await portfolio.save_portfolio_item("u1", "00088K", "한화3우B", 2000, 50000, group_name="롱숏")
+        await self.link("krfuture")
+        page = {"Output_0": [
+            {"iem_cd": "KAC96B000", "iem_nm": "한화 F 202611 (  10)",
+             "sby_dit_nm": "매수", "sby_dit_nm2": "매도", "bf_dd_ny_stl_qty": 100,
+             "bnc_ind_qty": 100, "byn_cns_qty": 100, "sll_cns_qty": 0,
+             "avg_pr": 0, "now_pr": 77600, "eal_pls_amt": 0, "lqd_pbl_qty": 0},
+            {"iem_cd": "KAC96C000", "iem_nm": "한화 F 202612 (  10)",
+             "sby_dit_nm": "매도", "sby_dit_nm2": "매도", "bf_dd_ny_stl_qty": 0,
+             "bnc_ind_qty": 100, "byn_cns_qty": 0, "sll_cns_qty": 100,
+             "avg_pr": 78647, "now_pr": 78500, "eal_pls_amt": 147000, "lqd_pbl_qty": 100},
+            {"iem_cd": "KAG56B000", "iem_nm": "한진칼 F 202611 (  10)",
+             "sby_dit_nm": "매도", "sby_dit_nm2": "매도", "bf_dd_ny_stl_qty": 50,
+             "bnc_ind_qty": 0, "byn_cns_qty": 0, "sll_cns_qty": 0,
+             "avg_pr": 207500, "now_pr": 236500, "eal_pls_amt": -14500000, "lqd_pbl_qty": 10},
+        ], "Output_1": {"nas_tal": 10000000, "tot_eal_pls": -14353000}}
+        before_roll = {"Output_0": [{**page["Output_0"][0], "sby_dit_nm": "매도", "byn_cns_qty": 0,
+                                     "bnc_ind_qty": 0, "avg_pr": 78000, "lqd_pbl_qty": 100}],
+                       "Output_1": {"nas_tal": 10000000, "tot_eal_pls": 0}}
+        with self.owned(), patch.object(derivatives, "now_kst", return_value=datetime(2026, 11, 10, 10, tzinfo=KST)), \
+             patch.object(namuh, "pages", self.domestic_api([before_roll])):
+            await sync.sync_account("u1", self.aid)
+        await portfolio.set_portfolio_pair("u1", "KRFUT_KAC96B000", "00088K")
+        with self.owned(), patch.object(derivatives, "now_kst", return_value=datetime(2026, 11, 10, 10, tzinfo=KST)), \
+             patch.object(namuh, "pages", self.domestic_api([page])), \
+             patch.object(futures_underlyings, "underlying_codes", AsyncMock(return_value={"KAC96B000": "000880", "KAC96C000": "000880"})):
+            for _ in range(2):
+                await sync.sync_account("u1", self.aid)
+                items = {r["stock_code"]: r for r in await portfolio.get_portfolio("u1", self.aid)}
+                self.assertNotIn("KRFUT_KAC96B000", items)
+                self.assertIsNone(await portfolio.get_portfolio_item("u1", "KRFUT_KAC96B000"))
+                self.assertEqual(items["KRFUT_KAC96C000"]["quantity"], -1000)
+                self.assertEqual(items["KRFUT_KAC96C000"]["pair_long_code"], "00088K")
+                self.assertEqual(items["KRFUT_KAG56B000"]["quantity"], -500)
+                snapshot = next(r for r in await accounts.list_accounts("u1") if r["account_id"] == self.aid)["broker_snapshot"]
+                self.assertEqual([(p["code"], p["side"], p["quantity"]) for p in snapshot["positions"]],
+                                 [("KAC96C000", "매도", 100), ("KAG56B000", "매도", 50)])
+                value = sum(items[p["stock_code"]]["quantity"] * p["current_price"] for p in snapshot["positions"])
+                self.assertEqual(value + items["CASH_KRW"]["quantity"], snapshot["equity"])
+
     async def test_domestic_day_preview_reads_all_pages_and_does_not_link_or_write_holdings(self):
         first, = self.domestic()
         second = {"Output_0": [first["Output_0"].pop()], "Output_1": first.pop("Output_1")}
         # 전량 청산된 행은 가격·코드가 생략되어도 보유 계약으로 가져오지 않는다.
-        first["Output_0"].append({"bf_dd_ny_stl_qty": 3, "bnc_ind_qty": -3})
+        first["Output_0"].append({"bf_dd_ny_stl_qty": 3, "sby_dit_nm2": "매도", "byn_cns_qty": 3, "sll_cns_qty": 0})
         before = await account_holdings.list_positions("u1")
         with self.owned(), patch.object(broker_accounts, "user_id", AsyncMock(return_value="u1")), \
              patch.object(derivatives, "now_kst", return_value=datetime(2026, 10, 6, 10, tzinfo=KST)), \
@@ -160,9 +203,10 @@ class NamuhProductsTests(TempDbMixin):
         snapshot = next(a for a in await accounts.list_accounts("u1") if a["account_id"] == self.aid)["broker_snapshot"]
         cases = [
             (False, "bf_dd_ny_stl_qty", None), (False, "bf_dd_ny_stl_qty", -1),
-            (False, "bnc_ind_qty", None), (False, "bnc_ind_qty", ""),
-            (False, "bnc_ind_qty", "NaN"), (False, "bnc_ind_qty", True),
-            (False, "bnc_ind_qty", -4), (False, "bnc_ind_qty", 0.5),
+            (False, "byn_cns_qty", None), (False, "sll_cns_qty", ""),
+            (False, "byn_cns_qty", "NaN"), (False, "sll_cns_qty", True),
+            (False, "byn_cns_qty", -4), (False, "sll_cns_qty", 0.5),
+            (False, "sby_dit_nm2", None), (False, "sby_dit_nm2", "알수없음"),
             (True, "tdy_ny_stl_qty", None), (True, "tdy_ny_stl_qty", -1),
             (True, "tdy_ny_stl_qty", 0.5), (True, "fno_iem_cd", ""),
         ]
@@ -264,7 +308,7 @@ class NamuhProductsTests(TempDbMixin):
             ("KAGT6B000", "두산", 10, 1456000, 1473000),
         ]:
             page["Output_0"].append({"iem_cd": code, "iem_nm": name + " F 202611 (  10)",
-                "sby_dit_nm": "매도", "bf_dd_ny_stl_qty": 0, "bnc_ind_qty": qty,
+                "sby_dit_nm": "매도", "bf_dd_ny_stl_qty": 0, "bnc_ind_qty": qty, "byn_cns_qty": 0, "sll_cns_qty": qty,
                 "avg_pr": avg, "now_pr": current, "eal_pls_amt": qty * 10 * (avg-current)})
         with self.owned(), patch.object(derivatives, "now_kst", return_value=datetime(2026, 10, 6, 10, tzinfo=KST)), \
              patch.object(namuh, "pages", self.domestic_api([page])):
@@ -300,6 +344,7 @@ class NamuhProductsTests(TempDbMixin):
         # 가격과 예수금이 같은 스냅샷으로 바뀐다. 0 계약은 제거한다.
         page["Output_0"][0].update({"now_pr": 33000, "eal_pls_amt": 800000})
         page["Output_0"][1]["bnc_ind_qty"] = 0
+        page["Output_0"][1]["sll_cns_qty"] = 0
         page["Output_1"].update({"nas_tal": 10000000, "tot_eal_pls": 0})
         with self.owned(), patch.object(derivatives, "now_kst", return_value=datetime(2026, 10, 6, 10, tzinfo=KST)), \
              patch.object(namuh, "pages", self.domestic_api([page])):

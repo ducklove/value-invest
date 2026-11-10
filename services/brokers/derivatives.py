@@ -25,16 +25,26 @@ def quantity(row: dict, key: str) -> float:
 
 
 def domestic_quantity(row: dict, *, night: bool) -> float:
+    """현재 미결제 잔고를 매수 양수·매도 음수 계약 수로 반환한다."""
     if night:
-        return quantity(row, "tdy_ny_stl_qty")
-    # 주간 잔고에는 금일미결제수량이 없다. 전일 잔고에 당일 증감을 반영한다.
-    # 청산가능수량은 미체결 청산 주문에 묶인 계약을 제외할 수 있어 사용하지 않는다.
+        current = quantity(row, "tdy_ny_stl_qty")
+        if not current:
+            return 0
+        side = str(row.get("sby_dit_nm", "")).strip()
+        if side not in {"매수", "매도"}:
+            raise BrokerError("선물의 매수·매도 구분을 확인할 수 없습니다.")
+        return current if side == "매수" else -current
+    # 주간 sby_dit_nm은 당일 거래 방향일 수 있다. 전일 매도 100계약을
+    # 당일 매수 100계약으로 닫은 행도 반환되므로 두 수량을 더하면 안 된다.
+    # sby_dit_nm2의 전일 방향을 적용하고 실제 당일 매수·매도 체결을 반영한다.
     previous = quantity(row, "bf_dd_ny_stl_qty")
-    change = number(row, "bnc_ind_qty")
-    current = previous + change
-    if not change.is_integer() or not current.is_integer() or current < 0:
-        raise BrokerError("선물 계약 수량을 확인할 수 없어 기존 잔고를 유지합니다.")
-    return current
+    if previous:
+        previous_side = str(row.get("sby_dit_nm2", "")).strip()
+        if previous_side not in {"매수", "매도"}:
+            raise BrokerError("선물의 전일 잔고 방향을 확인할 수 없어 기존 잔고를 유지합니다.")
+        if previous_side == "매도":
+            previous = -previous
+    return previous + quantity(row, "byn_cns_qty") - quantity(row, "sll_cns_qty")
 
 
 def valuation_rows(equity: float, pnl: float) -> list[dict]:
@@ -62,12 +72,11 @@ async def fetch_derivatives(user: str, link: dict) -> tuple[list[dict], dict]:
         positions = []
         for page in pages:
             for row in record_block(page, "Output_0"):
-                qty = domestic_quantity(row, night=night)
-                if not qty:
+                signed_qty = domestic_quantity(row, night=night)
+                if not signed_qty:
                     continue
-                side = str(row.get("sby_dit_nm", "")).strip()
-                if side not in {"매수", "매도"}:
-                    raise BrokerError("선물의 매수·매도 구분을 확인할 수 없습니다.")
+                side = "매수" if signed_qty > 0 else "매도"
+                qty = abs(signed_qty)
                 code = contract_code(row, "fno_iem_cd" if night else "iem_cd")
                 name = str(row.get("iem_nm") or code).strip()
                 terms = await contract_terms(user, link, code, name)
