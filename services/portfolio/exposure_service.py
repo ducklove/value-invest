@@ -128,12 +128,15 @@ async def _load_closes(codes: list[str]) -> tuple[dict[str, list[dict]] | None, 
 
 
 async def _yahoo_symbols(codes: list[str]) -> dict[str, str]:
-    """보유 코드 → Yahoo 심볼. 해외 시세·자산 인사이트와 같은 순서(고정 표 → 티커 맵 → 코드 그대로)."""
+    """보유 코드 → Yahoo 심볼. 금·가상자산은 대용 시리즈, 해외 종목은 해외 시세와 같은 순서(고정 표 → 티커 맵 → 코드 그대로)."""
     if not codes:
         return {}
     await foreign.ensure_ticker_map()
     symbols: dict[str, str] = {}
     for code in codes:
+        if code in exposure.SPECIAL_SERIES_PROXIES:  # 금·가상자산은 Yahoo 대용 시리즈
+            symbols[code] = exposure.SPECIAL_SERIES_PROXIES[code]
+            continue
         static = static_foreign_ticker(code)
         ticker = static["ticker"] if static else (foreign._ticker_map.get(code) or code)
         symbols[code] = foreign.yfinance_direct_ticker(ticker)
@@ -151,6 +154,8 @@ async def _load_foreign_closes(positions: list[dict]) -> tuple[dict[str, list[di
         return {}, None
     symbols = await _yahoo_symbols(codes)
     currency_of = {normalize_portfolio_code(p.get("code")): p.get("currency") for p in positions}
+    # 대용 시리즈는 달러 표시다(보유 통화는 원화로 적혀 있다). 환율을 첫 요청에 함께 받는다.
+    currency_of.update({code: "USD" for code in symbols if code in exposure.SPECIAL_SERIES_PROXIES})
     held_fx = {fx for code in symbols for fx in exposure.fx_symbols(currency_of.get(code))}
     wanted = [*symbols.values(), *sorted(held_fx)]
     loaded = await exposure_data.load_daily_series(wanted)
@@ -207,9 +212,9 @@ def _sources(
             available=closes_ok, detail="finance-pi",
         ),
     ]
-    if foreign_meta is not None:  # 해외 종목이 없는 계좌에는 보이지 않는다.
+    if foreign_meta is not None:  # 해외·금·가상자산이 없는 계좌에는 보이지 않는다.
         rows.append(exposure.source_freshness(
-            "yahoo", "해외 일봉", foreign_meta.get("as_of"), today=today, max_age_days=_MAX_AGE_DAYS["yahoo"],
+            "yahoo", "해외·금·코인 일봉", foreign_meta.get("as_of"), today=today, max_age_days=_MAX_AGE_DAYS["yahoo"],
             available=bool(foreign_meta.get("loaded")), detail="Yahoo Finance",
         ))
     return rows

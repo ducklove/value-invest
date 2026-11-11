@@ -330,12 +330,14 @@ def test_krw_fx_rows_hand_calculated_cross_rate():
     assert exposure.krw_fx_rows("KRW", rows) is None
 
 
-def test_foreign_series_codes_cover_only_foreign_listings():
+def test_foreign_series_codes_cover_foreign_listings_and_proxied_assets():
     positions = [
         {"code": "aapl"}, {"code": "005930"}, {"code": "VWO"}, {"code": "CASH_USD"}, {"code": "KRX_GOLD"},
-        {"code": "CRYPTO_BTC"}, {"code": "KRFUT_A"}, {"code": "IDX_SP500"}, {"code": "AAPL"}, {"code": ""},
+        {"code": "CRYPTO_BTC"}, {"code": "CMA_RP_KRW"}, {"code": "KRFUT_A"}, {"code": "IDX_SP500"},
+        {"code": "AAPL"}, {"code": ""},
     ]
-    assert exposure.foreign_series_codes(positions) == ["AAPL", "VWO"]
+    # 금·가상자산은 Yahoo 대용 시리즈로 받는다. 현금·RP·선물·지수는 아니다.
+    assert exposure.foreign_series_codes(positions) == ["AAPL", "VWO", "KRX_GOLD", "CRYPTO_BTC"]
 
 
 def test_krw_asof_closes_hand_calculated_for_a_us_listing():
@@ -458,8 +460,34 @@ def test_report_sends_foreign_listings_to_the_foreign_series():
     block = result["risk"]
     assert {row["code"] for row in block["rows"]} == {"005930", "AAPL"}
     assert block["foreign_count"] == 1
-    assert block["excluded"] == [{"code": "KRX_GOLD", "name": "금", "reason": "no_series", "sample_points": 0}]
+    # 금 대용 시리즈를 받지 못하면 '일봉 없음'으로 드러난다.
+    assert block["excluded"] == [{"code": "KRX_GOLD", "name": "금", "reason": "no_rows", "sample_points": 0}]
     assert block["coverage_pct"] == approx(80.0)  # (300 + 100) / 500
+
+
+def test_report_models_gold_and_crypto_through_their_proxy_series():
+    dates = [f"2026-03-{day:02d}" for day in range(2, 28)]
+    positions = [
+        {"code": "005930", "name": "삼성전자", "quantity": 1, "value": 300.0, "currency": "KRW"},
+        {"code": "KRX_GOLD", "name": "금", "quantity": 1, "value": 100.0, "currency": "KRW"},
+        {"code": "CRYPTO_BTC", "name": "비트코인", "quantity": 1, "value": 100.0, "currency": "KRW"},
+    ]
+    proxied = {code: [{"date": d, "close": base + (i % 4)} for i, d in enumerate(dates)]
+               for code, base in (("KRX_GOLD", 5_000_000.0), ("CRYPTO_BTC", 100_000_000.0))}
+    result = exposure.build_exposure_report(
+        positions,
+        closes={"005930": [{"date": d, "close": 100.0 + (i % 3)} for i, d in enumerate(dates)]},
+        foreign_closes=proxied,
+    )
+    block = result["risk"]
+    by_code = {row["code"]: row for row in block["rows"]}
+    assert set(by_code) == {"005930", "KRX_GOLD", "CRYPTO_BTC"}
+    assert by_code["KRX_GOLD"]["proxy_code"] == "GC=F"
+    assert by_code["CRYPTO_BTC"]["proxy_code"] == "BTC-USD"
+    assert by_code["005930"]["proxy_code"] is None
+    # 해외 종목 수와 대용 시리즈 수를 따로 센다(화면 안내 문구가 다르다).
+    assert (block["foreign_count"], block["proxy_count"]) == (0, 2)
+    assert block["coverage_pct"] == approx(100.0)
 
 
 # ---------------------------------------------------------------------------

@@ -87,6 +87,14 @@ ASOF_MAX_GAP_DAYS = 10
 FX_MAX_GAP_DAYS = 5
 # Yahoo 보조 통화 단위(펜스·센트) → 환율 통화. 수익률은 단위와 무관하다.
 _MINOR_CURRENCY_UNITS = {"GBX": "GBP", "ZAC": "ZAR", "ILA": "ILS"}
+# 일봉 이력이 없는 특수 자산의 Yahoo 대용 시리즈(달러 표시, 원화로 환산한다). 자산 인사이트와 같은
+# 심볼이다. KRX 금 프리미엄과 업비트 김치 프리미엄의 변동은 반영되지 않는다.
+SPECIAL_SERIES_PROXIES = {
+    "KRX_GOLD": "GC=F",
+    "CRYPTO_BTC": "BTC-USD",
+    "CRYPTO_ETH": "ETH-USD",
+    "CRYPTO_USDT": "USDT-USD",
+}
 
 SECTOR_UNCLASSIFIED = "미분류"
 SECTOR_SPAC = "스팩"
@@ -151,7 +159,8 @@ METHOD_NOTES = (
     "통화는 거래 통화 기준입니다. 국내 상장 해외 ETF는 원화로 잡힙니다.",
     "업종은 KIND 상장법인목록의 표준산업분류입니다. 해외 종목과 목록에 없는 종목은 '미분류'로 둡니다.",
     "HHI는 상위 구성만 아는 ETF의 나머지를 완전 분산으로 보므로 하한입니다.",
-    "위험 기여는 최근 1년 일봉에 현재 비중을 곱한 과거 추정치입니다. 국내는 finance-pi 일봉, 해외는 Yahoo 배당 조정 종가를 그 거래일 환율로 원화 환산해 씁니다. 금·가상자산은 일봉이 없어 빠지고, 선물은 기초자산 일봉으로 대신합니다.",
+    "위험 기여는 최근 1년 일봉에 현재 비중을 곱한 과거 추정치입니다. 국내는 finance-pi 일봉, 해외는 Yahoo 배당 조정 종가를 그 거래일 환율로 원화 환산해 씁니다. 선물은 기초자산 일봉으로 대신합니다.",
+    "KRX 금현물과 가상자산은 일봉 이력이 없어 Yahoo 대용 시리즈(금 선물 GC=F, BTC·ETH·USDT 달러 시세)를 원화로 환산해 씁니다. KRX 금 프리미엄과 업비트 김치 프리미엄의 변동, 금 선물 월물 교체 때의 작은 가격 차는 반영되지 않습니다.",
     "해외 종가는 NAV 정산처럼 국내 장 마감(15:30) 전에 끝난 가장 최근 정규장 종가를 그날 값으로 둡니다. 미국·유럽 종목은 전날 종가가 들어가므로, 장 시간이 달라 생기는 국내·해외 사이 상관의 과소 추정을 줄이지만 없애지는 못합니다.",
 )
 
@@ -401,12 +410,16 @@ def _is_foreign_listing(code: str) -> bool:
     )
 
 
+def _uses_yahoo_series(code: str) -> bool:
+    return _is_foreign_listing(code) or code in SPECIAL_SERIES_PROXIES
+
+
 def foreign_series_codes(positions: Iterable[Mapping[str, Any]]) -> list[str]:
-    """위험 모델에 Yahoo 일봉이 필요한 해외 상장 보유 코드."""
+    """위험 모델에 Yahoo 일봉이 필요한 보유 코드 — 해외 상장 종목과 금·가상자산(대용 시리즈)."""
     codes: dict[str, None] = {}
     for position in positions:
         code = normalize_portfolio_code(position.get("code"))
-        if _is_foreign_listing(code):
+        if _uses_yahoo_series(code):
             codes[code] = None
     return list(codes)
 
@@ -557,6 +570,7 @@ def compute_risk_model(
         "coverage_pct": None,
         "modeled_count": 0,
         "foreign_count": 0,
+        "proxy_count": 0,
         "excluded_count": len(positions),
         "rows": [],
         "excluded": [],
@@ -640,7 +654,8 @@ def compute_risk_model(
             "weight_pct": _round(weights[i] * 100.0),
             "volatility_pct": _round(sigma_i * annual),
             "risk_contribution_pct": _round(weights[i] * cov_ip / var_p * 100.0) if var_p > 0 else None,
-            "proxy_code": position["series_code"] if position["series_code"] != position["code"] else None,
+            "proxy_code": position.get("proxy_code")
+            or (position["series_code"] if position["series_code"] != position["code"] else None),
         })
     rows.sort(key=lambda r: abs(r["risk_contribution_pct"] or 0.0), reverse=True)
 
@@ -663,7 +678,8 @@ def compute_risk_model(
         "end_date": dates[-1],
         "coverage_pct": _pct(sum(abs(p["value"]) for p in modeled), gross_all),
         "modeled_count": len(modeled),
-        "foreign_count": sum(1 for p in modeled if p.get("foreign")),
+        "foreign_count": sum(1 for p in modeled if p.get("foreign") and p["code"] not in SPECIAL_SERIES_PROXIES),
+        "proxy_count": sum(1 for p in modeled if p["code"] in SPECIAL_SERIES_PROXIES),
         "rows": rows[:MAX_RISK_ROWS],
         "correlation": _correlation_matrix(rows, modeled, position_returns, top_k),
     })
@@ -976,7 +992,7 @@ def build_exposure_report(
         asset_slot["count"] += 1
 
         member = {"code": code, "name": name, "value": _money(value)}
-        series_code = code if is_korean_stock(code) or _is_foreign_listing(code) else None
+        series_code = code if is_korean_stock(code) or _uses_yahoo_series(code) else None
 
         if kind == "etf":
             flat = None
@@ -1057,6 +1073,7 @@ def build_exposure_report(
         risk_inputs.append({
             "code": code, "name": name, "value": value, "series_code": series_code,
             "foreign": bool(series_code) and not is_korean_stock(series_code),
+            "proxy_code": SPECIAL_SERIES_PROXIES.get(code),
         })
 
     invested_value = total_value - cash_value

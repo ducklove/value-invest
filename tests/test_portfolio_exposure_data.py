@@ -570,6 +570,30 @@ class ExposureServiceTests(TempDbMixin):
         self.assertAlmostEqual(rows[1]["close"], 8400.0)
         self.assertEqual(meta, {"requested": 1, "loaded": 1, "as_of": "2026-11-06"})
 
+    async def test_gold_and_crypto_use_dollar_proxy_series_converted_to_krw(self):
+        positions = [{"code": "KRX_GOLD", "currency": "KRW"}, {"code": "CRYPTO_BTC", "currency": "KRW"}]
+        daily = {
+            "GC=F": {"currency": "USD", "timezone": "America/New_York", "close_time": "23:59",
+                     "rows": [["2026-11-05", 4000.0], ["2026-11-06", 4100.0]]},
+            "BTC-USD": {"currency": "USD", "timezone": "UTC", "close_time": "23:59",
+                        "rows": [["2026-11-06", 70000.0], ["2026-11-07", 71000.0], ["2026-11-08", 72000.0]]},
+            "KRW=X": {"currency": "KRW", "timezone": "Europe/London", "close_time": "23:59",
+                      "rows": [["2026-11-05", 1400.0], ["2026-11-06", 1410.0]]},
+        }
+        load = AsyncMock(side_effect=lambda symbols: {s: daily[s] for s in symbols if s in daily})
+        with patch.object(exposure_data, "load_daily_series", new=load), \
+                patch.object(exposure_service, "now_kst", return_value=datetime(2026, 11, 10, 12, 0, tzinfo=KST)):
+            closes, meta = await exposure_service._load_foreign_closes(positions)
+        # 보유 통화가 원화로 적혀 있어도 대용 시리즈는 달러다 — 환율을 첫 요청에 함께 받는다.
+        self.assertEqual(load.await_args_list[0].args[0], ["GC=F", "BTC-USD", "KRW=X"])
+        self.assertEqual(load.await_count, 1)
+        # 금 선물 11-05(뉴욕 23:59 = 서울 11-06 13:59) → 11-06 값, 4000 × 1400.
+        self.assertEqual(closes["KRX_GOLD"][0], {"date": "2026-11-06", "close": 5_600_000.0, "session_date": "2026-11-05"})
+        # 코인 주말 봉(토·일)은 월요일 값으로 모이고 뒤의 세션(일요일)이 이긴다. 환율은 금요일 값.
+        self.assertEqual(closes["CRYPTO_BTC"][-1], {"date": "2026-11-09", "close": 72000.0 * 1410.0,
+                                                    "session_date": "2026-11-08"})
+        self.assertEqual(meta["loaded"], 2)
+
     async def test_foreign_series_without_fx_are_left_out_not_mixed_in(self):
         await self._add_holding("AAPL", "애플", 2, "USD")
         daily = {"AAPL": {"currency": "USD", "timezone": "America/New_York", "close_time": "16:00",

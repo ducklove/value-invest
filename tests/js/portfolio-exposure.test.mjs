@@ -235,10 +235,25 @@ test("해외 종목이 모델에 들면 원화 환산·종가 기준을 알리�
   assert.match(note.textContent, /미국·유럽은 전날 종가/);
   assert.match(content().textContent, /제외 일봉 지연 1개/);
 
+  assert.equal(content().querySelector("#pfXrayRiskProxy"), null);
   // 해외 종목이 없으면 안내를 붙이지 않는다.
   const domestic = load(() => ok(PAYLOAD));
   await domestic.w.pfLoadExposurePanel();
   assert.equal(domestic.content().querySelector("#pfXrayRiskForeign"), null);
+});
+
+test("금·가상자산은 대용 시세임을 행과 안내 문구로 밝힌다", async () => {
+  const rows = [
+    { code: "KRX_GOLD", name: "금", weight_pct: 10, volatility_pct: 15, risk_contribution_pct: 5, proxy_code: "GC=F" },
+    ...PAYLOAD.risk.rows,
+  ];
+  const { w, content } = load(() => ok({ ...PAYLOAD, risk: { ...PAYLOAD.risk, rows, proxy_count: 1 } }));
+  await w.pfLoadExposurePanel();
+  const first = content().querySelector("#pfXrayRiskTable tbody tr th");
+  assert.match(first.textContent, /KRX_GOLD · GC=F 대용/);
+  assert.match(content().querySelector("#pfXrayRiskProxy").textContent, /금·가상자산 1종목은 일봉 이력이 없어/);
+  // 대용이 아닌 행에는 표시하지 않는다.
+  assert.doesNotMatch(content().querySelectorAll("#pfXrayRiskTable tbody tr th")[1].textContent, /대용/);
 });
 
 test("긴 표는 앞 10행만 펼치고 접힌 행 수와 전체 개수를 정확히 알려 준다", async () => {
