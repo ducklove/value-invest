@@ -66,7 +66,7 @@
 1. `static/ecosystem/*`만 고친다(형제 사본 직접 수정 금지). 토큰은 추가만, 값은 `base.css`와 같게. 셸을 바꾸면 `vc-shell.js`의 `VERSION`을 올린다.
 2. `node scripts/sync-ecosystem.mjs --write` — 허브 블록 재생성 + 형제 사본·theme-boot 쓰기·`?v=` 라벨 갱신(git은 안 건드림).
 3. `node scripts/sync-ecosystem.mjs`가 FAIL 0이어야 한다. 허브 pytest·npm test와 각 형제 테스트(버전을 고정한 테스트가 있다)를 돌린다.
-4. 저장소별로 커밋. 형제 push = Pages 배포이므로 허브를 먼저 배포하고, push는 사용자가 요청할 때만.
+4. 저장소별로 커밋. 형제 push = Pages 배포이므로 허브를 먼저 배포한다. 별도 지시가 없으면 검증을 마친 변경을 바로 배포한다.
 
 ## 테스트·배포
 
@@ -77,7 +77,7 @@ python -m ruff check .     # F, E9, I
 ```
 
 - **master push = 곧 배포**: self-hosted runner가 `deploy/deploy.sh` 실행 (ruff→pytest→npm test→restart→healthz, 실패 시 OLD_SHA 롤백). 배포 의도 없이 master에 push 금지.
-- 커밋까지만 하고 push(=배포)는 사용자가 요청할 때만.
+- 별도 지시가 없으면 검증을 마친 변경을 즉시 push해 배포하고, 운영에서 변경 사항이 실제로 동작하는지 확인한다.
 
 ## 병렬 작업 가이드
 
