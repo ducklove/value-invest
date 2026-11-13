@@ -249,9 +249,12 @@ async def fetch_financial_statement(
     corp_code: str, year: int
 ) -> dict | None:
     """단일 회사의 단일 연도 재무제표를 가져온다. CFS 우선, OFS 폴백."""
+    if not api_key():
+        return None
     result = {}
 
     for report_code in ["CFS", "OFS"]:
+        _quota.check(essential=True)
         params = {
             "crtfc_key": api_key(),
             "corp_code": corp_code,
@@ -269,6 +272,9 @@ async def fetch_financial_statement(
             continue
 
         data = resp.json()
+        if data.get("status") == "020":
+            await _quota.mark_exhausted()
+            return None
         if data.get("status") != "000":
             continue
 
@@ -316,10 +322,8 @@ async def fetch_annual_report_dates(
 
     report_dates: dict[int, str] = {}
     for item in items:
-        report_nm = item.get("report_nm", "")
-        if not report_nm.startswith("사업보고서"):
-            continue
-        match = re.search(r"\((\d{4})\.", report_nm)
+        report_nm = item.get("report_nm", "").strip()
+        match = re.match(r"^(?:\[[^\]]+\]\s*)*사업보고서\s*\((\d{4})\.", report_nm)
         if not match:
             continue
         year = int(match.group(1))

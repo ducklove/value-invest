@@ -19,8 +19,10 @@ except ImportError:  # pragma: no cover - optional dependency
 import httpx
 
 import kis_ws_manager
+from cache_layer import MemoryTTLCache, cached_fetch
 from core.http import get_http_client
 from domain.numbers import parse_number
+from services import stock_valuation
 from services.dart import client as dart_client
 from services.market.sources import close_price as close_price_client
 from services.market.sources import kis_proxy as kis_proxy_client
@@ -30,13 +32,12 @@ logger = logging.getLogger(__name__)
 
 KRW_PER_EOK = 100_000_000
 WS_QUOTE_MAX_AGE_SECONDS = 90
+_analysis_financials_cache = MemoryTTLCache("analysis.kis_financials", 3600, evict_expired_after=3600)
 
 
 async def fetch_current_valuation_basis(stock_code: str, *, as_of: date | str | None = None, corp_code: str | None = None) -> dict:
     """Current TTM EPS/latest-quarter BPS, independent of annual market data."""
-    from services.stock_valuation import fetch_current_valuation_basis as fetch_basis
-
-    return await fetch_basis(stock_code, as_of=as_of, corp_code=corp_code)
+    return await stock_valuation.fetch_current_valuation_basis(stock_code, as_of=as_of, corp_code=corp_code)
 
 # yfinance 는 블로킹이고 wait_for 타임아웃 뒤에도 스레드가 계속 돈다. 모든
 # yfinance 호출은 services.market.sources.yfinance_runner 의 전용 소형 풀·
@@ -709,42 +710,85 @@ def _extract_kis_financial_data(financials_payload: dict) -> list[dict]:
     return extracted
 
 
-def _merge_financial_data(
-    existing_rows: list[dict] | None,
-    supplemental_rows: list[dict] | None,
-) -> list[dict]:
-    merged: dict[int, dict] = {}
+async def get_analysis_kis_financials(stock_code: str) -> dict:
+    """Share the annual provider response across analysis steps, including brief outages."""
+    async def load() -> dict:
+        try:
+            return await kis_proxy_client.get_financials(stock_code)
+        except kis_proxy_client.KISProxyError as exc:
+            logger.warning("KIS annual financials unavailable (%s): %s", stock_code, exc)
+            return {}
 
-    for row in supplemental_rows or []:
-        year = row.get("year")
-        if year is None:
-            continue
-        merged[year] = dict(row)
+    return await cached_fetch(
+        _analysis_financials_cache, stock_code, load,
+        ttl=lambda payload: 3600 if _normalize_financial_rows(payload, None) else 300,
+    )
 
-    for row in existing_rows or []:
-        year = row.get("year")
-        if year is None:
-            continue
-        target = merged.setdefault(year, {"year": year})
-        for key, value in row.items():
-            if key == "year" or value in (None, ""):
-                continue
-            target[key] = value
 
-    return [merged[year] for year in sorted(merged)]
+async def _analysis_annual_rows(
+    stock_code: str,
+    kis_payload: dict,
+    financial_data: list[dict] | None,
+    listed_shares: float | None = None,
+) -> dict[int, dict]:
+    kis = _normalize_financial_rows(kis_payload, listed_shares)
+    fallback = _derive_normalized_financial_rows(financial_data, None)
+    latest_kis = kis.get(date.today().year - 1, {})
+    if any(latest_kis.get(key) is None for key in ("eps", "bps", "roe", "debt_ratio", "operating_margin")):
+        naver = await stock_valuation.fetch_annual_valuation_rows(stock_code)
+        fallback = _merge_normalized_financial_rows(naver, fallback)
+    return _merge_normalized_financial_rows(kis, fallback)
+
+
+_ANNUAL_STATEMENT_FIELDS = ("net_income", "total_equity", "total_liabilities", "revenue", "operating_profit")
 
 
 async def ensure_financial_data_coverage(
     stock_code: str,
     financial_data: list[dict] | None = None,
+    *,
+    corp_code: str | None = None,
 ) -> list[dict]:
-    existing_rows = [dict(item) for item in (financial_data or [])]
+    existing = {item["year"]: dict(item) for item in (financial_data or []) if item.get("year") is not None}
     try:
-        financials_payload = await kis_proxy_client.get_financials(stock_code)
+        financials_payload = await get_analysis_kis_financials(stock_code)
     except Exception as exc:
         logger.warning("장기 재무 데이터 보강 실패(%s): %s", stock_code, exc)
-        return existing_rows
-    return _merge_financial_data(existing_rows, _extract_kis_financial_data(financials_payload))
+        financials_payload = {}
+    by_year = {row["year"]: row for row in _extract_kis_financial_data(financials_payload)}
+    for year, row in existing.items():
+        kis_row = by_year.get(year, {})
+        if sum(row.get(key) is not None for key in _ANNUAL_STATEMENT_FIELDS) >= sum(
+            kis_row.get(key) is not None for key in _ANNUAL_STATEMENT_FIELDS
+        ):
+            by_year[year] = row
+        elif row.get("report_date"):
+            kis_row["report_date"] = row["report_date"]
+
+    latest_year = date.today().year - 1
+    covered_years = {
+        year for year, row in by_year.items()
+        if all(row.get(key) is not None for key in _ANNUAL_STATEMENT_FIELDS)
+    }
+    if not corp_code or not dart_client.api_key() or latest_year in covered_years:
+        return [by_year[year] for year in sorted(by_year)]
+
+    # DART returns whole statements in won. Keep each DART row intact so
+    # legacy KIS amounts in 억원 are never mixed with won within a fiscal year.
+    missing_years = [year for year in range(latest_year - 2, latest_year + 1) if year not in covered_years]
+    reports = await asyncio.gather(*(
+        asyncio.wait_for(dart_client.fetch_financial_statement(corp_code, year), timeout=10)
+        for year in missing_years
+    ), return_exceptions=True)
+    for year, report in zip(missing_years, reports):
+        if isinstance(report, Exception):
+            logger.warning("DART annual financials unavailable (%s, %s): %s", stock_code, year, type(report).__name__)
+        elif report and sum(report.get(key) is not None for key in _ANNUAL_STATEMENT_FIELDS) >= sum(
+            by_year.get(year, {}).get(key) is not None for key in _ANNUAL_STATEMENT_FIELDS
+        ):
+            previous_date = by_year.get(year, {}).get("report_date")
+            by_year[year] = {"report_date": previous_date, **report}
+    return [by_year[year] for year in sorted(by_year)]
 
 
 def _financial_timeline(
@@ -762,6 +806,8 @@ def _financial_timeline(
 
     timeline = []
     for year, row in normalized_financials.items():
+        if not any(value is not None for value in row.values()):
+            continue
         report_date = report_dates.get(year) or _parse_report_date(None, year)
         if report_date:
             timeline.append((report_date, {"year": year, **row}))
@@ -848,6 +894,7 @@ async def fetch_market_data(
     start_year: int = 1985,
     end_year: int | None = None,
     corp_code: str | None = None,
+    use_analysis_sources: bool = False,
 ) -> list[dict]:
     if end_year is None:
         end_year = datetime.now().year
@@ -894,13 +941,12 @@ async def fetch_market_data(
             start_date=start_date,
             end_date=end_date,
         ),
-        kis_proxy_client.get_financials(stock_code),
+        get_analysis_kis_financials(stock_code) if use_analysis_sources else kis_proxy_client.get_financials(stock_code),
         kis_proxy_client.get_quote(stock_code),
         dart_dividends_future,
         close_price_client.get_daily_price_items(
-            stock_code,
-            since=start_date,
-            until=end_date,
+            stock_code, since=start_date, until=end_date,
+            fields=("close", "market_cap") if use_analysis_sources else None,
         ),
         return_exceptions=True,
     )
@@ -950,6 +996,11 @@ async def fetch_market_data(
         if value is not None
     }
     local_close_by_year = _group_close_by_year(local_close_items)
+    local_caps_by_year = {}
+    for item in _sorted_history_items(local_close_items):
+        trade_date = _parse_date(_get_first(item, "date", "stck_bsop_date"))
+        if trade_date:
+            local_caps_by_year[trade_date.year] = _safe_float(item.get("market_cap"))
 
     # Annual "price" for Korean stocks must come from corporate-action-aware
     # domestic sources. The internal close-price service is primary because it
@@ -977,10 +1028,13 @@ async def fetch_market_data(
     }
 
     listed_shares = _safe_float(_get_first(_quote_summary(quote_payload), "listed_shares", "lstn_stcn"))
-    normalized_financials = _merge_normalized_financial_rows(
-        _normalize_financial_rows(financials_payload, listed_shares),
-        _derive_normalized_financial_rows(financial_data, listed_shares),
-    )
+    if use_analysis_sources:
+        normalized_financials = await _analysis_annual_rows(stock_code, financials_payload, financial_data, listed_shares)
+    else:
+        normalized_financials = _merge_normalized_financial_rows(
+            _normalize_financial_rows(financials_payload, listed_shares),
+            _derive_normalized_financial_rows(financial_data, listed_shares),
+        )
 
     target_years = sorted(
         year
@@ -1029,7 +1083,7 @@ async def fetch_market_data(
                 "dividend_yield": _safe_div(dps, close_price, 100)
                 if dps is not None and close_price
                 else None,
-                "market_cap": round(close_price * shares, 2) if close_price and shares else None,
+                "market_cap": local_caps_by_year.get(year) or (round(close_price * shares, 2) if close_price and shares else None),
             }
         )
 
@@ -1073,6 +1127,39 @@ async def _fetch_kis_weekly_history_paged(
     return _sorted_history_items(deduped)
 
 
+async def _fetch_weekly_history(stock_code: str, start_date: date, end_date: date) -> list[dict]:
+    kis_items, local_rows = await asyncio.gather(
+        _fetch_kis_weekly_history_paged(stock_code, start_date, end_date),
+        close_price_client.get_daily_prices(
+            stock_code, since=start_date, until=end_date, fields=("close", "market_cap"),
+        ),
+        return_exceptions=True,
+    )
+    if isinstance(kis_items, Exception):
+        logger.warning("KIS weekly history unavailable (%s): %s", stock_code, kis_items)
+        kis_items = []
+    if isinstance(local_rows, Exception):
+        local_rows = []
+
+    # Use the last available trading session in each local week so price
+    # and observed market cap share a date. KIS covers weeks absent locally.
+    weeks = {}
+    for item in [*kis_items, *local_rows]:
+        trade_date = _parse_date(_get_first(item, "date", "stck_bsop_date", "trade_date", "business_date"))
+        if trade_date:
+            iso = trade_date.isocalendar()
+            weeks[iso.year, iso.week] = item
+    return [weeks[key] for key in sorted(weeks)]
+
+
+def _historical_market_cap(item: dict, close: float | None, implied_shares: float | None) -> float | None:
+    market_cap = _safe_float(item.get("market_cap"))
+    if market_cap is not None and market_cap > 0:
+        return market_cap
+    shares = _safe_float(_get_first(item, "listed_shares", "lstn_stcn")) or implied_shares
+    return round(close * shares, 2) if close and shares and shares > 0 else None
+
+
 async def fetch_weekly_market_data(
     stock_code: str,
     financial_data: list[dict] | None = None,
@@ -1081,13 +1168,14 @@ async def fetch_weekly_market_data(
     end_date = date.today()
     start_date = end_date - timedelta(days=years * 365)
 
-    financials_payload, dividends_payload = await asyncio.gather(
-        kis_proxy_client.get_financials(stock_code),
+    financials_payload, dividends_payload, history_items = await asyncio.gather(
+        get_analysis_kis_financials(stock_code),
         kis_proxy_client.get_dividends(
             stock_code,
             start_date=start_date,
             end_date=end_date,
         ),
+        _fetch_weekly_history(stock_code, start_date, end_date),
         return_exceptions=True,
     )
     if isinstance(financials_payload, Exception):
@@ -1096,20 +1184,28 @@ async def fetch_weekly_market_data(
     if isinstance(dividends_payload, Exception):
         logger.warning("KIS weekly dividend fetch failed (%s): %s", stock_code, dividends_payload)
         dividends_payload = {}
-    normalized_financials = _merge_normalized_financial_rows(
-        _normalize_financial_rows(financials_payload, None),
-        _derive_normalized_financial_rows(financial_data, None),
-    )
+    if isinstance(history_items, Exception):
+        raise history_items
+
+    return await build_analysis_history(stock_code, history_items, dividends_payload, financials_payload, financial_data)
+
+
+async def build_analysis_history(
+    stock_code: str,
+    history_items: list[dict],
+    dividends_payload: dict,
+    financials_payload: dict,
+    financial_data: list[dict] | None,
+) -> list[dict]:
+    normalized_financials = await _analysis_annual_rows(stock_code, financials_payload, financial_data)
     financial_timeline = _financial_timeline(financial_data, normalized_financials)
     kis_dividend_events = _build_dividend_events(dividends_payload.get("items"))
-
-    history_items = await _fetch_kis_weekly_history_paged(stock_code, start_date, end_date)
 
     results = []
     active_financial = None
     timeline_index = 0
 
-    for item in history_items:
+    for item in _sorted_history_items(history_items):
         trade_date = _parse_date(_get_first(item, "stck_bsop_date", "date", "trade_date", "business_date"))
         if trade_date is None:
             continue
@@ -1141,7 +1237,7 @@ async def fetch_weekly_market_data(
                 "dividend_yield": _safe_div(trailing_dividends, close_price, 100)
                 if trailing_dividends is not None and close_price
                 else None,
-                "market_cap": round(close_price * shares, 2) if close_price and shares else None,
+                "market_cap": _historical_market_cap(item, close_price, shares),
                 "roe": active_financial.get("roe") if active_financial else None,
                 "debt_ratio": active_financial.get("debt_ratio") if active_financial else None,
                 "operating_margin": active_financial.get("operating_margin") if active_financial else None,

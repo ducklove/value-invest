@@ -393,6 +393,7 @@ async function renderResult(data) {
   activeQuoteSnapshot = data.quote_snapshot || {};
   // 카드의 배당/ROE 에 이전 종목의 주간 데이터가 섞이지 않게 먼저 갱신한다.
   _lastWeeklyIndicators = data.weekly_indicators || null;
+  _coverageWeeklyIndicators = _lastWeeklyIndicators || {};
   currentUserPreference = normalizeUserPreference(data.user_preference);
   document.getElementById('companyName').textContent = `${data.corp_name} (${data.stock_code})`;
   const cachedText = data.cached ? `캐시됨 (${new Date(data.analyzed_at).toLocaleDateString('ko-KR')})` : '신규 분석 완료';

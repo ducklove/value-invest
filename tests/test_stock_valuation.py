@@ -25,6 +25,20 @@ def quarterly_payload(periods=None, eps=None, bps=None):
     }
 
 
+def test_annual_fallback_keeps_actual_values_and_excludes_consensus():
+    payload = quarterly_payload(
+        periods=[("202412", "N"), ("202512", "N"), ("202612", "Y")],
+        eps={"202412": "-200", "202512": "1,200", "202612": "2,000"},
+        bps={"202412": "5,000", "202512": "6,000", "202612": "7,000"},
+    )
+    payload["financePeriodType"] = "annual"
+    assert stock_valuation.parse_annual_valuation(payload, "005930", today=date(2027, 1, 1)) == {
+        2024: {"eps": -200, "bps": 5000},
+        2025: {"eps": 1200, "bps": 6000},
+    }
+    assert stock_valuation.parse_annual_valuation(payload, "000660", today=date(2027, 1, 1)) == {}
+
+
 class QuarterlyValuationTests(unittest.TestCase):
     def parse(self, payload):
         return stock_valuation.parse_quarterly_valuation(payload, "005930", today=date(2026, 10, 28))

@@ -323,9 +323,10 @@ async def get_daily_price_items(
     *,
     since: date | datetime | str | None = None,
     until: date | datetime | str | None = None,
+    fields: tuple[str, ...] | None = None,
 ) -> list[dict[str, Any]]:
     try:
-        rows = await get_daily_prices(ticker, since=since, until=until)
+        rows = await get_daily_prices(ticker, since=since, until=until, fields=fields)
         if rows:
             return daily_rows_to_kis_items(rows)
     except ClosePriceClientError:

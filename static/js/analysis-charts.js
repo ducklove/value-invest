@@ -317,22 +317,33 @@ async function renderChartGrid(container, chartKeys, indicatorMap, gridColor, ti
         series = legacy.map(d => ({ ...d, value: d.value != null ? d.value * 1e8 : null }));
       }
     }
-    if (series.length === 0) return;
+    const card = document.createElement('div');
+    card.className = 'chart-card';
+    const heading = document.createElement('h3');
+    heading.textContent = key;
+    card.appendChild(heading);
+    const chart = series.length ? buildChartSeries(key, series) : null;
+    if (!chart?.values.some(Number.isFinite)) {
+      const empty = document.createElement('div');
+      empty.className = 'chart-note';
+      empty.textContent = chart?.rawValues.some(Number.isFinite)
+        ? '이 기간에 표시 기준을 충족하는 값이 없습니다.'
+        : '이 기간에 확인된 데이터가 없습니다.';
+      card.appendChild(empty);
+      container.appendChild(card);
+      return;
+    }
 
-    const { labelField, labels, values, rawValues, note, spanGaps } = buildChartSeries(key, series);
+    const { labelField, labels, values, rawValues, note, spanGaps } = chart;
     const zeroBaseline = shouldUseZeroBaseline(values);
     const color = CHART_COLORS[i % CHART_COLORS.length];
     const displayLabels = labelField === 'date' ? labels.map(formatWeeklyTickLabel) : labels;
-
-    const card = document.createElement('div');
-    card.className = 'chart-card';
     const chartDiv = document.createElement('div');
     chartDiv.className = 'chart-canvas-wrap';
     const innerDiv = document.createElement('div');
     innerDiv.id = `${prefix}-chart-${i}`;
     innerDiv.style.cssText = 'width:100%;height:100%;';
     chartDiv.appendChild(innerDiv);
-    card.innerHTML = `<h3>${key}</h3>`;
     card.appendChild(chartDiv);
     if (note) {
       const noteEl = document.createElement('div');
@@ -475,6 +486,7 @@ async function switchValuationPeriod(period) {
     if (!daily) {
       try {
         daily = await apiFetchJson(`/api/analyze/${stockCode}/daily`);
+        if (_lastAnalysisData?.stock_code !== stockCode || _currentPeriod !== period) return;
         _dailyCache[stockCode] = daily;
       } catch (e) {
         console.error('Daily fetch failed', e);

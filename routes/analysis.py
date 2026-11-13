@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -20,12 +21,15 @@ from repositories import financial as financial_repo
 from repositories import user_stocks as user_stocks_repo
 from services import research_valuation, stock_price, stock_quotes
 from services.dart import client as dart_client
+from services.market.sources import close_price
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 _PRICE_INDICATOR_MARKERS = ("주가", "二쇨")
+_VALUATION_HISTORY_VERSION = 1
+_VALUATION_HISTORY_KEYS = ("PER", "PBR", "ROE (%)", "시가총액", "EPS (원)", "부채비율 (%)", "영업이익률 (%)")
 
 
 def _analysis_snapshot_has_invalid_prices(snapshot: dict | None) -> bool:
@@ -64,6 +68,25 @@ def _analysis_snapshot_has_invalid_prices(snapshot: dict | None) -> bool:
             except (TypeError, ValueError):
                 continue
     return False
+
+
+def _analysis_snapshot_needs_valuation_repair(snapshot: dict | None) -> bool:
+    if not snapshot or snapshot.get("valuation_history_version") == _VALUATION_HISTORY_VERSION:
+        return False
+    weekly = snapshot.get("weekly_indicators") or {}
+    return any(
+        not any(point.get("value") is not None for point in weekly.get(key, []))
+        for key in _VALUATION_HISTORY_KEYS
+    )
+
+
+def _analysis_snapshot_is_usable(snapshot: dict | None) -> bool:
+    return bool(
+        snapshot
+        and not analysis_snapshot_is_stale(snapshot.get("valuation_refreshed_at") or snapshot.get("analyzed_at"))
+        and not _analysis_snapshot_has_invalid_prices(snapshot)
+        and not _analysis_snapshot_needs_valuation_repair(snapshot)
+    )
 
 
 async def _get_analysis_lock(stock_code: str) -> asyncio.Lock:
@@ -114,6 +137,8 @@ async def _build_analysis_response(
         "corp_name": corp_name,
         "cached": cached,
         "quote_snapshot": quote_snapshot,
+        "valuation_history_version": _VALUATION_HISTORY_VERSION,
+        "valuation_refreshed_at": datetime.now().isoformat(),
         **result,
     }
     if analyzed_at:
@@ -124,14 +149,18 @@ async def _build_analysis_response(
 async def _ensure_financial_report_dates(stock_code: str, corp_code: str | None, fin_data: list[dict]) -> list[dict]:
     if not fin_data or all(item.get("report_date") for item in fin_data):
         return fin_data
-    if not corp_code:
+    if not corp_code or not dart_client.api_key():
         return fin_data
 
     years = [item["year"] for item in fin_data if item.get("year") is not None]
     if not years:
         return fin_data
 
-    report_dates = await dart_client.fetch_annual_report_dates(corp_code, min(years), max(years))
+    try:
+        report_dates = await dart_client.fetch_annual_report_dates(corp_code, min(years), max(years))
+    except Exception as exc:
+        logger.warning("사업보고서 접수일 조회 실패(%s): %s", stock_code, type(exc).__name__)
+        return fin_data
     updated = False
     for item in fin_data:
         if item.get("report_date"):
@@ -148,7 +177,7 @@ async def _ensure_financial_report_dates(stock_code: str, corp_code: str | None,
 
 
 async def _ensure_financial_coverage(stock_code: str, corp_code: str | None, fin_data: list[dict]) -> list[dict]:
-    merged = await stock_price.ensure_financial_data_coverage(stock_code, fin_data)
+    merged = await stock_price.ensure_financial_data_coverage(stock_code, fin_data, corp_code=corp_code)
     if merged != fin_data:
         await financial_repo.save_financial_data(stock_code, merged)
     return await _ensure_financial_report_dates(stock_code, corp_code, merged)
@@ -159,20 +188,25 @@ async def _load_cached_analysis_payload(
     corp_code: str | None,
     corp_name: str,
     analyzed_at: str | None,
+    *,
+    repair_valuation: bool,
 ) -> dict:
     fin_data = await financial_repo.get_financial_data(stock_code)
-    if corp_code:
-        fin_data = await _ensure_financial_report_dates(stock_code, corp_code, fin_data)
-
     mkt_data = await financial_repo.get_market_data(stock_code)
-    needs_market_refresh = stock_price.market_data_needs_refresh(mkt_data)
+    needs_market_refresh = (
+        repair_valuation or not fin_data or stock_price.market_data_needs_refresh(mkt_data)
+    )
 
-    if corp_code and (not fin_data or needs_market_refresh):
+    if corp_code and needs_market_refresh:
         fin_data = await _ensure_financial_coverage(stock_code, corp_code, fin_data)
+    elif corp_code:
+        fin_data = await _ensure_financial_report_dates(stock_code, corp_code, fin_data)
 
     if needs_market_refresh:
         try:
-            refreshed = await stock_price.fetch_market_data(stock_code, fin_data, corp_code=corp_code)
+            refreshed = await stock_price.fetch_market_data(
+                stock_code, fin_data, corp_code=corp_code, use_analysis_sources=True,
+            )
             if refreshed:
                 mkt_data = refreshed
                 await financial_repo.save_market_data(stock_code, refreshed)
@@ -217,14 +251,13 @@ async def get_forward_valuation(stock_code: str):
 @router.get("/api/analyze/{stock_code}/daily")
 async def get_daily_data(stock_code: str):
     """Return 1-year daily price + valuation data for a stock."""
-    from datetime import date, timedelta
     end_date = date.today()
     start_date = end_date - timedelta(days=365)
 
     financials_payload, dividends_payload, history_payload, fin_data = await asyncio.gather(
-        stock_price.kis_proxy_client.get_financials(stock_code),
+        stock_price.get_analysis_kis_financials(stock_code),
         stock_price.kis_proxy_client.get_dividends(stock_code, start_date=start_date, end_date=end_date),
-        stock_price.kis_proxy_client.get_history(stock_code, start_date=start_date, end_date=end_date, period="D", adjusted=True),
+        _get_analysis_daily_history(stock_code, start_date, end_date),
         financial_repo.get_financial_data(stock_code),
         return_exceptions=True,
     )
@@ -238,53 +271,28 @@ async def get_daily_data(stock_code: str):
     if isinstance(history_payload, Exception):
         raise HTTPException(status_code=500, detail="일봉 데이터 조회 실패")
 
-    # KIS financials 가 죽어도 ROE/부채비율/영업이익률은 DART 재무데이터로
-    # 채운다 — 주간(fetch_weekly_market_data)과 같은 병합 규칙(KIS 우선).
-    normalized = stock_price._merge_normalized_financial_rows(
-        stock_price._normalize_financial_rows(financials_payload, None),
-        stock_price._derive_normalized_financial_rows(fin_data, None),
+    return await stock_price.build_analysis_history(
+        stock_code,
+        history_payload,
+        dividends_payload,
+        financials_payload,
+        fin_data,
     )
-    financial_timeline = stock_price._financial_timeline(fin_data, normalized)
-    kis_dividend_events = stock_price._build_dividend_events(dividends_payload.get("items"))
 
-    results = []
-    active_financial = None
-    timeline_index = 0
 
-    for item in stock_price._sorted_history_items(history_payload.get("items")):
-        trade_date = stock_price._parse_date(stock_price._get_first(item, "stck_bsop_date", "date", "trade_date"))
-        if trade_date is None:
-            continue
-        from datetime import datetime
-        trade_dt = datetime.combine(trade_date, datetime.min.time())
-        while timeline_index < len(financial_timeline) and financial_timeline[timeline_index][0] <= trade_dt:
-            active_financial = financial_timeline[timeline_index][1]
-            timeline_index += 1
-
-        close = stock_price._safe_float(stock_price._get_first(item, "stck_clpr", "close_price", "close"))
-        eps = active_financial.get("eps") if active_financial else None
-        bps = active_financial.get("bps") if active_financial else None
-        shares = active_financial.get("shares_outstanding") if active_financial else None
-        trailing_div = stock_price._sum_trailing_dividends(kis_dividend_events, trade_date)
-        if trailing_div is None and kis_dividend_events and close is not None:
-            trailing_div = 0.0
-
-        results.append({
-            "date": trade_date.isoformat(),
-            "close_price": close,
-            "per": stock_price._safe_div(close, eps) if close else None,
-            "pbr": stock_price._safe_div(close, bps) if close else None,
-            "eps": eps,
-            # 주당배당금(시점별 TTM) — dividend_yield 와 동일한 trailing 합계.
-            # active_financial 에는 dividend_per_share 키가 없어 과거엔 항상 None 이었다.
-            "dividend_per_share": trailing_div,
-            "dividend_yield": stock_price._safe_div(trailing_div, close, 100) if trailing_div is not None and close else None,
-            "market_cap": round(close * shares, 2) if close and shares else None,
-            "roe": active_financial.get("roe") if active_financial else None,
-            "debt_ratio": active_financial.get("debt_ratio") if active_financial else None,
-            "operating_margin": active_financial.get("operating_margin") if active_financial else None,
-        })
-    return results
+async def _get_analysis_daily_history(stock_code: str, start_date: date, end_date: date) -> list[dict]:
+    try:
+        items = await close_price.get_daily_price_items(
+            stock_code, since=start_date, until=end_date, fields=("close", "market_cap"),
+        )
+    except close_price.ClosePriceClientError:
+        items = []
+    if items:
+        return items
+    payload = await stock_price.kis_proxy_client.get_history(
+        stock_code, start_date=start_date, end_date=end_date, period="D", adjusted=True,
+    )
+    return payload.get("items") or []
 
 
 def _compute_beta_from_pairs(pairs: list[tuple[float, float]]) -> float | None:
@@ -437,23 +445,25 @@ async def get_stock_dr(stock_code: str):
 async def analyze_stock(stock_code: str, request: Request):
     current_user = await get_current_user(request)
     snapshot = await analysis_repo.get_analysis_snapshot(stock_code)
-    if (
-        snapshot
-        and not analysis_snapshot_is_stale(snapshot.get("analyzed_at"))
-        and not _analysis_snapshot_has_invalid_prices(snapshot)
-    ):
+    if _analysis_snapshot_is_usable(snapshot):
         await _remember_recent_analysis(current_user, stock_code)
         return await _decorate_analysis_payload(snapshot, current_user)
 
     meta = await analysis_repo.get_analysis_meta(stock_code)
     if meta:
-        corp_code = await corp_codes.get_corp_code(stock_code)
-        payload = await _load_cached_analysis_payload(
-            stock_code,
-            corp_code,
-            meta["corp_name"],
-            meta.get("analyzed_at"),
-        )
+        lock = await _get_analysis_lock(stock_code)
+        async with lock:
+            snapshot = await analysis_repo.get_analysis_snapshot(stock_code)
+            if _analysis_snapshot_is_usable(snapshot):
+                payload = snapshot
+            else:
+                payload = await _load_cached_analysis_payload(
+                    stock_code,
+                    await corp_codes.get_corp_code(stock_code),
+                    meta["corp_name"],
+                    meta.get("analyzed_at"),
+                    repair_valuation=_analysis_snapshot_needs_valuation_repair(snapshot),
+                )
         await _remember_recent_analysis(current_user, stock_code)
         return await _decorate_analysis_payload(payload, current_user)
 
@@ -473,11 +483,7 @@ async def analyze_stock(stock_code: str, request: Request):
 
         async with stock_lock:
             snapshot = await analysis_repo.get_analysis_snapshot(stock_code)
-            if (
-                snapshot
-                and not analysis_snapshot_is_stale(snapshot.get("analyzed_at"))
-                and not _analysis_snapshot_has_invalid_prices(snapshot)
-            ):
+            if _analysis_snapshot_is_usable(snapshot):
                 await _remember_recent_analysis(current_user, stock_code)
                 yield sse_event("result", await _decorate_analysis_payload(snapshot, current_user))
                 return
@@ -489,6 +495,7 @@ async def analyze_stock(stock_code: str, request: Request):
                     corp_code,
                     meta["corp_name"],
                     meta.get("analyzed_at"),
+                    repair_valuation=_analysis_snapshot_needs_valuation_repair(snapshot),
                 )
                 await _remember_recent_analysis(current_user, stock_code)
                 yield sse_event("result", await _decorate_analysis_payload(payload, current_user))
@@ -513,7 +520,9 @@ async def analyze_stock(stock_code: str, request: Request):
                 yield sse_event("progress", {"step": "market_start", "message": "시장 데이터를 계산합니다..."})
                 mkt_data = []
                 try:
-                    mkt_data = await stock_price.fetch_market_data(stock_code, fin_data, corp_code=corp_code)
+                    mkt_data = await stock_price.fetch_market_data(
+                        stock_code, fin_data, corp_code=corp_code, use_analysis_sources=True,
+                    )
                     yield sse_event("progress", {
                         "step": "market_done",
                         "message": f"시장 데이터 수집 완료 ({len(mkt_data)}개년 데이터)",

@@ -1,8 +1,53 @@
 import time
 import unittest
+from datetime import date
 from unittest.mock import AsyncMock, patch
 
 from services import stock_price
+
+
+async def test_analysis_uses_reported_alternatives_when_kis_financials_are_down():
+    year = date.today().year - 1
+    statement = {
+        "year": year, "revenue": 600_000_000, "operating_profit": 0, "net_income": 80_000_000,
+        "total_equity": 400_000_000, "total_liabilities": 100_000_000, "report_date": f"{year + 1}-03-24",
+    }
+    history = [
+        {"date": f"{year + 1}-03-23", "close": 850, "market_cap": 85_000_000},
+        {"date": f"{year + 1}-03-24", "close": 1000, "market_cap": 100_000_000},
+    ]
+    with patch.object(stock_price, "get_analysis_kis_financials", AsyncMock(return_value={})), \
+         patch.object(stock_price.dart_client, "api_key", return_value="test"), \
+         patch.object(stock_price.dart_client, "fetch_financial_statement", AsyncMock(
+             side_effect=lambda code, requested: statement if requested == year else None,
+         )), \
+         patch.object(stock_price.stock_valuation, "fetch_annual_valuation_rows", AsyncMock(
+             return_value={year: {"eps": 50, "bps": 250}},
+         )):
+        financials = await stock_price.ensure_financial_data_coverage("012450", corp_code="00126566")
+        before, after = await stock_price.build_analysis_history("012450", history, {}, {}, financials)
+
+    assert before["per"] is None
+    assert before["market_cap"] == 85_000_000
+    assert after["per"] == 20
+    assert after["pbr"] == 4
+    assert after["eps"] == 50
+    assert after["roe"] == 20
+    assert after["debt_ratio"] == 25
+    assert after["operating_margin"] == 0
+    assert after["market_cap"] == 100_000_000
+
+
+async def test_weekly_history_keeps_last_local_session_and_recovers_from_kis_failure():
+    rows = [
+        {"date": "2026-11-09", "close": 850, "market_cap": 85_000_000},
+        {"date": "2026-11-12", "close": 1000, "market_cap": 100_000_000},
+    ]
+    with patch.object(stock_price, "_fetch_kis_weekly_history_paged", AsyncMock(side_effect=RuntimeError)), \
+         patch.object(stock_price.close_price_client, "get_daily_prices", AsyncMock(return_value=rows)):
+        history = await stock_price._fetch_weekly_history("012450", date(2026, 11, 9), date(2026, 11, 13))
+
+    assert history == [rows[-1]]
 
 
 class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):

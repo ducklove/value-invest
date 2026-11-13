@@ -25,12 +25,13 @@ from domain.numbers import parse_number
 
 logger = logging.getLogger(__name__)
 
-_API = "https://m.stock.naver.com/api/stock/{stock_code}/finance/quarter"
+_API = "https://m.stock.naver.com/api/stock/{stock_code}/finance/{period}"
 _KST = ZoneInfo("Asia/Seoul")
 _CACHE_TTL_SECONDS = 3600
 _NO_DATA_TTL_SECONDS = 300
 _MAX_PERIOD_AGE_DAYS = 220
 _cache = MemoryTTLCache("valuation.quarterly.v1", _CACHE_TTL_SECONDS, evict_expired_after=_CACHE_TTL_SECONDS)
+_annual_cache = MemoryTTLCache("valuation.annual", _CACHE_TTL_SECONDS, evict_expired_after=_CACHE_TTL_SECONDS)
 
 
 def _today() -> date:
@@ -80,6 +81,74 @@ def _number(cell) -> float | None:
         return None
     value = parse_number(cell.get("value"), zero_as_none=False)
     return value if value is not None and math.isfinite(value) else None
+
+
+async def _fetch_finance_table(stock_code: str, period: str) -> dict:
+    client = await get_http_client("naver_bulk")
+    response = await client.get(
+        _API.format(stock_code=stock_code, period=period),
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=6.0,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def parse_annual_valuation(payload: dict, stock_code: str, *, today: date | None = None) -> dict[int, dict]:
+    """Read actual annual metrics for historical charts, with no consensus values."""
+    if not isinstance(payload, dict) or payload.get("financePeriodType") != "annual":
+        return {}
+    info = payload.get("financeInfo")
+    if not isinstance(info, dict) or payload.get("itemCode") != stock_code or info.get("itemCode") != stock_code:
+        return {}
+
+    today = today or _today()
+    periods = {}
+    for column in info.get("trTitleList") or []:
+        if not isinstance(column, dict) or column.get("isConsensus") != "N":
+            continue
+        key = column.get("key")
+        period_end = _period(key)
+        if period_end is None or period_end > today:
+            continue
+        if period_end.year in periods:
+            return {}
+        periods[period_end.year] = key
+
+    fields = {"EPS": "eps", "BPS": "bps", "ROE": "roe", "부채비율": "debt_ratio", "영업이익률": "operating_margin"}
+    rows = {}
+    for row in info.get("rowList") or []:
+        if not isinstance(row, dict):
+            continue
+        field = fields.get(str(row.get("title") or "").strip().upper())
+        if field and isinstance(row.get("columns"), dict):
+            if field in rows:
+                return {}
+            rows[field] = row["columns"]
+
+    annual = {}
+    for year, key in periods.items():
+        values = {field: _number(columns.get(key)) for field, columns in rows.items()}
+        if any(value is not None for value in values.values()):
+            annual[year] = values
+    return annual
+
+
+async def fetch_annual_valuation_rows(stock_code: str) -> dict[int, dict]:
+    if not re.fullmatch(r"[0-9A-Z]{6}", stock_code):
+        return {}
+
+    async def load() -> dict[int, dict]:
+        try:
+            return parse_annual_valuation(await _fetch_finance_table(stock_code, "annual"), stock_code)
+        except Exception as exc:
+            logger.warning("Annual valuation unavailable for %s: %s", stock_code, type(exc).__name__)
+            return {}
+
+    return await cached_fetch(
+        _annual_cache, stock_code, load,
+        ttl=lambda rows: _CACHE_TTL_SECONDS if rows else _NO_DATA_TTL_SECONDS,
+    )
 
 
 def parse_quarterly_valuation(payload: dict, stock_code: str, *, today: date | None = None) -> dict:
@@ -221,10 +290,7 @@ async def fetch_current_valuation_basis(stock_code: str, *, as_of: date | str | 
 
     async def load() -> dict:
         try:
-            client = await get_http_client("naver_bulk")
-            response = await client.get(_API.format(stock_code=stock_code), headers={"User-Agent": "Mozilla/5.0"}, timeout=6.0)
-            response.raise_for_status()
-            result = parse_quarterly_valuation(response.json(), stock_code, today=today)
+            result = parse_quarterly_valuation(await _fetch_finance_table(stock_code, "quarter"), stock_code, today=today)
             result["fetched_at"] = datetime.now(_KST).isoformat(timespec="seconds")
             return result
         except Exception as exc:

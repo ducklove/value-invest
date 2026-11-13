@@ -147,7 +147,7 @@ async def test_recent_disclosures_maps_items_and_swallows_errors():
 
 async def test_annual_report_dates_go_through_list_client():
     items = [
-        {"report_nm": "사업보고서 (2024.12)", "rcept_dt": "20250320"},
+        {"report_nm": "[첨부정정]사업보고서 (2024.12)", "rcept_dt": "20250320"},
         {"report_nm": "분기보고서 (2025.03)", "rcept_dt": "20250515"},
     ]
     fake = FakeDart(_ok(items))

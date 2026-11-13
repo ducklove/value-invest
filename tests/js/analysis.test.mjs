@@ -117,6 +117,27 @@ test("valuation 카드: TTM 자료가 없으면 연간 EPS·BPS로 조용히 폴
   assert.equal(m.roe, 10);
 });
 
+test("시세 없이도 연간 ROE와 확인된 거래일의 시가총액이 표시된다", () => {
+  const w = load();
+  const metrics = w.getCurrentValuationMetrics(
+    { "ROE (%)": [{ year: 2025, value: 10 }] },
+    { "시가총액": [{ date: "2026-11-12", value: 100000000 }] },
+    {},
+  );
+  assert.equal(metrics.roe, 10);
+  assert.equal(metrics.marketCap, 100000000);
+  assert.equal(metrics.per, null);
+});
+
+test("밸류에이션 차트는 값이 모두 null이면 빈 축 대신 상태를 표시한다", async () => {
+  const w = load();
+  w.loadChartLib = async () => {};
+  const container = w.document.createElement("div");
+  await w.renderChartGrid(container, ["PER"], { PER: [{ date: "2026-11-12", value: null }] }, "", "", "weekly");
+  assert.match(container.textContent, /확인된 데이터가 없습니다/);
+  assert.equal(container.querySelector(".chart-canvas-wrap"), null);
+});
+
 test("valuation 카드: 주간 TTM 배당 0 은 실측 0.00% 로 표시된다", () => {
   const w = load();
   const weekly = {

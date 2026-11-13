@@ -19,10 +19,15 @@ function getLatestIndicatorValue(series) {
 // recorded yet (e.g., it's January and last year's dividend was
 // declared but no distribution yet).
 function getLatestPositiveValue(series) {
+  const point = getLatestPositivePoint(series);
+  return point ? Number(point.value) : null;
+}
+
+function getLatestPositivePoint(series) {
   const arr = series || [];
   for (let i = arr.length - 1; i >= 0; i -= 1) {
     const v = Number(arr[i]?.value);
-    if (Number.isFinite(v) && v > 0) return v;
+    if (Number.isFinite(v) && v > 0) return arr[i];
   }
   return null;
 }
@@ -35,9 +40,7 @@ function formatMetricNumber(value, suffix = '') {
 
 function getCurrentValuationMetrics(indicators, weeklyIndicators, quoteSnapshot, valuationBasis = null) {
   const currentPrice = Number(quoteSnapshot?.price);
-  if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
-    return { per: null, pbr: null, roe: null, dividendYield: null, marketCap: null };
-  }
+  const hasPrice = Number.isFinite(currentPrice) && currentPrice > 0;
 
   // 과거 차트의 EPS/BPS 는 연간 실적이다. 현재 PER/PBR 에는 별도로
   // 검증한 TTM EPS / 최신 분기말 BPS 만 사용하고, 없으면 N/A 로 둔다.
@@ -57,26 +60,26 @@ function getCurrentValuationMetrics(indicators, weeklyIndicators, quoteSnapshot,
     ?? getLatestIndicatorValue(indicators['ROE (%)']);
 
   return {
-    per: Number.isFinite(latestEps) && latestEps > 0 ? currentPrice / latestEps : null,
-    pbr: Number.isFinite(latestBps) && latestBps > 0 ? currentPrice / latestBps : null,
+    per: hasPrice && Number.isFinite(latestEps) && latestEps > 0 ? currentPrice / latestEps : null,
+    pbr: hasPrice && Number.isFinite(latestBps) && latestBps > 0 ? currentPrice / latestBps : null,
     roe,
-    dividendYield: trailingDps !== null ? (trailingDps / currentPrice) * 100 : null,
-    marketCap: getCurrentMarketCap(indicators, currentPrice),
+    dividendYield: hasPrice && trailingDps !== null ? (trailingDps / currentPrice) * 100 : null,
+    marketCap: getCurrentMarketCap(indicators, currentPrice, weekly),
   };
 }
 
-// 현재 시총 = 최신 연간 (시가총액/주가)로 추정한 상장주식수 × 현재가.
-// 둘 중 하나라도 없으면 최신 연간 시총을 그대로 쓴다.
-function getCurrentMarketCap(indicators, currentPrice) {
+function getCurrentMarketCap(indicators, currentPrice, weekly = {}) {
+  const weeklyMcap = getLatestPositiveValue(weekly['시가총액']);
+  if (weeklyMcap) {
+    return weeklyMcap;
+  }
   const mcapSeries = (indicators['시가총액'] && indicators['시가총액'].length)
     ? indicators['시가총액']
     : (indicators['시가총액 (억원)'] || []).map(d => ({ ...d, value: d.value != null ? d.value * 1e8 : null }));
-  const latestMcap = getLatestIndicatorValue(mcapSeries);
-  const latestAnnualPrice = getLatestIndicatorValue(indicators['주가 (원)']);
-  if (latestMcap && latestAnnualPrice && latestAnnualPrice > 0 && currentPrice > 0) {
-    return (latestMcap / latestAnnualPrice) * currentPrice;
-  }
-  return latestMcap;
+  const annualMcap = getLatestPositivePoint(mcapSeries);
+  if (!annualMcap) return null;
+  const price = getLatestIndicatorValue((indicators['주가 (원)'] || []).filter(point => point.year === annualMcap.year));
+  return price > 0 && currentPrice > 0 ? annualMcap.value / price * currentPrice : Number(annualMcap.value);
 }
 
 // 베타는 별도 엔드포인트에서 비동기로 받아오며, 처음 렌더 시에는 '…' 로
@@ -86,6 +89,7 @@ let _currentStockLinks = null;  // {preferred?, holding?} 또는 null — 외부
 let _currentDr = null;  // [{label, exchange, ticker, change_pct, converted_price}] 또는 null — 해외 DR
 let _currentValuationBasis = null;  // null: 로딩 중, {}: 조회 불가
 let _forwardValuation = null;  // 증권사 리포트의 명시적인 연간 예상 EPS/BPS
+let _coverageWeeklyIndicators = {};
 
 function _valuationSourceLink(label, url) {
   const text = escapeHtml(String(label || ''));
@@ -207,7 +211,8 @@ function renderCurrentValuationSummary(indicators, weeklyIndicators, quoteSnapsh
     ..._forwardBasisCard('Forward PBR', 'bps', price),
     { label: 'ROE', value: formatMetricNumber(metrics.roe, '%'), sub: '연간 실적' },
     { label: '배당수익률', value: formatMetricNumber(metrics.dividendYield, '%') },
-    { label: '시가총액', value: _fmtMarketCap(metrics.marketCap) },
+    { label: '시가총액', value: _fmtMarketCap(metrics.marketCap),
+      sub: getLatestPositivePoint(weeklyIndicators?.['시가총액'])?.date || '' },
     { label: '목표가', value: _fmtTargetAvg() },
     { label: '베타 (1Y)', value: betaVal, attr: 'data-beta="1"' },
   ].map(item => (
@@ -295,7 +300,7 @@ function _drValuationCards(drs) {
 function _renderCoverage() {
   const el = document.getElementById('coverageNote');
   if (!el) return;
-  el.innerHTML = renderCurrentValuationSummary(activeIndicators || {}, _lastWeeklyIndicators || {}, activeQuoteSnapshot || {});
+  el.innerHTML = renderCurrentValuationSummary(activeIndicators || {}, _coverageWeeklyIndicators, activeQuoteSnapshot || {});
   // 실제 렌더된 카드 수로 열 수를 정한다 — DR sanity 가드로 일부가 숨겨질 수
   // 있어 _currentDr.length 가 아니라 DOM 의 실제 .valuation-card 수를 센다.
   el.dataset.count = String(el.querySelectorAll('.valuation-card').length);
