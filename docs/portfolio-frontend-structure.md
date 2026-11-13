@@ -112,7 +112,7 @@ CSS: 생태계 공통 토큰 `./static/ecosystem/vc-tokens.css`가 분할 CSS �
 19. `portfolio-groups-market.js`: 그룹 관리 모달, market bar, CSV import/export, 통화 전환.
 20. `portfolio-ai.js`: 포트폴리오 AI 분석 요청 흐름.
 21. `portfolio-reports.js`: 월간/연간 기간 투자 보고서 목록·생성·렌더링. v2 보고서의 매수/매도 기반 `composition_changes` 블록과 v3의 기간 종료 스냅샷(`holdings.end_snapshot`, 기본 접힘)을 보여주고, 바로 아래의 독립 카드 `#pfPeriodPerformanceWrap`에는 저장 여부와 무관하게 NAV에서 계산한 연간 실적 목록(연도 행 클릭 → 월간 펼침)을 그린다.
-22. `portfolio-performance.js`: 심층 분석 탭 shell, 영역지도, 성과 데이터 로딩.
+22. `portfolio-performance.js`: 심층 분석 탭 shell, 점프 내비 표시(`pfInitDeepNav`), 영역지도, 성과 데이터 로딩.
 23. `portfolio-trends-benchmark.js`: NAV 차트 비교지수 선택/캐시, beta·R² 통계와 beta 오버레이.
 24. `portfolio-trends.js`: NAV/평가금액 추이 차트, 수익률 카드, 기간/Y축 동기화, 공용 차트 헬퍼.
 25. `portfolio-trends-group-weight.js`: 그룹 비중 100% 누적 면적 차트와 drill-down 진입(`_GROUP_WEIGHT_COLORS` 공급).
@@ -163,6 +163,24 @@ CSS: 생태계 공통 토큰 `./static/ecosystem/vc-tokens.css`가 분할 CSS �
 `static/admin.html`은 `utils.js`(apiFetch·escapeHtml·cssToken·isDarkTheme·schedulePoll·safeStorage*; 옛 inline `apiFetch` 사본은 제거) → `admin.js`(부트스트랩·AI 설정) →
 `admin-observability.js`(관측성 패널·라이브 갱신·수동 잡) →
 `admin-linked-projects.js`(연결 프로젝트 config·외국/우선주 배당 관리) 순서로 로드한다.
+
+## 심층 분석 탭 배치
+
+카드 15개는 `index.html` 에서 네 묶음(`<section class="pf-deep-section">`)으로 나뉜다. 카드 id 와 로드 방식은 그대로이고 순서만 묶음을 따른다.
+
+| 묶음 (`id`) | 카드 |
+|---|---|
+| 성과 `pfDeepPerformance` | NAV · 리스크 · 연간 실적 · 평가금액 추이 |
+| 구성·위험 `pfDeepExposure` | X-Ray · 그룹 비중 추이 · 리밸런싱 |
+| 손익·현금 `pfDeepIncome` | 수익 원인 분해 · 실현손익·세금 · 배당 캘린더 · 자금 입출금 |
+| 기록·리포트 `pfDeepRecords` | 기간 보고서 · 투자 논거 · 투자 일지 · AI 분석 |
+
+- 점프 내비(`.pf-deep-anchors`)는 묶음마다 캡슐 하나(`.pf-deep-nav-group`)이고 링크는 전부 순수 앵커다. `pfInitDeepNav` 가 스크롤 위치에 맞춰
+  보고 있는 묶음만 펼치고(`.is-spy` + `.is-active`) 현재 카드를 표시한다. 스크립트가 없으면 전부 펼친 채로 동작한다.
+- 카드를 추가하면 묶음 안에 넣고 내비에 링크를 같은 순서로 추가한다(`test_performance_tab_has_sticky_anchor_nav_covering_every_card` 가 확인).
+- 카드·제목·안내문(`.pf-insight-notice`)·접이식(`details.pf-insight-method`)·요약 숫자(`.pf-insight-summary`)의 공통 모양은
+  `portfolio.css` 끝의 "심층 분석 탭 화면 정리" 블록에 `#pfPerformanceTab` 범위로 모여 있다. 카드별 규칙보다 우선하고
+  `mobile-overrides.css` 의 같은 요소 규칙보다도 우선하므로, 좁은 화면 값은 그 블록의 미디어 쿼리에 둔다.
 
 ## 투자 판단 도구
 

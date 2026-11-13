@@ -21,7 +21,7 @@ function pfAttributionHtml(data) {
     <div class="pf-attribution-bars" aria-label="자산 증감 구성">${bars}</div>
     <p class="pf-chart-note">합계 검산 차이 ${pfAttributionMoney(data.reconciliation_error)} · 분석 가능한 종목 구간 ${Number(data.coverage?.eligible_intervals || 0)}/${Number(data.coverage?.examined_intervals || 0)}</p>
     ${issues ? `<p class="pf-insight-notice">${issues}</p>` : ''}
-    <details><summary>종목별 기여분 (${(data.stocks || []).length}개)</summary><div class="pf-insight-table-scroll"><table class="pf-insight-table"><thead><tr><th>종목</th><th>가격</th><th>환율</th><th>미분리</th><th>합계</th></tr></thead><tbody>${stocks || '<tr><td colspan="5">분류 가능한 종목 구간이 없습니다.</td></tr>'}</tbody></table></div></details>
+    <details class="pf-insight-method"><summary>종목별 기여분 (${(data.stocks || []).length}개)</summary><div class="pf-insight-table-scroll"><table class="pf-insight-table"><thead><tr><th>종목</th><th>가격</th><th>환율</th><th>미분리</th><th>합계</th></tr></thead><tbody>${stocks || '<tr><td colspan="5">분류 가능한 종목 구간이 없습니다.</td></tr>'}</tbody></table></div></details>
     <details class="pf-insight-method"><summary>계산 방식과 데이터 한계</summary>${(data.notes || []).map(note => `<p>${escapeHtml(note)}</p>`).join('')}</details>`;
 }
 

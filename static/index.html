@@ -469,31 +469,47 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
       <div class="pf-deep-head">
         <div class="pf-deep-title">
           <h2>심층 분석</h2>
-          <span>NAV · 리스크 · 리밸런싱 · 현금흐름</span>
+          <span>성과 · 구성과 위험 · 손익과 현금 · 기록</span>
         </div>
         <div class="pf-deep-meta">스냅샷 기준</div>
       </div>
 
-      <!-- 카드 10개가 한 화면에 이어지는 장스크롤을 완화하는 점프 내비 — 순수 앵커
-           링크라 JS 없이도 동작한다(UX 감사 P2⑥). 각 대상 카드의 scroll-margin-top 이
-           고정 헤더/이 바 자체의 높이만큼 여유를 둬 점프 후 제목이 가려지지 않는다. -->
+      <!-- 카드 15개를 네 묶음으로 나눈 점프 내비. 순수 앵커 링크라 JS 없이도 동작한다
+           (UX 감사 P2⑥). JS 가 켜지면 portfolio-performance.js 의 pfInitDeepNav 가 지금
+           보고 있는 묶음만 펼치고(.is-spy) 현재 카드를 표시한다. 각 대상의
+           scroll-margin-top 이 고정 헤더·이 바 높이만큼 여유를 둔다. -->
       <nav class="pf-deep-anchors" aria-label="심층 분석 섹션 바로가기">
-        <a class="pf-deep-anchor-link" href="#pfNavWrap">NAV</a>
-        <a class="pf-deep-anchor-link" href="#pfRiskWrap">리스크</a>
-        <a class="pf-deep-anchor-link" href="#pfExposureWrap">X-Ray</a>
-        <a class="pf-deep-anchor-link" href="#pfAttributionWrap">수익 분해</a>
-        <a class="pf-deep-anchor-link" href="#pfTaxWrap">세금</a>
-        <a class="pf-deep-anchor-link" href="#pfThesisWrap">투자 논거</a>
-        <a class="pf-deep-anchor-link" href="#pfPeriodReportWrap">보고서</a>
-        <a class="pf-deep-anchor-link" href="#pfPeriodPerformanceWrap">연간실적</a>
-        <a class="pf-deep-anchor-link" href="#pfRebalanceWrap">리밸런싱</a>
-        <a class="pf-deep-anchor-link" href="#pfDivCalWrap">배당</a>
-        <a class="pf-deep-anchor-link" href="#pfJournalWrap">일지</a>
-        <a class="pf-deep-anchor-link" href="#pfValueWrap">평가금액</a>
-        <a class="pf-deep-anchor-link" href="#pfGroupWeightWrap">그룹비중</a>
-        <a class="pf-deep-anchor-link" href="#pfCashflowWrap">현금흐름</a>
-        <a class="pf-deep-anchor-link" href="#pfAiWrap">AI</a>
+        <div class="pf-deep-nav-group" data-section="pfDeepPerformance">
+          <a class="pf-deep-nav-section" href="#pfDeepPerformance">성과</a>
+          <a class="pf-deep-anchor-link" href="#pfNavWrap">NAV</a>
+          <a class="pf-deep-anchor-link" href="#pfRiskWrap">리스크</a>
+          <a class="pf-deep-anchor-link" href="#pfPeriodPerformanceWrap">연간실적</a>
+          <a class="pf-deep-anchor-link" href="#pfValueWrap">평가금액</a>
+        </div>
+        <div class="pf-deep-nav-group" data-section="pfDeepExposure">
+          <a class="pf-deep-nav-section" href="#pfDeepExposure">구성·위험</a>
+          <a class="pf-deep-anchor-link" href="#pfExposureWrap">X-Ray</a>
+          <a class="pf-deep-anchor-link" href="#pfGroupWeightWrap">그룹비중</a>
+          <a class="pf-deep-anchor-link" href="#pfRebalanceWrap">리밸런싱</a>
+        </div>
+        <div class="pf-deep-nav-group" data-section="pfDeepIncome">
+          <a class="pf-deep-nav-section" href="#pfDeepIncome">손익·현금</a>
+          <a class="pf-deep-anchor-link" href="#pfAttributionWrap">수익 분해</a>
+          <a class="pf-deep-anchor-link" href="#pfTaxWrap">세금</a>
+          <a class="pf-deep-anchor-link" href="#pfDivCalWrap">배당</a>
+          <a class="pf-deep-anchor-link" href="#pfCashflowWrap">현금흐름</a>
+        </div>
+        <div class="pf-deep-nav-group" data-section="pfDeepRecords">
+          <a class="pf-deep-nav-section" href="#pfDeepRecords">기록·리포트</a>
+          <a class="pf-deep-anchor-link" href="#pfPeriodReportWrap">보고서</a>
+          <a class="pf-deep-anchor-link" href="#pfThesisWrap">투자 논거</a>
+          <a class="pf-deep-anchor-link" href="#pfJournalWrap">일지</a>
+          <a class="pf-deep-anchor-link" href="#pfAiWrap">AI</a>
+        </div>
       </nav>
+
+      <section class="pf-deep-section" id="pfDeepPerformance" aria-labelledby="pfDeepPerformanceTitle">
+      <div class="pf-deep-section-head"><h3 id="pfDeepPerformanceTitle">성과</h3><span>기준가 추이와 위험 지표, 연·월별 실적</span></div>
 
       <div class="pf-nav-chart-wrap pf-analysis-card pf-analysis-card-primary" id="pfNavWrap">
         <div class="pf-nav-header">
@@ -523,10 +539,82 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
         </div>
       </div>
 
+      <!-- 보고서 카드와 별개인 독립 카드 — 저장된 보고서가 아니라 NAV 스냅샷에서
+           매번 계산한다. 연도 행을 누르면 그 해의 월간 실적이 펼쳐진다
+           (portfolio-reports.js 가 보고서 카드와 함께 로드한다). -->
+      <div class="pf-nav-chart-wrap pf-analysis-card pf-period-perf" id="pfPeriodPerformanceWrap">
+        <div class="pf-nav-header">
+          <h3>연간 실적</h3>
+          <span class="pf-chart-note">NAV 기준 · 연도를 누르면 월간 실적</span>
+        </div>
+        <div id="pfPeriodPerformanceContent" class="pf-period-perf-content">
+          <div class="pf-risk-empty">성과 탭을 열면 연도별 실적을 불러옵니다.</div>
+        </div>
+      </div>
+
+      <div class="pf-nav-chart-wrap pf-analysis-card" id="pfValueWrap">
+        <div class="pf-nav-header">
+          <h3>평가금액 추이</h3>
+          <label class="pf-bench-chip"><input type="checkbox" id="pfValueYZero" onchange="onValueYZeroToggle()"><span>Y축 0부터</span></label>
+        </div>
+        <div class="pf-nav-chart-container pf-nav-short">
+          <div id="pfValueChart" style="width:100%;height:100%;"></div>
+        </div>
+        <div class="pf-chart-range" id="pfValueRange"></div>
+        <div class="pf-nav-returns" id="pfValueStats"></div>
+      </div>
+      </section>
+
+      <section class="pf-deep-section" id="pfDeepExposure" aria-labelledby="pfDeepExposureTitle">
+      <div class="pf-deep-section-head"><h3 id="pfDeepExposureTitle">구성·위험</h3><span>실제로 무엇을 들고 있고 어디서 위험이 오는지</span></div>
+
       <section class="pf-nav-chart-wrap pf-analysis-card" id="pfExposureWrap" aria-labelledby="pfExposureTitle">
         <div class="pf-nav-header"><div><h3 id="pfExposureTitle">포트폴리오 X-Ray</h3><span class="pf-chart-note">ETF·지주사·우선주를 풀어 본 실제 노출 · 입력 없음</span></div></div>
         <div id="pfExposureContent" aria-live="polite">심층 분석을 열면 실제 노출을 계산합니다.</div>
       </section>
+
+      <div class="pf-nav-chart-wrap pf-analysis-card" id="pfGroupWeightWrap">
+        <div class="pf-nav-header">
+          <h3>그룹 비중 추이</h3>
+          <span class="pf-chart-note">100% 누적 면적 차트 · 일별 스냅샷 기준</span>
+        </div>
+        <div class="pf-nav-chart-container pf-group-weight">
+          <div id="pfGroupWeightChart" style="width:100%;height:100%;"></div>
+        </div>
+        <div class="pf-chart-range" id="pfGroupWeightRange"></div>
+        <div class="pf-nav-returns" id="pfGroupWeightStats"></div>
+        <div class="pf-group-composition-wrap" id="pfGroupCompositionWrap" style="display:none;">
+          <div class="pf-nav-header">
+            <h4 id="pfGroupCompositionTitle">그룹 내 종목 비중 추이</h4>
+            <button class="pf-mini-btn" type="button" onclick="pfHideGroupComposition()">닫기</button>
+          </div>
+          <div class="pf-nav-chart-container pf-group-composition">
+            <div id="pfGroupCompositionChart" style="width:100%;height:100%;"></div>
+          </div>
+          <div class="pf-chart-range" id="pfGroupCompositionRange"></div>
+          <div class="pf-nav-returns" id="pfGroupCompositionStats"></div>
+        </div>
+      </div>
+
+      <div class="pf-nav-chart-wrap pf-analysis-card" id="pfRebalanceWrap">
+        <div class="pf-nav-header">
+          <h3>리밸런싱</h3>
+          <div class="pf-rebal-header-actions">
+            <label class="pf-rebal-alert-toggle" title="목표 비중 이탈 항목이 생기면 연결된 알림 채널로 보냅니다">
+              <input type="checkbox" id="pfRebalanceAlertCb" onchange="pfRebalanceToggleAlert(this.checked)"> 이탈 시 알림
+            </label>
+            <button class="pf-mini-btn" type="button" id="pfRebalanceEditBtn" onclick="pfRebalanceToggleEditor()">목표 설정</button>
+          </div>
+        </div>
+        <div id="pfRebalanceEditor" class="pf-rebal-editor" style="display:none;"></div>
+        <div id="pfRebalanceContent" class="pf-rebal-content">
+          <div class="pf-risk-empty">성과 탭을 열면 리밸런싱 현황을 불러옵니다.</div>
+        </div>
+      </div>
+      </section>
+
+      <section class="pf-deep-section" id="pfDeepIncome" aria-labelledby="pfDeepIncomeTitle">
+      <div class="pf-deep-section-head"><h3 id="pfDeepIncomeTitle">손익·현금</h3><span>수익이 어디서 났는지와 세금·배당·입출금</span></div>
 
       <section class="pf-nav-chart-wrap pf-analysis-card" id="pfAttributionWrap" aria-labelledby="pfAttributionTitle">
         <div class="pf-nav-header"><div><h3 id="pfAttributionTitle">수익 원인 분해</h3><span class="pf-chart-note">가격 · 환율 · 배당 · 순입출금과 미분류 금액</span></div></div>
@@ -554,22 +642,29 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
         <div id="pfTaxContent" aria-live="polite">심층 분석을 열면 실현손익과 세금 추정을 불러옵니다.</div>
       </section>
 
-      <section class="pf-nav-chart-wrap pf-analysis-card" id="pfThesisWrap" aria-labelledby="pfThesisTitle">
-        <div class="pf-nav-header"><div><h3 id="pfThesisTitle">투자 논거 · 반증 조건</h3><span class="pf-chart-note">저장된 연간 재무자료 기준 · 조건 충족은 재검토 신호</span></div><button type="button" class="pf-mini-btn" onclick="pfLoadTheses()">다시 점검</button></div>
-        <details id="pfThesisEditor"><summary>투자 논거 등록·수정</summary>
-          <form class="pf-insight-form" id="pfThesisForm" onsubmit="pfSubmitThesis(event)">
-            <label>종목 코드 <input name="stock_code" maxlength="24" required placeholder="005930 또는 AAPL"></label>
-            <label class="pf-insight-wide">투자 논거 <textarea name="thesis" rows="2" maxlength="2000" required placeholder="이 종목을 보유하는 이유"></textarea></label>
-            <label class="pf-insight-wide">반증 조건 <textarea name="invalidation" rows="2" maxlength="2000" required placeholder="어떤 변화가 생기면 이 판단을 다시 검토할까요?"></textarea></label>
-            <label>자동 점검 지표 <select name="metric"><option value="manual">직접 확인</option><option value="revenue_growth_pct">매출 전년 대비 증감률 (%)</option><option value="operating_margin_pct">영업이익률 (%)</option><option value="debt_ratio_pct">부채비율 (%)</option></select></label>
-            <label>반증 조건이 되는 비교 <select name="operator"><option value="lt">기준값 미만</option><option value="lte">기준값 이하</option><option value="gt">기준값 초과</option><option value="gte">기준값 이상</option></select></label>
-            <label>기준값 (%) <input name="threshold" type="number" step="any" placeholder="직접 확인이면 생략"></label>
-            <label>검토 기한 (선택) <input name="deadline" type="date"></label>
-            <label class="pf-insight-wide">근거 원문 링크 (선택) <input name="evidence_url" type="url" maxlength="2000" placeholder="https://"></label>
-            <div class="pf-thesis-buttons"><button type="submit" class="pf-mini-btn">논거 저장</button><button type="button" class="pf-mini-btn" onclick="pfEditThesis()">새 논거로 초기화</button></div>
-          </form>
-        </details><div id="pfThesisContent" aria-live="polite">심층 분석을 열면 투자 논거를 점검합니다.</div>
+      <div class="pf-nav-chart-wrap pf-analysis-card" id="pfDivCalWrap">
+        <div class="pf-nav-header">
+          <h3>배당 캘린더</h3>
+          <span class="pf-chart-note">배당기준일 · 지급일 · 배당금 계산</span>
+          <button type="button" class="pf-mini-btn" onclick="pfLoadDividendCalendarPanel({force:true})">다시 불러오기</button>
+        </div>
+        <div id="pfDivCalContent" class="pf-divcal-content">
+          <div class="pf-risk-empty">성과 탭을 열면 배당 캘린더를 불러옵니다.</div>
+        </div>
+      </div>
+
+      <div class="pf-cashflow-section pf-analysis-card" id="pfCashflowWrap">
+        <h3>자금 입출금</h3>
+        <p class="pf-trade-help">입금·출금과 배당 분배금 지급 내역입니다. 등록은 상단의 ‘자금 입출금’ 또는 ‘분배금 출금’에서 할 수 있습니다.</p>
+        <table class="pf-cf-table" id="pfCfTable">
+          <thead><tr><th>날짜</th><th>구분</th><th>금액</th><th>기준가</th><th>좌수변동</th><th>잔여 좌수</th><th>메모</th><th></th></tr></thead>
+          <tbody id="pfCfBody"></tbody>
+        </table>
+      </div>
       </section>
+
+      <section class="pf-deep-section" id="pfDeepRecords" aria-labelledby="pfDeepRecordsTitle">
+      <div class="pf-deep-section-head"><h3 id="pfDeepRecordsTitle">기록·리포트</h3><span>기간 보고서와 투자 판단 기록</span></div>
 
       <div class="pf-nav-chart-wrap pf-analysis-card pf-period-report-card" id="pfPeriodReportWrap">
         <div class="pf-nav-header pf-period-report-head">
@@ -592,46 +687,22 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
         </div>
       </div>
 
-      <!-- 보고서 카드와 별개인 독립 카드 — 저장된 보고서가 아니라 NAV 스냅샷에서
-           매번 계산한다. 연도 행을 누르면 그 해의 월간 실적이 펼쳐진다
-           (portfolio-reports.js 가 보고서 카드와 함께 로드한다). -->
-      <div class="pf-nav-chart-wrap pf-analysis-card pf-period-perf" id="pfPeriodPerformanceWrap">
-        <div class="pf-nav-header">
-          <h3>연간 실적</h3>
-          <span class="pf-chart-note">NAV 기준 · 연도를 누르면 월간 실적</span>
-        </div>
-        <div id="pfPeriodPerformanceContent" class="pf-period-perf-content">
-          <div class="pf-risk-empty">성과 탭을 열면 연도별 실적을 불러옵니다.</div>
-        </div>
-      </div>
-
-      <div class="pf-analysis-grid pf-analysis-grid-compact">
-      <div class="pf-nav-chart-wrap pf-analysis-card" id="pfRebalanceWrap">
-        <div class="pf-nav-header">
-          <h3>리밸런싱</h3>
-          <div class="pf-rebal-header-actions">
-            <label class="pf-rebal-alert-toggle" title="목표 비중 이탈 항목이 생기면 연결된 알림 채널로 보냅니다">
-              <input type="checkbox" id="pfRebalanceAlertCb" onchange="pfRebalanceToggleAlert(this.checked)"> 이탈 시 알림
-            </label>
-            <button class="pf-mini-btn" type="button" id="pfRebalanceEditBtn" onclick="pfRebalanceToggleEditor()">목표 설정</button>
-          </div>
-        </div>
-        <div id="pfRebalanceEditor" class="pf-rebal-editor" style="display:none;"></div>
-        <div id="pfRebalanceContent" class="pf-rebal-content">
-          <div class="pf-risk-empty">성과 탭을 열면 리밸런싱 현황을 불러옵니다.</div>
-        </div>
-      </div>
-
-      <div class="pf-nav-chart-wrap pf-analysis-card" id="pfDivCalWrap">
-        <div class="pf-nav-header">
-          <h3>배당 캘린더</h3>
-          <span class="pf-chart-note">배당기준일 · 지급일 · 배당금 계산</span>
-          <button type="button" class="pf-mini-btn" onclick="pfLoadDividendCalendarPanel({force:true})">다시 불러오기</button>
-        </div>
-        <div id="pfDivCalContent" class="pf-divcal-content">
-          <div class="pf-risk-empty">성과 탭을 열면 배당 캘린더를 불러옵니다.</div>
-        </div>
-      </div>
+      <section class="pf-nav-chart-wrap pf-analysis-card" id="pfThesisWrap" aria-labelledby="pfThesisTitle">
+        <div class="pf-nav-header"><div><h3 id="pfThesisTitle">투자 논거 · 반증 조건</h3><span class="pf-chart-note">저장된 연간 재무자료 기준 · 조건 충족은 재검토 신호</span></div><button type="button" class="pf-mini-btn" onclick="pfLoadTheses()">다시 점검</button></div>
+        <details id="pfThesisEditor"><summary>투자 논거 등록·수정</summary>
+          <form class="pf-insight-form" id="pfThesisForm" onsubmit="pfSubmitThesis(event)">
+            <label>종목 코드 <input name="stock_code" maxlength="24" required placeholder="005930 또는 AAPL"></label>
+            <label class="pf-insight-wide">투자 논거 <textarea name="thesis" rows="2" maxlength="2000" required placeholder="이 종목을 보유하는 이유"></textarea></label>
+            <label class="pf-insight-wide">반증 조건 <textarea name="invalidation" rows="2" maxlength="2000" required placeholder="어떤 변화가 생기면 이 판단을 다시 검토할까요?"></textarea></label>
+            <label>자동 점검 지표 <select name="metric"><option value="manual">직접 확인</option><option value="revenue_growth_pct">매출 전년 대비 증감률 (%)</option><option value="operating_margin_pct">영업이익률 (%)</option><option value="debt_ratio_pct">부채비율 (%)</option></select></label>
+            <label>반증 조건이 되는 비교 <select name="operator"><option value="lt">기준값 미만</option><option value="lte">기준값 이하</option><option value="gt">기준값 초과</option><option value="gte">기준값 이상</option></select></label>
+            <label>기준값 (%) <input name="threshold" type="number" step="any" placeholder="직접 확인이면 생략"></label>
+            <label>검토 기한 (선택) <input name="deadline" type="date"></label>
+            <label class="pf-insight-wide">근거 원문 링크 (선택) <input name="evidence_url" type="url" maxlength="2000" placeholder="https://"></label>
+            <div class="pf-thesis-buttons"><button type="submit" class="pf-mini-btn">논거 저장</button><button type="button" class="pf-mini-btn" onclick="pfEditThesis()">새 논거로 초기화</button></div>
+          </form>
+        </details><div id="pfThesisContent" aria-live="polite">심층 분석을 열면 투자 논거를 점검합니다.</div>
+      </section>
 
       <div class="pf-nav-chart-wrap pf-analysis-card" id="pfJournalWrap">
         <div class="pf-nav-header">
@@ -641,54 +712,6 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
         <div id="pfJournalContent" class="pf-journal-content">
           <div class="pf-risk-empty">성과 탭을 열면 투자 일지를 불러옵니다.</div>
         </div>
-      </div>
-      </div>
-
-      <div class="pf-analysis-grid pf-analysis-grid-trends">
-      <div class="pf-nav-chart-wrap pf-analysis-card" id="pfValueWrap">
-        <div class="pf-nav-header">
-          <h3>평가금액 추이</h3>
-          <label class="pf-bench-chip"><input type="checkbox" id="pfValueYZero" onchange="onValueYZeroToggle()"><span>Y축 0부터</span></label>
-        </div>
-        <div class="pf-nav-chart-container pf-nav-short">
-          <div id="pfValueChart" style="width:100%;height:100%;"></div>
-        </div>
-        <div class="pf-chart-range" id="pfValueRange"></div>
-        <div class="pf-nav-returns" id="pfValueStats"></div>
-      </div>
-
-      <div class="pf-nav-chart-wrap pf-analysis-card" id="pfGroupWeightWrap">
-        <div class="pf-nav-header">
-          <h3>그룹 비중 추이</h3>
-          <span class="pf-chart-note">100% 누적 면적 차트 · 일별 스냅샷 기준</span>
-        </div>
-        <div class="pf-nav-chart-container pf-group-weight">
-          <div id="pfGroupWeightChart" style="width:100%;height:100%;"></div>
-        </div>
-        <div class="pf-chart-range" id="pfGroupWeightRange"></div>
-        <div class="pf-nav-returns" id="pfGroupWeightStats"></div>
-        <div class="pf-group-composition-wrap" id="pfGroupCompositionWrap" style="display:none;">
-          <div class="pf-nav-header">
-            <h4 id="pfGroupCompositionTitle">그룹 내 종목 비중 추이</h4>
-            <button class="pf-mini-btn" type="button" onclick="pfHideGroupComposition()">닫기</button>
-          </div>
-          <div class="pf-nav-chart-container pf-group-composition">
-            <div id="pfGroupCompositionChart" style="width:100%;height:100%;"></div>
-          </div>
-          <div class="pf-chart-range" id="pfGroupCompositionRange"></div>
-          <div class="pf-nav-returns" id="pfGroupCompositionStats"></div>
-        </div>
-      </div>
-      </div>
-
-      <div class="pf-analysis-grid pf-analysis-grid-flow">
-      <div class="pf-cashflow-section pf-analysis-card" id="pfCashflowWrap">
-        <h3>자금 입출금</h3>
-        <p class="pf-trade-help">입금·출금과 배당 분배금 지급 내역입니다. 등록은 상단의 ‘자금 입출금’ 또는 ‘분배금 출금’에서 할 수 있습니다.</p>
-        <table class="pf-cf-table" id="pfCfTable">
-          <thead><tr><th>날짜</th><th>구분</th><th>금액</th><th>기준가</th><th>좌수변동</th><th>잔여 좌수</th><th>메모</th><th></th></tr></thead>
-          <tbody id="pfCfBody"></tbody>
-        </table>
       </div>
 
       <div class="pf-nav-chart-wrap pf-analysis-card" id="pfAiWrap">
@@ -715,7 +738,7 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
         </div>
         <div id="pfAiTokens" class="pf-ai-meta"></div>
       </div>
-      </div>
+      </section>
     </div><!-- /pfPerformanceTab -->
 
     <div id="pfHouseholdTab" class="pf-household-tab" style="display:none;">

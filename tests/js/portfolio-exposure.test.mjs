@@ -154,6 +154,29 @@ test("노출 표는 지주 환산을 분리하고 모르는 값은 0 이 아니�
   assert.equal(rows[1].querySelector("th").textContent.trim(), "SK<하이닉스> 000660");
   assert.match(content().textContent, /순노출·합계·HHI에 더하지 않습니다/);
   assert.match(content().querySelector("#pfXrayExposureTable thead").textContent, /지주 환산\(추정\)/);
+  // 순노출 칸의 막대: 가장 큰 50% 가 칸을 채우고, 직접·선물 180만과 ETF 경유 30만을 6:1 로 나눠 그린다.
+  const segments = [...rows[0].querySelectorAll(".pf-xray-meter i")];
+  assert.deepEqual(segments.map((bar) => bar.style.width), ["85.7%", "14.3%"]);
+  assert.deepEqual(segments.map((bar) => bar.className), ["", "is-etf"]);
+  // 음수 순노출은 나누지 않고 빗금 한 조각으로 그린다.
+  const negative = rows[1].querySelector(".pf-xray-meter");
+  assert.ok(negative.classList.contains("is-negative"));
+  assert.deepEqual([...negative.querySelectorAll("i")].map((bar) => bar.style.width), ["4.8%"]);
+});
+
+test("ETF·지주사·계산 방식은 접어 두고 요약 줄에 핵심 숫자를 보여 준다", async () => {
+  const { w, content } = load(() => ok(PAYLOAD));
+  await w.pfLoadExposurePanel();
+  const folds = [...content().querySelectorAll("details.pf-xray-fold")];
+  assert.equal(folds.length, 3);
+  assert.ok(folds.every((fold) => !fold.open));
+  const summaries = folds.map((fold) => fold.querySelector("summary").textContent);
+  assert.match(summaries[0], /^ETF 풀어 보기\d+개 · 전체 커버리지 41\.7%$/);
+  assert.match(summaries[1], /^지주사 풀어 보기\d+개 · 자회사 환산 .+ · 추정$/);
+  assert.equal(summaries[2], "계산 방식과 데이터 한계");
+  // 접혀 있어도 내용은 문서에 있다(펼치면 바로 보인다).
+  assert.ok(folds[0].querySelector("#pfXrayEtfTable"));
+  assert.ok(folds[1].querySelector("#pfXrayHoldcoBasis"));
 });
 
 test("지주사 환산은 추정치로 표시하고 기준일과 한계를 드러낸다", async () => {
@@ -222,6 +245,13 @@ test("위험 기여·상관을 그리고 표본 부족은 제외 사유로 드�
   assert.equal(cells.length, 4);
   assert.equal(cells[1].textContent, "-0.69");
   assert.equal(cells[3].textContent, "-"); // 상관을 못 구하면 null → '-'.
+  // 대각선은 항상 1 이라 색을 입히지 않는다. 나머지 칸만 부호·세기로 칠한다.
+  assert.ok(cells[0].classList.contains("is-diagonal"));
+  assert.equal(cells[0].getAttribute("style"), null);
+  assert.match(cells[1].getAttribute("style"), /var\(--down\)/);
+  // 위험 기여 칸의 막대: 가장 큰 값이 칸을 채우고 음수 기여는 빗금이다.
+  assert.equal(rows[0].querySelector(".pf-xray-meter i").style.width, "100%");
+  assert.ok(rows[1].querySelector(".pf-xray-meter").classList.contains("is-negative"));
   // 행 번호로 열 번호와 맞춰 읽는다.
   assert.match(content().querySelector("#pfXrayHeatmap tbody th").textContent, /^1\. 에이$/);
 });

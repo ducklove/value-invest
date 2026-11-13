@@ -42,6 +42,71 @@ async function pfLoadGroupWeightHistory({ force = false } = {}) {
   return _pfGroupWeightHistoryPromise;
 }
 
+// 심층 분석 점프 내비(index.html .pf-deep-anchors) — 스크롤 위치에 맞춰 지금 보고 있는
+// 묶음만 펼치고 현재 카드를 표시한다. 링크 자체는 순수 앵커라 이 코드가 없어도 동작한다.
+let _pfDeepNavBound = false;
+let _pfDeepNavQueued = false;
+let _pfDeepNavPinned = null;
+function _pfDeepNavSync() {
+  _pfDeepNavQueued = false;
+  const nav = document.querySelector('#pfPerformanceTab .pf-deep-anchors');
+  if (!nav || typeof pfActiveTab === 'undefined' || pfActiveTab !== 'performance') return;
+  const links = [...nav.querySelectorAll('.pf-deep-anchor-link')];
+  if (!links.length) return;
+  const targetTop = link => {
+    const target = document.getElementById((link.getAttribute('href') || '').slice(1));
+    return target ? target.getBoundingClientRect().top : NaN;
+  };
+  // 내비 바 아래쪽을 지난 마지막 카드가 현재 카드다. 아직 아무것도 지나지 않았으면 첫 카드.
+  const line = nav.getBoundingClientRect().bottom + 24;
+  let current = links[0];
+  links.forEach(link => {
+    if (targetTop(link) <= line) current = link;
+  });
+  // 방금 누른 대상이 화면에는 보이는데 기준선까지 못 올라온 경우(페이지 끝이라 더 못 내려감)에는
+  // 누른 쪽을 현재로 둔다. 기준선을 지나거나 화면 밖으로 나가면 다시 위치로 판단한다.
+  if (_pfDeepNavPinned) {
+    const top = targetTop(_pfDeepNavPinned);
+    const pinned = _pfDeepNavPinned.classList.contains('pf-deep-anchor-link')
+      ? _pfDeepNavPinned
+      : _pfDeepNavPinned.parentElement.querySelector('.pf-deep-anchor-link');
+    if (pinned && top > line && top < window.innerHeight) current = pinned;
+    else _pfDeepNavPinned = null;
+  }
+  links.forEach(link => {
+    const active = link === current;
+    link.classList.toggle('is-active', active);
+    if (active) link.setAttribute('aria-current', 'true');
+    else link.removeAttribute('aria-current');
+  });
+  const group = current.closest('.pf-deep-nav-group');
+  const changed = group && !group.classList.contains('is-active');
+  nav.querySelectorAll('.pf-deep-nav-group').forEach(el => el.classList.toggle('is-active', el === group));
+  nav.classList.add('is-spy');
+  // 좁은 화면에서는 바가 가로로 넘친다. 묶음이 바뀌면 그 캡슐을 왼쪽으로 당겨 온다.
+  if (changed && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = Math.max(0, group.offsetLeft - 8);
+}
+function pfInitDeepNav() {
+  if (!_pfDeepNavBound) {
+    _pfDeepNavBound = true;
+    const queue = () => {
+      if (_pfDeepNavQueued) return;
+      _pfDeepNavQueued = true;
+      (typeof requestAnimationFrame === 'function' ? requestAnimationFrame : callback => setTimeout(callback, 16))(_pfDeepNavSync);
+    };
+    // 스크롤 컨테이너가 화면 크기에 따라 달라서(창 또는 본문 영역) 캡처 단계에서 한 번에 받는다.
+    document.addEventListener('scroll', queue, { capture: true, passive: true });
+    window.addEventListener('resize', queue, { passive: true });
+    document.addEventListener('click', event => {
+      const link = event.target && event.target.closest ? event.target.closest('.pf-deep-anchors a[href^="#"]') : null;
+      if (!link) return;
+      _pfDeepNavPinned = link;
+      queue();
+    });
+  }
+  _pfDeepNavSync();
+}
+
 let _pfTabRequestId = 0;
 function pfSwitchTab(tab) {
   const requestId = ++_pfTabRequestId;
@@ -77,6 +142,7 @@ function pfSwitchTab(tab) {
   activeEl.classList.add('fade-in');
   if (tab !== 'performance') _performanceLoadSeq += 1;
   if (tab === 'performance') {
+    pfInitDeepNav();
     loadPerformanceData();
     if (typeof pfLoadAttribution === 'function') pfLoadAttribution();
     // 실현손익·세금 추정 카드 동일 패턴(portfolio-tax.js).

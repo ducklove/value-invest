@@ -57,6 +57,8 @@ test('세금 카드는 미검증 세액을 어림값으로 보여 주고 좁은 
   await expect(content).toContainText('미포함: NH 외 계좌 1개 (수동 계좌)');
   await expect(content).toContainText('AUD 보유 종목의 매매는');
   await expect(content).not.toContainText('1,601,380');
+  // 점프 내비는 보고 있는 묶음만 펼친다. 묶음을 먼저 누른 뒤 카드로 간다.
+  await page.locator('.pf-deep-nav-section[href="#pfDeepIncome"]').click();
   await page.locator('.pf-deep-anchor-link[href="#pfTaxWrap"]').click();
   await expect(page.locator('#pfTaxTitle')).toBeInViewport();
 

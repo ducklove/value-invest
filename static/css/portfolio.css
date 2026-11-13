@@ -3880,32 +3880,215 @@ body.pf-compact-rows .pf-pair-connector, body.pf-compact-rows .pf-row-position {
 @media (max-width: 600px) {
   .pf-tax-income-list { grid-template-columns: minmax(0, 1fr); }
   .pf-tax-table th, .pf-tax-table td { padding: 8px 4px; font-size: 11px; }
+}
 
-/* 포트폴리오 X-Ray(심층 분석) — 타일·표는 리스크·수익 분해 카드의 클래스를 재사용한다.
-   막대는 값 크기만 나타내는 한 가지 색이고, 현금·미분류처럼 분류 밖 항목은 회색이다. */
-#pfExposureContent h4 { margin: 20px 0 8px; font-size: 14px; }
-#pfExposureContent .pf-chart-note { text-align: left; }
-#pfExposureContent .pf-risk-sub { white-space: normal; }
-#pfExposureContent h4 small { margin-left: 6px; font-size: 11px; font-weight: 400; color: var(--text-secondary); }
-.pf-xray-sources { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
-.pf-xray-source { padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-.pf-xray-source.is-stale { border-color: var(--warning); color: var(--text); background: var(--warning-tint); }
-.pf-xray-split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; }
-.pf-xray-bar { display: grid; grid-template-columns: minmax(0, 150px) minmax(30px, 1fr) minmax(64px, auto); gap: 10px; align-items: center; margin: 7px 0; font-size: 12px; }
-.pf-xray-bar > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.pf-xray-bar strong { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.pf-xray-bar strong small { display: block; font-size: 10px; font-weight: 400; color: var(--text-secondary); }
-.pf-xray-track { height: 8px; border-radius: 4px; background: var(--surface-muted); overflow: hidden; }
-.pf-xray-track i { display: block; height: 100%; border-radius: 0 4px 4px 0; background: var(--primary); }
-.pf-xray-bar.is-muted .pf-xray-track i { background: var(--text-secondary); }
-.pf-xray-bar.is-negative .pf-xray-track i { background: repeating-linear-gradient(135deg, var(--primary) 0 3px, transparent 3px 6px); }
+/* 포트폴리오 X-Ray(심층 분석).
+   한 화면 흐름: 요약 띠 → 구성(자산군·통화·업종 막대) → 실제 노출 → 위험 기여·상관 → 접어 둔 세부.
+   막대는 값 크기만 나타내는 한 가지 색이다. 현금·미분류처럼 분류 밖 항목은 회색, 음수는 빗금.
+   ETF 경유분만 같은 색의 옅은 단계로 구분한다(범례는 실제 노출 제목 옆). */
+.pf-xray { display: grid; gap: 22px; min-width: 0; }
+.pf-xray > * { min-width: 0; }
+.pf-xray-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.pf-xray-top .pf-insight-notice { flex: 1 1 100%; margin: 0; }
+.pf-xray-scope { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.pf-xray-sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pf-xray-sources-label { margin-right: 2px; font-size: 11px; color: var(--text-secondary); }
+.pf-xray-source { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px; background: var(--surface-muted); font-size: 11px; line-height: 1.5; color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pf-xray-source::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+.pf-xray-source b { font-weight: 600; color: var(--text); }
+.pf-xray-source.is-stale { background: var(--warning-tint); color: var(--text); }
+.pf-xray-source.is-stale::before { background: var(--warning); }
+
+/* 요약 띠 — 칸 사이 1px 선은 격자 틈으로 그려 열 수가 바뀌어도 맞는다. */
+.pf-xray-stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--border); overflow: hidden; }
+.pf-xray-stat { min-width: 0; padding: 14px 16px; background: var(--surface); }
+.pf-xray-stat-label { font-size: 11.5px; font-weight: 600; color: var(--text-secondary); }
+.pf-xray-stat-value { margin-top: 4px; font-size: 22px; font-weight: 700; line-height: 1.15; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.pf-xray-stat-sub { margin-top: 5px; font-size: 11px; line-height: 1.45; color: var(--text-secondary); font-variant-numeric: tabular-nums; word-break: keep-all; }
+
+.pf-xray-section { min-width: 0; }
+.pf-xray-section-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; margin-bottom: 12px; padding-bottom: 9px; border-bottom: 1px solid var(--border); }
+.pf-xray-section-head h4 { margin: 0; font-size: 14.5px; font-weight: 700; line-height: 1.3; }
+.pf-xray-section-head h4 small, .pf-xray-group h5 small, .pf-xray-subhead small { margin-left: 6px; font-size: 11.5px; font-weight: 400; color: var(--text-secondary); }
+.pf-xray-legend { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); }
+.pf-xray-legend i { width: 10px; height: 10px; border-radius: 2px; background: var(--primary); }
+.pf-xray-legend i + i, .pf-xray-legend i.is-etf { margin-left: 8px; }
+.pf-xray-legend i.is-etf, .pf-xray-meter i.is-etf { background: color-mix(in srgb, var(--primary) 42%, var(--surface)); }
+.pf-xray-note, .pf-xray-meta { margin: 10px 0 0; font-size: 11.5px; line-height: 1.65; color: var(--text-secondary); text-align: left; overflow-wrap: anywhere; }
+.pf-xray-meta { margin: 0 0 10px; font-variant-numeric: tabular-nums; }
+.pf-xray-note + .pf-xray-note { margin-top: 2px; }
+
+/* 구성 — 이름·값 한 줄, 그 아래 얇은 막대. 업종처럼 이름이 길어도 잘리지 않는다. */
+.pf-xray-compose { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 44px; }
+.pf-xray-compose-col { display: grid; gap: 20px; align-content: start; min-width: 0; }
+.pf-xray-group { min-width: 0; }
+.pf-xray-group h5, .pf-xray-subhead { margin: 0 0 6px; font-size: 12.5px; font-weight: 700; line-height: 1.4; }
+.pf-xray-subhead { margin-top: 18px; }
+.pf-xray-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label value" "track track"; gap: 5px 12px; padding: 6px 0; font-size: 12.5px; line-height: 1.35; }
+.pf-xray-bar > span { grid-area: label; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.pf-xray-bar > strong { grid-area: value; display: inline-flex; flex-direction: row-reverse; align-items: baseline; gap: 8px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pf-xray-bar strong small { font-size: 11px; font-weight: 400; color: var(--text-secondary); }
+.pf-xray-track { grid-area: track; height: 6px; border-radius: 3px; background: var(--surface-muted); overflow: hidden; }
+.pf-xray-track i { display: block; height: 100%; min-width: 2px; border-radius: 3px; background: var(--primary); }
+.pf-xray-bar.is-muted > span { color: var(--text-secondary); }
+.pf-xray-bar.is-muted .pf-xray-track i { background: color-mix(in srgb, var(--text-secondary) 55%, var(--surface)); }
+.pf-xray-bar.is-negative .pf-xray-track i, .pf-xray-meter.is-negative i { background: repeating-linear-gradient(135deg, var(--primary) 0 3px, transparent 3px 6px); }
+.pf-xray-buckets { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+
+/* 표 — 순노출·위험 기여 칸에 막대를 같이 그린다. */
+#pfExposureContent .pf-xray-table { font-size: 12.5px; }
+#pfExposureContent .pf-xray-table th, #pfExposureContent .pf-xray-table td { padding: 9px 10px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); font-variant-numeric: tabular-nums; }
+#pfExposureContent .pf-xray-table thead th { padding-top: 4px; padding-bottom: 7px; font-size: 11.5px; font-weight: 600; color: var(--text-secondary); border-bottom-color: var(--border); }
+#pfExposureContent .pf-xray-table tbody th { max-width: 300px; overflow: hidden; text-overflow: ellipsis; font-weight: 600; text-align: left; }
+#pfExposureContent .pf-xray-table tbody tr:last-child > * { border-bottom: 0; }
+#pfExposureContent .pf-xray-table tbody tr:hover { background: var(--surface-muted); }
+#pfExposureContent .pf-xray-table small { margin-left: 3px; font-size: 11px; font-weight: 400; color: var(--text-secondary); }
 .pf-insight-table td.pf-xray-text, .pf-insight-table th.pf-xray-text { text-align: left; }
 .pf-insight-table td.pf-xray-text { white-space: normal; min-width: 180px; line-height: 1.5; }
-.pf-insight-table small { color: var(--text-secondary); font-weight: 400; }
-.pf-xray-heatmap { border-collapse: separate; border-spacing: 2px; font-size: 11px; font-variant-numeric: tabular-nums; }
-.pf-xray-heatmap th { padding: 4px 6px; font-weight: 400; color: var(--text-secondary); white-space: nowrap; text-align: left; }
-.pf-xray-heatmap td { min-width: 40px; padding: 6px 4px; text-align: center; border-radius: 4px; color: var(--text); }
-@media (max-width: 760px) {
-  .pf-xray-split { grid-template-columns: minmax(0, 1fr); }
-  .pf-xray-bar { grid-template-columns: minmax(0, 104px) minmax(20px, 1fr) minmax(58px, auto); gap: 6px; font-size: 11px; }
+#pfExposureContent .pf-xray-table td.pf-xray-text small { margin-left: 0; }
+.pf-xray-meter-cell { width: 40%; min-width: 150px; }
+.pf-xray-meter { display: inline-flex; gap: 2px; width: calc(100% - 66px); height: 8px; margin-right: 10px; vertical-align: middle; }
+.pf-xray-meter i { flex: none; height: 100%; min-width: 2px; background: var(--primary); }
+.pf-xray-meter i:last-child { border-radius: 0 4px 4px 0; }
+.pf-xray-meter-cell strong { display: inline-block; min-width: 52px; font-weight: 700; }
+.pf-xray-more { margin-top: 2px; }
+.pf-xray-more > summary { display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px; border-radius: var(--radius-sm); font-size: 12px; font-weight: 600; color: var(--primary); cursor: pointer; list-style: none; }
+.pf-xray-more > summary::-webkit-details-marker, .pf-xray-fold > summary::-webkit-details-marker { display: none; }
+.pf-xray-more > summary::after, .pf-xray-fold > summary::before { content: ""; flex: none; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg); transition: transform 0.15s ease; }
+.pf-xray-more[open] > summary::after { transform: translateY(1px) rotate(-135deg); }
+.pf-xray-more > summary:hover { background: var(--surface-muted); }
+.pf-xray-more > summary:focus-visible, .pf-xray-fold > summary:focus-visible { outline: none; box-shadow: var(--ring); }
+
+/* 위험 기여 — 왼쪽 표, 오른쪽 상관 히트맵. 대각선은 항상 1 이라 회색으로 뺀다. */
+.pf-xray-risk { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 20px 36px; align-items: start; }
+.pf-xray-risk.is-single { grid-template-columns: minmax(0, 1fr); }
+.pf-xray-risk-main, .pf-xray-corr { min-width: 0; }
+.pf-xray-risk .pf-xray-meter-cell { width: 46%; min-width: 150px; }
+#pfExposureContent .pf-xray-risk .pf-xray-table tbody th { max-width: 190px; }
+.pf-xray-corr .pf-xray-subhead { margin-top: 4px; }
+.pf-xray-heatmap { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 2px; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.pf-xray-heatmap th { padding: 2px 0; font-weight: 500; color: var(--text-secondary); text-align: center; }
+.pf-xray-heatmap thead th:first-child { width: 32%; }
+.pf-xray-heatmap tbody th { padding-right: 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11.5px; color: var(--text); text-align: left; }
+.pf-xray-heatmap td { height: 30px; padding: 0; text-align: center; border-radius: 4px; color: var(--text); }
+.pf-xray-heatmap td.is-diagonal { background: var(--surface-muted); color: var(--text-secondary); }
+.pf-xray-heatmap td.is-empty { color: var(--text-secondary); }
+.pf-xray-corr-legend { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 8px; font-size: 10.5px; color: var(--text-secondary); }
+.pf-xray-corr-legend i { width: 96px; height: 6px; border-radius: 3px; background: linear-gradient(90deg, color-mix(in srgb, var(--down) 46%, var(--surface)), var(--surface), color-mix(in srgb, var(--up) 46%, var(--surface))); box-shadow: inset 0 0 0 1px var(--border); }
+
+/* 접어 둔 세부 — 요약 줄 오른쪽에 핵심 숫자를 먼저 보여 준다. */
+.pf-xray-folds { border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+.pf-xray-fold + .pf-xray-fold { border-top: 1px solid var(--border); }
+.pf-xray-fold > summary { display: flex; align-items: center; gap: 10px; padding: 12px 14px; font-size: 13px; font-weight: 600; cursor: pointer; list-style: none; }
+.pf-xray-fold > summary::before { color: var(--text-secondary); transform: translateX(-1px) rotate(-45deg); }
+.pf-xray-fold[open] > summary::before { transform: translateY(-2px) rotate(45deg); }
+.pf-xray-fold > summary:hover { background: var(--surface-muted); }
+.pf-xray-fold > summary small { margin-left: auto; font-size: 11.5px; font-weight: 400; color: var(--text-secondary); font-variant-numeric: tabular-nums; text-align: right; }
+.pf-xray-fold-body { padding: 2px 14px 14px; font-size: 12.5px; line-height: 1.7; }
+.pf-xray-fold-body > p { margin: 8px 0 0; }
+.pf-xray-fold-body > .pf-insight-notice { margin: 4px 0 12px; }
+@media (max-width: 1100px) {
+  .pf-xray-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pf-xray-risk { grid-template-columns: minmax(0, 1fr); }
 }
+@media (max-width: 760px) {
+  .pf-xray { gap: 18px; }
+  .pf-xray-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pf-xray-stat { padding: 11px 12px; }
+  .pf-xray-stat-value { font-size: 19px; }
+  .pf-xray-compose { grid-template-columns: minmax(0, 1fr); }
+  .pf-xray-sources-label { flex: 1 1 100%; }
+  #pfExposureContent .pf-xray-table th, #pfExposureContent .pf-xray-table td { padding: 8px 6px; }
+  #pfExposureContent .pf-xray-table tbody th { max-width: 150px; }
+  .pf-xray-meter-cell, .pf-xray-risk .pf-xray-meter-cell { width: auto; min-width: 0; }
+  .pf-xray-meter { display: none; }
+  .pf-xray-meter-cell strong { min-width: 0; }
+  .pf-xray-heatmap { min-width: 420px; }
+  .pf-xray-fold > summary { flex-wrap: wrap; }
+  .pf-xray-fold > summary small { flex: 1 1 100%; margin-left: 16px; text-align: left; }
+}
+
+/* 심층 분석 탭 화면 정리(2026-11). 카드 15개를 네 묶음(.pf-deep-section)으로 나누고,
+   카드·제목·안내문·접이식·표의 모양을 이 탭 안에서 하나로 맞춘다. 위쪽의 카드별 규칙을
+   덮어쓰므로 #pfPerformanceTab 로 범위를 좁혔고, mobile-overrides.css 의 같은 요소 규칙보다
+   우선하므로 좁은 화면 값은 이 블록 끝의 미디어 쿼리에 둔다. */
+#pfPerformanceTab { gap: 18px; }
+#pfPerformanceTab .pf-deep-head { padding: 2px 2px 0; border: 0; border-radius: 0; background: none; }
+#pfPerformanceTab .pf-deep-title h2 { font-size: 22px; letter-spacing: -0.01em; }
+#pfPerformanceTab .pf-deep-title span { font-size: 12.5px; font-weight: 500; }
+#pfPerformanceTab .pf-deep-meta { font-weight: 600; }
+
+/* 점프 내비 — 묶음마다 캡슐 하나. JS 가 켜지면(.is-spy) 보고 있는 묶음만 펼친다. */
+#pfPerformanceTab .pf-deep-anchors { align-items: center; gap: 8px; margin: 0; padding: 8px 0; }
+.pf-deep-nav-group { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); box-shadow: var(--shadow-sm); }
+.pf-deep-nav-section { flex: 0 0 auto; padding: 6px 12px; border-radius: 999px; color: var(--text-secondary); font-size: 13px; font-weight: 700; line-height: 1.3; text-decoration: none; white-space: nowrap; transition: background 0.15s ease, color 0.15s ease; }
+.pf-deep-nav-section:hover { color: var(--text); background: var(--surface-muted); }
+.pf-deep-nav-section:focus-visible { outline: none; box-shadow: var(--ring); }
+.pf-deep-nav-group.is-active { border-color: color-mix(in srgb, var(--primary) 35%, var(--border)); }
+.pf-deep-nav-group.is-active .pf-deep-nav-section { color: var(--primary); }
+#pfPerformanceTab .pf-deep-anchor-link { padding: 6px 11px; border: 0; background: none; font-size: 12.5px; font-weight: 600; line-height: 1.3; }
+#pfPerformanceTab .pf-deep-anchor-link:hover { background: var(--surface-muted); }
+#pfPerformanceTab .pf-deep-anchor-link.is-active { background: color-mix(in srgb, var(--primary) 13%, var(--surface)); color: var(--primary); }
+.pf-deep-anchors.is-spy .pf-deep-nav-group:not(.is-active) .pf-deep-anchor-link { display: none; }
+
+.pf-deep-section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; scroll-margin-top: calc(var(--m-header-h, 0px) + 64px); }
+.pf-deep-section + .pf-deep-section { margin-top: 14px; }
+.pf-deep-section-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 0 2px; }
+.pf-deep-section-head h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 17px; font-weight: 800; line-height: 1.3; letter-spacing: -0.01em; }
+.pf-deep-section-head h3::before { content: ""; width: 4px; height: 16px; border-radius: 2px; background: var(--primary); }
+.pf-deep-section-head span { color: var(--text-secondary); font-size: 12.5px; line-height: 1.4; }
+#pfPerformanceTab .pf-nav-chart-wrap, #pfPerformanceTab .pf-cashflow-section { scroll-margin-top: calc(var(--m-header-h, 0px) + 64px); }
+
+/* 카드 공통 */
+#pfPerformanceTab .pf-analysis-card { padding: 18px 20px 20px; border-radius: var(--radius-xl); background: var(--surface); }
+#pfPerformanceTab .pf-nav-header { margin-bottom: 14px; }
+#pfPerformanceTab .pf-nav-header h3, #pfPerformanceTab .pf-cashflow-section > h3 { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+#pfPerformanceTab .pf-chart-note { font-size: 12px; font-weight: 400; }
+#pfPerformanceTab .pf-nav-header > div > .pf-chart-note { display: block; margin-top: 3px; text-align: left; }
+#pfPerformanceTab .pf-risk-empty { background: var(--surface-muted); border-color: color-mix(in srgb, var(--border) 70%, transparent); }
+
+/* 안내문 — 주의 색 띠 대신 옅은 바탕의 상자. */
+#pfPerformanceTab .pf-insight-notice { margin: 12px 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--warning) 30%, var(--border)); border-radius: var(--radius-md); background: var(--warning-tint); font-size: 12.5px; line-height: 1.6; overflow-wrap: anywhere; }
+
+/* 접이식 — 줄 전체가 버튼처럼 보이게 하고 표식은 꺾쇠로 통일한다. */
+#pfPerformanceTab :is(details.pf-insight-method, #pfThesisEditor, details.pf-divcal-coverage, details.pf-divcal-help) { margin-top: 6px; border-top: 1px solid var(--border); font-size: 13px; }
+#pfPerformanceTab :is(details.pf-insight-method, #pfThesisEditor, details.pf-divcal-coverage, details.pf-divcal-help) > summary { display: flex; align-items: center; gap: 9px; padding: 12px 2px; color: var(--text); font-size: 13px; font-weight: 600; line-height: 1.4; cursor: pointer; list-style: none; }
+#pfPerformanceTab :is(details.pf-insight-method, #pfThesisEditor, details.pf-divcal-coverage, details.pf-divcal-help) > summary::-webkit-details-marker { display: none; }
+#pfPerformanceTab :is(details.pf-insight-method, #pfThesisEditor, details.pf-divcal-coverage, details.pf-divcal-help) > summary::before { content: ""; flex: none; width: 6px; height: 6px; margin-left: 2px; border-right: 1.5px solid var(--text-secondary); border-bottom: 1.5px solid var(--text-secondary); transform: rotate(-45deg); transition: transform 0.15s ease; }
+#pfPerformanceTab :is(details.pf-insight-method, #pfThesisEditor, details.pf-divcal-coverage, details.pf-divcal-help)[open] > summary::before { transform: translateY(-2px) rotate(45deg); }
+#pfPerformanceTab :is(details.pf-insight-method, #pfThesisEditor, details.pf-divcal-coverage, details.pf-divcal-help) > summary:hover { color: var(--primary); }
+#pfPerformanceTab :is(details.pf-insight-method, #pfThesisEditor, details.pf-divcal-coverage, details.pf-divcal-help) > summary:focus-visible { outline: none; box-shadow: var(--ring); }
+#pfPerformanceTab details.pf-insight-method > p { margin: 0 0 8px; font-size: 12.5px; line-height: 1.7; color: var(--text-secondary); }
+
+/* 요약 숫자 — 수익 분해·세금 카드의 큰 숫자를 칸으로 묶는다. 수익 분해 막대는 얇게. */
+#pfPerformanceTab .pf-insight-summary { gap: 1px; margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--border); overflow: hidden; font-size: 12px; color: var(--text-secondary); }
+#pfPerformanceTab .pf-insight-summary > div { min-width: 0; padding: 14px 16px; background: var(--surface); }
+#pfPerformanceTab .pf-insight-summary strong { margin-top: 4px; color: var(--text); font-size: 22px; font-weight: 700; line-height: 1.2; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+#pfPerformanceTab .pf-attribution-row { margin: 10px 0; }
+#pfPerformanceTab .pf-attribution-track { height: 8px; border-radius: 4px; background: var(--surface-muted); }
+#pfPerformanceTab .pf-attribution-track i { border-radius: 0 4px 4px 0; }
+
+/* 연간 실적 — 평가액 변화와 기간 날짜가 붙어 보이지 않게 띄운다. */
+#pfPerformanceTab .pf-perf-meta { display: inline-flex; align-items: baseline; justify-content: flex-end; gap: 10px; }
+#pfPerformanceTab .pf-perf-meta .pf-risk-sub { margin-top: 0; font-size: 11px; font-weight: 400; }
+
+/* 표 머리글·행 강조 */
+#pfPerformanceTab .pf-insight-table thead th { font-size: 11.5px; font-weight: 600; color: var(--text-secondary); }
+#pfPerformanceTab .pf-insight-table tbody tr:hover { background: var(--surface-muted); }
+
+@media (max-width: 900px) {
+  #pfPerformanceTab { gap: 14px; }
+  #pfPerformanceTab .pf-deep-title h2 { font-size: 19px; }
+  #pfPerformanceTab .pf-analysis-card { padding: 14px; border-radius: var(--radius-lg); }
+  .pf-deep-section { gap: 12px; }
+  .pf-deep-section-head h3 { font-size: 16px; }
+  #pfPerformanceTab .pf-nav-header > div > .pf-chart-note { width: auto; }
+  #pfPerformanceTab .pf-insight-summary > div { padding: 11px 12px; }
+  #pfPerformanceTab .pf-insight-summary strong { font-size: 18px; }
+}
+/* 모바일 간편 보기에서는 포트폴리오 탭 바(.pf-tab-bar)가 헤더 밑에 고정된다. 점프 내비는
+   그 아래에 붙여야 가려지지 않는다(탭 바 높이 54px). */
+body.pf-mobile-simple #pfPerformanceTab .pf-deep-anchors { top: calc(var(--m-header-h, 42px) + 54px); }
+body.pf-mobile-simple .pf-deep-section,
+body.pf-mobile-simple #pfPerformanceTab .pf-nav-chart-wrap,
+body.pf-mobile-simple #pfPerformanceTab .pf-cashflow-section { scroll-margin-top: calc(var(--m-header-h, 42px) + 112px); }

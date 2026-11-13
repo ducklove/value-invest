@@ -2,6 +2,8 @@
 # 구 test_frontend_structure.py(1,500줄 단일 파일)를 2026-07-07 화면별로 분할.
 # 새 화면 계약 테스트는 해당 화면 파일에 추가한다. 공용 경로/상수/헬퍼는
 # tests/_frontend_structure.py 에 있다.
+import re
+
 from _frontend_structure import JS, PORTFOLIO_SPLIT_FILES, ROOT, STATIC, _all_css
 
 
@@ -238,11 +240,12 @@ def test_performance_tab_includes_period_report_panel():
     assert ".pf-period-report-sections .pf-period-report-wide" in styles
     assert ".pf-period-snapshot-group" in styles
 
-    # 연간 실적 목록 — 보고서 카드 '안'이 아니라 바로 아래의 독립 카드다.
+    # 연간 실적 목록 — 보고서 카드 '안'이 아니라 독립 카드다. 성과 묶음(리스크 다음)에 살고,
+    # 보고서 카드는 기록·리포트 묶음에 산다.
     assert 'class="pf-nav-chart-wrap pf-analysis-card pf-period-perf" id="pfPeriodPerformanceWrap"' in html
     assert 'id="pfPeriodPerformanceContent"' in html
-    assert html.find('id="pfPeriodReportContent"') < html.find('id="pfPeriodPerformanceWrap"')
-    assert html.find('id="pfPeriodPerformanceWrap"') < html.find('id="pfRebalanceWrap"')
+    assert html.find('id="pfRiskWrap"') < html.find('id="pfPeriodPerformanceWrap"') < html.find('id="pfDeepExposure"')
+    assert html.find('id="pfDeepRecords"') < html.find('id="pfPeriodReportContent"')
     # 점프 내비에도 독립 섹션으로 올라간다.
     assert '<a class="pf-deep-anchor-link" href="#pfPeriodPerformanceWrap">연간실적</a>' in html
     assert "/api/portfolio/period-reports/performance" in reports
@@ -811,8 +814,9 @@ def test_performance_tab_includes_rebalance_panel():
     assert 'id="pfRebalanceContent"' in html
     assert 'id="pfRebalanceEditor"' in html
     assert 'id="pfRebalanceAlertCb"' in html
-    assert html.find('id="pfPeriodReportWrap"') < html.find('id="pfRebalanceWrap"')
-    assert html.find('id="pfRebalanceWrap"') < html.find('id="pfValueChart"')
+    # 구성·위험 묶음에서 그룹 비중 추이 다음에 산다.
+    assert html.find('id="pfDeepExposure"') < html.find('id="pfGroupWeightWrap"') < html.find('id="pfRebalanceWrap"')
+    assert html.find('id="pfRebalanceWrap"') < html.find('id="pfDeepIncome"')
     # 성과 탭이 보일 때만 lazy 로드(pfSwitchTab 경유) — 앱 시작 시 조회 금지.
     assert "if (typeof pfLoadRebalancePanel === 'function') pfLoadRebalancePanel();" in performance
     # 기능 홈: 보고서 fetch/렌더, 목표 에디터(PUT 전체 교체), 알림 토글.
@@ -883,12 +887,11 @@ def test_performance_tab_includes_dividend_calendar_panel():
     performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
     divcal = (JS / "portfolio-dividends-calendar.js").read_text(encoding="utf-8")
 
-    # '배당 캘린더' 카드는 성과 탭의 리밸런싱 카드(#pfRebalanceWrap) 바로
-    # 다음, 평가금액 추이 앞에 산다.
+    # '배당 캘린더' 카드는 손익·현금 묶음에서 세금 카드 다음, 자금 입출금 앞에 산다.
     assert 'id="pfDivCalWrap"' in html
     assert 'id="pfDivCalContent"' in html
-    assert html.find('id="pfRebalanceWrap"') < html.find('id="pfDivCalWrap"')
-    assert html.find('id="pfDivCalWrap"') < html.find('id="pfValueChart"')
+    assert html.find('id="pfDeepIncome"') < html.find('id="pfTaxWrap"') < html.find('id="pfDivCalWrap"')
+    assert html.find('id="pfDivCalWrap"') < html.find('id="pfCashflowWrap"') < html.find('id="pfDeepRecords"')
     # 성과 탭이 보일 때만 lazy 로드(pfSwitchTab 경유) — 앱 시작 시 조회 금지.
     assert "if (typeof pfLoadDividendCalendarPanel === 'function') pfLoadDividendCalendarPanel();" in performance
     # 기능 홈: fetch/렌더/월 펼침은 portfolio-dividends-calendar.js.
@@ -1060,22 +1063,42 @@ def test_performance_tab_has_sticky_anchor_nav_covering_every_card():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     styles = _all_css()
 
-    # 심층 분석 탭이 카드 10개짜리 단일 스크롤이라 탐색성이 낮았다(UX 감사 P2⑥).
-    # 순수 <a href="#id"> 앵커라 JS 없이 동작 — 대상 id 10개가 전부 존재해야 한다.
-    anchor_targets = [
-        "pfNavWrap", "pfRiskWrap", "pfPeriodReportWrap", "pfRebalanceWrap",
-        "pfDivCalWrap", "pfJournalWrap", "pfValueWrap", "pfGroupWeightWrap",
-        "pfCashflowWrap", "pfAiWrap",
-    ]
+    # 심층 분석 탭이 카드 15개짜리 단일 스크롤이라 탐색성이 낮았다(UX 감사 P2⑥).
+    # 카드를 네 묶음으로 나누고, 순수 <a href="#id"> 앵커라 JS 없이 동작한다 —
+    # 묶음과 카드 id 가 전부 존재하고, 카드는 자기 묶음 안에 내비와 같은 순서로 있어야 한다.
+    sections = {
+        "pfDeepPerformance": ["pfNavWrap", "pfRiskWrap", "pfPeriodPerformanceWrap", "pfValueWrap"],
+        "pfDeepExposure": ["pfExposureWrap", "pfGroupWeightWrap", "pfRebalanceWrap"],
+        "pfDeepIncome": ["pfAttributionWrap", "pfTaxWrap", "pfDivCalWrap", "pfCashflowWrap"],
+        "pfDeepRecords": ["pfPeriodReportWrap", "pfThesisWrap", "pfJournalWrap", "pfAiWrap"],
+    }
     nav_start = html.find('<nav class="pf-deep-anchors"')
     nav_end = html.find("</nav>", nav_start)
     assert nav_start != -1 and nav_end != -1
     anchor_block = html[nav_start:nav_end]
-    for target_id in anchor_targets:
-        assert f'href="#{target_id}"' in anchor_block, f"missing anchor link for #{target_id}"
-        assert f'id="{target_id}"' in html, f"missing scroll target #{target_id}"
-    # 점프 내비는 앵커 바보다 먼저, 첫 카드(NAV)보다는 앞에 온다.
-    assert html.find('id="pfNavWrap"') > nav_end
+    tab_end = html.find("<!-- /pfPerformanceTab -->")
+    nav_cursor = 0
+    body_cursor = nav_end
+    for section_id, card_ids in sections.items():
+        for target_id in [section_id, *card_ids]:
+            link = anchor_block.find(f'href="#{target_id}"', nav_cursor)
+            assert link != -1, f"missing or misordered anchor link for #{target_id}"
+            nav_cursor = link
+            target = html.find(f'id="{target_id}"', body_cursor)
+            assert target != -1, f"missing or misordered scroll target #{target_id}"
+            body_cursor = target
+        assert f'<div class="pf-deep-nav-group" data-section="{section_id}">' in anchor_block
+        assert f'<section class="pf-deep-section" id="{section_id}"' in html
+    assert body_cursor < tab_end
+    # 내비에 없는 카드가 생기면 점프할 길이 없다.
+    cards = re.findall(r'class="[^"]*\bpf-analysis-card(?![-\w])[^"]*"', html[nav_end:tab_end])
+    assert len(cards) == sum(len(ids) for ids in sections.values())
+
+    # 스크롤 위치에 따라 보고 있는 묶음만 펼친다. 스크립트가 없으면 전부 펼친 채로 남는다.
+    performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
+    assert "function pfInitDeepNav()" in performance
+    assert "pfInitDeepNav();" in performance[performance.find("function pfSwitchTab("):]
+    assert ".pf-deep-anchors.is-spy .pf-deep-nav-group:not(.is-active) .pf-deep-anchor-link { display: none; }" in styles
 
     # 모바일 슬림 헤더(--m-header-h, 데스크톱에선 미정의라 0px 로 빠짐) 밑에 붙고,
     # 점프 대상은 헤더 + 이 바 높이만큼 scroll-margin 을 둬 제목이 가려지지 않는다.
@@ -1089,8 +1112,8 @@ def test_portfolio_xray_card_structure():
     exposure = (JS / "portfolio-exposure.js").read_text(encoding="utf-8")
     styles = _all_css()
 
-    # 리스크 카드 바로 뒤, 수익 분해 앞에 산다. 점프 내비로도 갈 수 있다.
-    assert html.find('id="pfRiskWrap"') < html.find('id="pfExposureWrap"') < html.find('id="pfAttributionWrap"')
+    # 구성·위험 묶음의 첫 카드다(성과 묶음 뒤, 수익 분해 앞). 점프 내비로도 갈 수 있다.
+    assert html.find('id="pfRiskWrap"') < html.find('id="pfDeepExposure"') < html.find('id="pfExposureWrap"') < html.find('id="pfAttributionWrap"')
     assert 'href="#pfExposureWrap"' in html
     assert 'id="pfExposureContent"' in html
     # 심층 분석 진입 때 지연 로드하고, 리스크 스크립트 다음에 등록한다.
@@ -1106,3 +1129,10 @@ def test_portfolio_xray_card_structure():
     assert "account_id=" in exposure
     assert ".pf-xray-bar" in styles
     assert ".pf-xray-heatmap" in styles
+    # X-Ray 규칙이 다른 카드의 미디어 쿼리 안에 갇히면 데스크톱에서 통째로 사라진다
+    # (2026-11 머지에서 닫는 중괄호가 빠져 실제로 그랬다). 파일의 중괄호 짝을 고정한다.
+    portfolio_css = (STATIC / "css" / "portfolio.css").read_text(encoding="utf-8")
+    assert portfolio_css.count("{") == portfolio_css.count("}")
+    xray_rule = portfolio_css.find("\n.pf-xray-stats {")
+    assert xray_rule != -1
+    assert portfolio_css.rfind("@media", 0, xray_rule) < portfolio_css.rfind("\n}\n", 0, xray_rule)

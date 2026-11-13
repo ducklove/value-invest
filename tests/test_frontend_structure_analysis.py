@@ -87,12 +87,12 @@ def test_investment_journal_lives_in_analysis_view_and_performance_tab():
     assert html.find('id="wikiQa"') < html.find('id="stockJournalSection"')
     assert html.find('id="stockJournalSection"') < html.find('id="emptyState"')
     assert "if (typeof loadStockJournal === 'function') loadStockJournal(data.stock_code);" in analysis
-    # 표면 ② 성과 탭 '투자 일지' 카드: 배당 캘린더 다음, 평가금액 추이 앞.
+    # 표면 ② 성과 탭 '투자 일지' 카드: 기록·리포트 묶음에서 투자 논거 다음, AI 분석 앞.
     # 전 종목 타임라인(읽기/복기) — 성과 탭이 보일 때만 lazy 로드.
     assert 'id="pfJournalWrap"' in html
     assert 'id="pfJournalContent"' in html
-    assert html.find('id="pfDivCalWrap"') < html.find('id="pfJournalWrap"')
-    assert html.find('id="pfJournalWrap"') < html.find('id="pfValueChart"')
+    assert html.find('id="pfDeepRecords"') < html.find('id="pfThesisWrap"') < html.find('id="pfJournalWrap"')
+    assert html.find('id="pfJournalWrap"') < html.find('id="pfAiWrap"')
     assert "if (typeof pfLoadJournalPanel === 'function') pfLoadJournalPanel();" in performance
     # 기능 홈: fetch/렌더/폼/인라인 수정/삭제는 portfolio-journal.js.
     assert "async function pfLoadJournalPanel(" in journal
