@@ -15,7 +15,9 @@ import aiosqlite
 
 from domain.portfolio_codes import is_korean_listing, is_special_asset, normalize_portfolio_code
 from domain.portfolio_codes import is_korean_stock as _is_portfolio_korean_stock
+from domain.portfolio_dividends import dividend_on_current_share_basis
 from domain.portfolio_order import pin_long_short_pairs
+from domain.timeutil import today_kst
 from repositories import accounts as accounts_repo
 from repositories.db import get_db, read_snapshot, transaction
 
@@ -391,25 +393,11 @@ def _pref_to_common(code: str) -> str | None:
 
 
 async def get_trailing_dividends(stock_codes: list[str]) -> dict[str, float]:
-    """Latest positive `dividend_per_share` per stock across market_data.
+    """Resolve the latest completed annual DPS on the portfolio's share basis.
 
-    Used for the 배당액 column — the UI multiplies this by the user's
-    quantity client-side so edits to quantity reflect instantly. We pull
-    the most recent non-zero value because dividend_per_share occasionally
-    arrives as 0 for the current year (pre-announcement) and that would
-    hide the true trailing yield.
-
-    Excluded: the current calendar year, to avoid the "0 until announced"
-    trap the analysis page had (see services/stock_price.py dividend fallback).
-
-    Preferred-stock fallback: the market_data pipeline (services/stock_price.py)
-    indexes by common-stock code, so a 005935 holding will miss unless
-    we also look up its common counterpart 005930. The actual dividend
-    paid to preferred holders is usually slightly higher (typical 1%p
-    dividend premium) than the common, but the common figure is the
-    best automated approximation available until preferred-specific
-    data is harvested separately. Without this fallback preferred-stock
-    배당액 is silently 0 across the whole table.
+    The UI uses the result with the current quote and holding quantity.
+    A confirmed zero is valid; exclude provisional current-year market data.
+    Preferred shares can use the curated sheet or their common-share fallback.
     """
     if not stock_codes:
         return {}
@@ -420,7 +408,8 @@ async def get_trailing_dividends(stock_codes: list[str]) -> dict[str, float]:
         if common and common != code:
             pref_to_common_map[code] = common
     all_codes = list(set(stock_codes) | set(pref_to_common_map.values()))
-    current_year = datetime.now().year
+    as_of = today_kst()
+    current_year = as_of.year
     placeholders = ",".join("?" for _ in all_codes)
     db = await get_db()
     # 0 도 유효한 '무배당 확정' 값으로 취급 — 이전엔 `> 0` 필터로 제외
@@ -444,7 +433,7 @@ async def get_trailing_dividends(stock_codes: list[str]) -> dict[str, float]:
               )""",
         (*all_codes, current_year, *all_codes, current_year),
     )
-    direct_dps = {row["stock_code"]: float(row["dividend_per_share"]) for row in await cursor.fetchall()}
+    direct_dps = {row["stock_code"]: row for row in await cursor.fetchall()}
 
     # Preferred-stock override — a separately-curated Google Sheet carries
     # the authoritative per-year dividend for each preferred (Data!AI =
@@ -454,17 +443,17 @@ async def get_trailing_dividends(stock_codes: list[str]) -> dict[str, float]:
     # we must not silently substitute the common stock's non-zero number.
     # Only NULL rows (missing) fall through to the common fallback.
     pref_codes = list(pref_to_common_map.keys())
-    pref_overrides: dict[str, float] = {}
+    pref_overrides: dict[str, aiosqlite.Row] = {}
     if pref_codes:
         pref_placeholders = ",".join("?" for _ in pref_codes)
         cursor = await db.execute(
-            f"""SELECT stock_code, dividend_per_share
+            f"""SELECT stock_code, dividend_per_share, sheet_year AS year
                 FROM preferred_dividends
                 WHERE stock_code IN ({pref_placeholders})
                   AND dividend_per_share IS NOT NULL""",
             pref_codes,
         )
-        pref_overrides = {row["stock_code"]: float(row["dividend_per_share"]) for row in await cursor.fetchall()}
+        pref_overrides = {row["stock_code"]: row for row in await cursor.fetchall()}
 
     # foreign_dividends — yfinance-sourced + admin manual overrides.
     # Single lookup handles everything outside the KR market_data pipeline.
@@ -498,18 +487,18 @@ async def get_trailing_dividends(stock_codes: list[str]) -> dict[str, float]:
     #       이라도 허용해서 '배당 중단' 상태 반영.
     out: dict[str, float] = {}
     for code in stock_codes:
-        direct = direct_dps.get(code)
-        if direct is not None and direct > 0:
-            out[code] = direct
-        elif code in foreign_overrides:
+        annual = direct_dps.get(code)
+        if (annual is None or annual["dividend_per_share"] <= 0) and code in foreign_overrides:
             out[code] = foreign_overrides[code]
-        elif direct is not None:
-            # market_data dps == 0 and no override
-            out[code] = direct
-        elif code in pref_overrides:
-            out[code] = pref_overrides[code]
-        elif code in pref_to_common_map and pref_to_common_map[code] in direct_dps:
-            out[code] = direct_dps[pref_to_common_map[code]]
+            continue
+        if annual is None:
+            annual = pref_overrides.get(code)
+        if annual is None and code in pref_to_common_map:
+            annual = direct_dps.get(pref_to_common_map[code])
+        if annual is not None:
+            out[code] = dividend_on_current_share_basis(
+                code, annual["year"], float(annual["dividend_per_share"]), as_of,
+            )
     return out
 
 

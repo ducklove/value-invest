@@ -1,4 +1,5 @@
 import time
+from datetime import date
 from unittest.mock import AsyncMock, patch
 
 from _harness import TempDbMixin, seed_corp_codes, seed_user
@@ -691,6 +692,36 @@ class PortfolioTests(TempDbMixin):
 
     async def test_get_trailing_dividends_empty_list(self):
         self.assertEqual(await portfolio_repo.get_trailing_dividends([]), {})
+
+    async def test_trailing_dividends_use_daekyo_post_consolidation_share_basis(self):
+        # The preferred sheet and market-data cache disagree in production.
+        # The 2025 filing establishes 60 won before the two-for-one consolidation.
+        await financial_repo.upsert_market_dividends("019680", {2025: 60.0})
+        await financial_repo.upsert_market_dividends("019685", {2025: 60.0})
+        await portfolio_repo.upsert_preferred_dividends([
+            {"stock_code": "019685", "dividend_per_share": 105.0, "sheet_year": 2025},
+        ])
+        codes = ["019680", "019685"]
+        with patch.object(portfolio_repo, "today_kst", return_value=date(2026, 9, 9)):
+            self.assertEqual(await portfolio_repo.get_trailing_dividends(codes), dict.fromkeys(codes, 60.0))
+        with patch.object(portfolio_repo, "today_kst", return_value=date(2026, 11, 14)):
+            self.assertEqual(await portfolio_repo.get_trailing_dividends(codes), dict.fromkeys(codes, 120.0))
+            self.assertEqual((await financial_repo.get_market_data("019685"))[-1]["dividend_per_share"], 60.0)
+            # An adjusted provider refresh must not apply the factor a second time.
+            await financial_repo.upsert_market_dividends("019685", {2025: 120.0})
+            self.assertEqual(await portfolio_repo.get_trailing_dividends(codes), dict.fromkeys(codes, 120.0))
+        with patch.object(portfolio_repo, "today_kst", return_value=date(2027, 4, 1)):
+            await financial_repo.upsert_market_dividends("019685", {2026: 75.0})
+            self.assertEqual((await portfolio_repo.get_trailing_dividends(codes))["019685"], 75.0)
+
+    async def test_daekyo_preferred_dividend_consolidation_with_fallback_sources(self):
+        await financial_repo.upsert_market_dividends("019680", {2025: 60.0})
+        with patch.object(portfolio_repo, "today_kst", return_value=date(2026, 11, 14)):
+            self.assertEqual(await portfolio_repo.get_trailing_dividends(["019685"]), {"019685": 120.0})
+            await portfolio_repo.upsert_preferred_dividends([
+                {"stock_code": "019685", "dividend_per_share": 105.0, "sheet_year": 2025},
+            ])
+            self.assertEqual(await portfolio_repo.get_trailing_dividends(["019685"]), {"019685": 120.0})
 
     async def test_dividend_warmup_fetches_missing_domestic_market_data(self):
         """신규 국내 종목은 분석 화면을 열기 전에도 포트폴리오 배당 캐시가
