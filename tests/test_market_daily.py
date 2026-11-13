@@ -221,10 +221,10 @@ class MarketDailyRuleTests(unittest.TestCase):
         self.assertEqual(market_daily._flatten_news_payload({"items": [{"id": 1}]}), [{"id": 1}])
         self.assertEqual(market_daily._flatten_news_payload(None), [])
 
-    def test_gemini35_flash_cost_estimate(self):
+    def test_gemini_hydrogen_cost_estimate(self):
         self.assertAlmostEqual(
-            market_daily.estimate_gemini35_flash_cost(12_000, 1_200),
-            0.0288,
+            market_daily.estimate_gemini_hydrogen_cost(12_000, 1_200),
+            0.027,
         )
 
     def test_market_tape_prioritizes_breaking_events(self):

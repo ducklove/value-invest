@@ -197,13 +197,17 @@ class AiAdminConfigTests(TempDbMixin):
         self.assertAlmostEqual(row["cost_usd"], 0.12)
 
     def test_reasoning_controls_accept_feature_specific_effort(self):
-        controls = ai_config.openrouter_reasoning_controls("google/gemini-3.5-flash", effort="low")
+        controls = ai_config.openrouter_reasoning_controls("google/gemini-4-hydrogen", effort="low")
 
         self.assertEqual(controls["reasoning"], {"effort": "low", "exclude": True})
         self.assertFalse(controls["include_reasoning"])
 
-        fallback = ai_config.openrouter_reasoning_controls("google/gemini-3.5-flash", effort="wild")
-        self.assertEqual(fallback["reasoning"], {"effort": "minimal", "exclude": True})
+        fallback = ai_config.openrouter_reasoning_controls("google/gemini-4-hydrogen", effort="wild")
+        self.assertEqual(fallback["reasoning"], {"effort": "low", "exclude": True})
+
+    async def test_saved_flash_tier_override_uses_hydrogen(self):
+        await ai_config.app_settings_repo.set_app_setting("AI_TIER_MODEL::BALANCED", "google/gemini-3.5-flash")
+        self.assertEqual(await ai_config.get_model_for_feature("market_daily"), "google/gemini-4-hydrogen")
 
     async def test_preferred_dividend_rows_are_listed_for_admin_coverage(self):
         await portfolio_repo.upsert_preferred_dividends([

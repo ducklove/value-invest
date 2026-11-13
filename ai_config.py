@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from typing import Any
 
@@ -14,9 +15,9 @@ OPENROUTER_KEY_SETTING = "OPENROUTER_API_KEY"
 # OpenRouter 별칭 대신 명시적 모델 ID를 등급 기본값으로 둔다. 실제 운영값은
 # 관리자 DB 설정 또는 등급별 환경변수로 재정의할 수 있다.
 LIGHT_MODEL = "qwen/qwen3.6-flash"
-BALANCED_MODEL = "google/gemini-3.5-flash"
+GEMINI_HYDROGEN = "google/gemini-4-hydrogen"
+BALANCED_MODEL = GEMINI_HYDROGEN
 PREMIUM_MODEL = "openai/gpt-5.6-terra"
-GEMINI_35_FLASH = BALANCED_MODEL
 DEFAULT_PORTFOLIO_AI_MODEL = BALANCED_MODEL
 _TIER_MODEL_SETTING_PREFIX = "AI_TIER_MODEL::"
 
@@ -98,14 +99,21 @@ def _tier_model_setting_key(tier: str) -> str:
     return f"{_TIER_MODEL_SETTING_PREFIX}{tier}"
 
 
+def _current_model(model: str) -> str:
+    # Stored model selections and older environment files may still name Flash.
+    if re.fullmatch(r"(?:google/)?gemini-[\w.-]*flash[\w.-]*(?::[\w-]+)?", model.strip(), re.IGNORECASE):
+        return GEMINI_HYDROGEN
+    return model
+
+
 def _configured_tier_model(spec: dict[str, Any]) -> str:
     value = os.getenv(str(spec["env"]))
     if value:
-        return value
+        return _current_model(value)
     for legacy_env in spec.get("legacy_envs", ()):
         legacy_value = os.getenv(str(legacy_env))
         if legacy_value:
-            return legacy_value
+            return _current_model(legacy_value)
     return str(spec["default"])
 
 
@@ -167,7 +175,7 @@ async def get_model_for_tier(tier: str) -> str:
         return ""
     stored = await app_settings_repo.get_app_setting(_tier_model_setting_key(normalized))
     if stored and stored.get("value"):
-        return str(stored["value"])
+        return _current_model(str(stored["value"]))
     return _configured_tier_model(spec)
 
 
@@ -244,7 +252,7 @@ async def save_tier_models(models: dict[str, Any], actor: str | None):
         model = str(value or "").strip()
         if not model:
             raise ValueError(f"{tier} model is required.")
-        await app_settings_repo.set_app_setting(_tier_model_setting_key(tier), model, updated_by=actor)
+        await app_settings_repo.set_app_setting(_tier_model_setting_key(tier), _current_model(model), updated_by=actor)
 
 
 def openrouter_reasoning_controls(model: str, *, effort: str | None = None) -> dict[str, Any]:
@@ -257,6 +265,8 @@ def openrouter_reasoning_controls(model: str, *, effort: str | None = None) -> d
     """
     allowed_efforts = {"none", "minimal", "low", "medium", "high", "xhigh"}
     requested_effort = str(effort or "").strip().lower()
+    if model.lower() == GEMINI_HYDROGEN and requested_effort not in {"low", "medium", "high", "xhigh"}:
+        requested_effort = "low"
     if requested_effort:
         if requested_effort not in allowed_efforts:
             requested_effort = "minimal"
