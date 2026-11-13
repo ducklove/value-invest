@@ -12,11 +12,11 @@ from repositories import ai_usage as ai_usage_repo
 from repositories import app_settings as app_settings_repo
 
 OPENROUTER_KEY_SETTING = "OPENROUTER_API_KEY"
-# OpenRouter 별칭 대신 명시적 모델 ID를 등급 기본값으로 둔다. 실제 운영값은
-# 관리자 DB 설정 또는 등급별 환경변수로 재정의할 수 있다.
+# 균형 등급은 OpenRouter의 최신 Gemini Flash를 따른다. 관리자 DB 설정이나
+# 등급별 환경변수로 기본 모델을 바꿀 수 있다.
 LIGHT_MODEL = "qwen/qwen3.6-flash"
-GEMINI_HYDROGEN = "google/gemini-4-hydrogen"
-BALANCED_MODEL = GEMINI_HYDROGEN
+GEMINI_FLASH_LATEST = "~google/gemini-flash-latest"
+BALANCED_MODEL = GEMINI_FLASH_LATEST
 PREMIUM_MODEL = "openai/gpt-5.6-terra"
 DEFAULT_PORTFOLIO_AI_MODEL = BALANCED_MODEL
 _TIER_MODEL_SETTING_PREFIX = "AI_TIER_MODEL::"
@@ -101,8 +101,10 @@ def _tier_model_setting_key(tier: str) -> str:
 
 def _current_model(model: str) -> str:
     # Stored model selections and older environment files may still name Flash.
-    if re.fullmatch(r"(?:google/)?gemini-[\w.-]*flash[\w.-]*(?::[\w-]+)?", model.strip(), re.IGNORECASE):
-        return GEMINI_HYDROGEN
+    if model.strip().lower() == "google/gemini-4-hydrogen" or re.fullmatch(
+        r"(?:google/)?gemini-[\w.-]*flash[\w.-]*(?::[\w-]+)?", model.strip(), re.IGNORECASE
+    ):
+        return GEMINI_FLASH_LATEST
     return model
 
 
@@ -265,7 +267,7 @@ def openrouter_reasoning_controls(model: str, *, effort: str | None = None) -> d
     """
     allowed_efforts = {"none", "minimal", "low", "medium", "high", "xhigh"}
     requested_effort = str(effort or "").strip().lower()
-    if model.lower() == GEMINI_HYDROGEN and requested_effort not in {"low", "medium", "high", "xhigh"}:
+    if model.lower() == GEMINI_FLASH_LATEST and requested_effort not in {"low", "medium", "high", "xhigh"}:
         requested_effort = "low"
     if requested_effort:
         if requested_effort not in allowed_efforts:

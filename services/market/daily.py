@@ -169,10 +169,6 @@ def _signed_change_pct(raw_pct: Any, direction: str | None = None) -> float | No
     return pct
 
 
-def estimate_gemini_hydrogen_cost(input_tokens: int = 0, output_tokens: int = 0) -> float:
-    return (input_tokens * 1.50 + output_tokens * 7.50) / 1_000_000
-
-
 def _material_disclosure_reason(report_name: str) -> str | None:
     normalized = re.sub(r"\s+", "", report_name or "")
     for keyword in _MATERIAL_DISCLOSURE_KEYWORDS:
@@ -996,7 +992,6 @@ async def _call_openrouter(payload: dict[str, Any], google_sub: str | None) -> d
                 model=model,
                 model_profile="market_daily",
                 timeout=httpx.Timeout(90.0, read=90.0),
-                cost_estimator=estimate_gemini_hydrogen_cost if model == ai_config.GEMINI_HYDROGEN else None,
                 ok_if_content=True,
             )
         except Exception as exc:

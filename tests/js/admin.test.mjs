@@ -93,12 +93,12 @@ function fixtures() {
       tiers: [
         { key: "LOCAL", label: "LOCAL", description: "외부 LLM 미사용", model: "", external: false, source: "env/default" },
         { key: "LIGHT", label: "LIGHT", description: "저비용 요약", model: "qwen/qwen3.6-flash", external: true, source: "env/default" },
-        { key: "BALANCED", label: "BALANCED", description: "기본 분석", model: "google/gemini-4-hydrogen", external: true, source: "env/default" },
+        { key: "BALANCED", label: "BALANCED", description: "기본 분석", model: "~google/gemini-flash-latest", external: true, source: "env/default" },
         { key: "PREMIUM", label: "PREMIUM", description: "고급 분석", model: "openai/gpt-5.6-terra", external: true, source: "env/default" },
       ],
       features: [
         { key: "daily_briefing", label: "AI 데일리 브리핑", tier: "LIGHT", model: "qwen/qwen3.6-flash" },
-        { key: "portfolio_balanced", label: "포트폴리오 기본 분석", tier: "BALANCED", model: "google/gemini-4-hydrogen" },
+        { key: "portfolio_balanced", label: "포트폴리오 기본 분석", tier: "BALANCED", model: "~google/gemini-flash-latest" },
         { key: "portfolio_premium", label: "포트폴리오 고급 분석", tier: "PREMIUM", model: "openai/gpt-5.6-terra" },
       ],
       usage: { by_feature: [], days: 30 },
