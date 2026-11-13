@@ -1,6 +1,7 @@
 """NH 당일 매매의 결제 예정 현금. 잔고·수익 원장에 다시 가산하지 않는다."""
 
 from datetime import datetime
+from decimal import Decimal
 
 from domain.market_calendar import is_trading_day
 from domain.timeutil import KST
@@ -10,6 +11,17 @@ from services.brokers.activity import _check_message, numeric
 from services.brokers.symbols import summary
 
 PATH = "/krstock/inquiry/v1/realizedPnl"
+
+
+def settlement_delta(previous: dict, current: dict) -> Decimal | None:
+    """잔고 응답 두 개의 D+2−D+1 차이 변화. 장중 매매 합계가 늦어도 보존한다."""
+    def spread(balances):
+        won = balances.get("KRW", {})
+        tomorrow, settlement = (numeric(won, key) for key in ("nxt_dd_dca", "nxt2_dd_dca"))
+        return settlement - tomorrow if tomorrow is not None and settlement is not None else None
+
+    before, after = spread(previous), spread(current)
+    return after - before if before is not None and after is not None else None
 
 
 async def fetch(user: str, link: dict, balances: dict) -> list[dict]:

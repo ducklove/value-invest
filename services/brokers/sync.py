@@ -125,8 +125,9 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                     if not row["stock_code"].startswith("CASH_") and not is_futures_value(row["stock_code"]) and any(r["stock_code"] == row["stock_code"] and r["quantity"] * row["quantity"] < 0 for r in other):
                         raise BrokerError("다른 계좌의 공매도 잔고와 충돌하여 동기화를 보류했습니다.")
                 now = datetime.now(timezone.utc).isoformat()
+                settlement_delta = cash_trades.settlement_delta(json.loads(current["balances_json"]), balances) if review_trades else None
                 await broker_cash_reviews.observe(db, user, current, rows, previous, fx_rates=review_fx,
-                                                  trades=trades, settling=review_trades)
+                                                  trades=trades, settling=review_trades, settlement_delta=settlement_delta)
                 if isinstance(entries, activity.ActivityBatch):
                     await broker_cash_reviews.reconcile_related(db, user)
                 created = {r["stock_code"]: r["created_at"] for r in previous}

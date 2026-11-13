@@ -51,11 +51,12 @@ class CashReviewTests(TempDbMixin):
         with patch.object(broker_cash_reviews, "stamp", return_value=later):
             return (await broker_cash_reviews.history("u1"))["items"]
 
-    async def trade_sync(self, balance, buy=0, sell=0, charges=0, *, error=None, entries=None):
+    async def trade_sync(self, balance, buy=0, sell=0, charges=0, *, error=None, entries=None, settlement=None):
         day = stamp()[:10]
         trades = [{"booked_date": day, "date": day, "currency": "KRW", "kind": kind, "amount": amount}
                   for kind, amount in (("trade_buy", -buy), ("trade_sell", sell), ("trade_charges", -charges))]
-        with patch.object(sync, "fetch_snapshot", AsyncMock(return_value=([cash(balance)], {"KRW": {"nxt_dd_dca": 0, "nxt2_dd_dca": 0}}))), \
+        tomorrow, due = settlement or (0, 0)
+        with patch.object(sync, "fetch_snapshot", AsyncMock(return_value=([cash(balance)], {"KRW": {"nxt_dd_dca": tomorrow, "nxt2_dd_dca": due}}))), \
              patch.object(activity, "fetch", AsyncMock(return_value=entries if entries is not None else self.income_batch(None))), \
              patch.object(cash_trades, "fetch", AsyncMock(return_value=trades, side_effect=error)) as query:
             result = await sync.sync_account("u1", self.aid, include_activity=True)
@@ -82,6 +83,35 @@ class CashReviewTests(TempDbMixin):
         self.assertEqual(await self.pending(), [])
         await self.trade_sync(9994500, buy=10000000, charges=500)
         self.assertEqual((await self.pending())[0]["unexplained"], -5000)  # 매매 재사용 금지
+
+    async def test_delayed_mixed_fills_recover_per_observation_and_keep_external_deposit(self):
+        # 한 조회에 매수/매도가 상계되며, 별도 입금은 D+1과 D+2에 같이 반영된다.
+        await self.trade_sync(20000000, settlement=(20000000, 20000000))
+        for cash_balance, due in [(20601000, (20000000, 20601000)), (21804000, (20100000, 21804000))]:
+            await self.trade_sync(cash_balance, settlement=due, error=BrokerError("매매 합계 반영 대기"))
+        for _ in range(2):
+            await self.trade_sync(21676156, buy=1000000, sell=2700000, charges=23844,
+                                  settlement=(20000000, 21676156))
+            rows = (await broker_cash_reviews.history("u1", pending=False))["items"]
+            self.assertEqual([row["trade_amount"] for row in rows], [-27844, 1103000, 601000])
+            self.assertEqual([row["unexplained"] for row in await self.pending()], [-100000, 100000])
+        self.assertEqual((await account_holdings.list_positions("u1", self.aid))[0]["quantity"], 21676156)
+        self.assertEqual(await snapshots.get_cashflows("u1"), [])
+
+    async def test_delayed_settlement_gap_with_unverified_sum_stays_unexplained(self):
+        await self.trade_sync(20000000, settlement=(20000000, 20000000))
+        await self.trade_sync(22000000, settlement=(20000000, 22000000), error=BrokerError("매매 합계 반영 대기"))
+        await self.trade_sync(21800000, sell=1800000, settlement=(19900000, 21800000))
+        self.assertEqual(sorted(r["unexplained"] for r in await self.pending()), [-200000, 2000000])
+
+    async def test_delayed_trade_offset_by_external_deposit_is_not_lost_when_cash_is_flat(self):
+        await self.trade_sync(20000000, settlement=(20000000, 20000000))
+        await self.trade_sync(20000000, settlement=(21000000, 20000000), error=BrokerError("매매 합계 반영 대기"))
+        await self.trade_sync(21499000, buy=1000000, sell=1500000, charges=1000,
+                              settlement=(21000000, 21499000))
+        rows = await self.pending()
+        self.assertEqual([(row["amount"], row["trade_amount"], row["unexplained"]) for row in rows],
+                         [(0, -1000000, 1000000)])
 
     async def test_trade_baseline_and_income_refetch_preserve_evidence(self):
         await self.trade_sync(20000000, buy=10000000, charges=500)

@@ -292,9 +292,20 @@ async def _trade_point(db, user: str, aid: str, state: dict, trades: list[dict] 
         elif valid and rows and not any(delta.values()):
             for row in rows:
                 await db.execute("UPDATE broker_cash_reviews SET trade_amount=0 WHERE id=?", (row["id"],))
-        elif valid and rows and _matches_trades([_decimal(row["amount"]) for row in rows], delta):
-            for row in rows:
-                await db.execute("UPDATE broker_cash_reviews SET trade_amount=amount WHERE id=?", (row["id"],))
+        elif valid and rows:
+            if all(row["settlement_delta"] is not None for row in rows):
+                # 잔고의 순변동과 달리 D+2−D+1에는 양쪽 결제일에 공통인 입출금이 빠진다.
+                # 여러 체결이 같은 조회에 섞여 방향이 상계돼도, 양 끝의 검증된 누계 차이와
+                # 중간 조회들의 결제 차액이 모두 이어져야 개별 금액을 확정한다.
+                amounts = [_decimal(row["settlement_delta"]) for row in rows]
+                credits = sum(max(Decimal(0), amount) for amount in amounts)
+                if (sum(amounts) == net and credits <= delta["trade_sell"] and delta["trade_charges"] <= 0
+                        and all(row["trade_amount"] is None for row in rows)):
+                    for row, amount in zip(rows, amounts):
+                        await db.execute("UPDATE broker_cash_reviews SET trade_amount=? WHERE id=?", (float(amount), row["id"]))
+            elif all(row["settlement_delta"] is None for row in rows) and _matches_trades([_decimal(row["amount"]) for row in rows], delta):
+                for row in rows:
+                    await db.execute("UPDATE broker_cash_reviews SET trade_amount=amount WHERE id=?", (row["id"],))
     await db.execute("UPDATE broker_cash_review_state SET trade_json=? WHERE google_sub=? AND account_id=?",
                      (json.dumps({"date": day, "at": now, "totals": totals}), user, aid))
 
@@ -312,10 +323,12 @@ def _legacy_trade_allocations(rows, pools: dict, receipts: dict) -> dict:
     for (day, currency), totals in groups.items():
         candidates = [row for row in rows if row["currency"] == currency and row["from_at"][:10] == day == row["to_at"][:10]]
         amounts = [_decimal(row["amount"]) - receipts.get(row["id"], 0) for row in candidates]
-        if (_matches_trades(amounts, totals) and all(row["trade_amount"] is None or _decimal(row["trade_amount"]) == amount
-                                                   for row, amount in zip(candidates, amounts))):
+        if (_matches_trades(amounts, totals) and all(
+                (row["trade_amount"] is None or _decimal(row["trade_amount"]) == amount)
+                and (row["settlement_delta"] is None or _decimal(row["settlement_delta"]) == amount)
+                for row, amount in zip(candidates, amounts))):
             allocations.update({row["id"]: amount for row, amount in zip(candidates, amounts) if amount})
-        elif not any(row["trade_amount"] is not None for row in candidates):
+        elif not any(row["trade_amount"] is not None or row["settlement_delta"] is not None for row in candidates):
             continue  # 복원 불가한 기존 혼합 이력에는 이전 대조를 유지한다.
         for key in sources[day, currency]:
             pools[key] = Decimal(0)  # 구간별 확인과 일별 합계를 이중 사용하지 않는다.
@@ -405,7 +418,7 @@ async def _reconcile(db, user: str, aid: str, state: dict, evidence: dict, now: 
 
 
 async def observe(db, user: str, link: dict, positions: list[dict], previous: list[dict], *, fx_rates: dict | None = None,
-                  trades: list[dict] | None = None, settling: bool = False):
+                  trades: list[dict] | None = None, settling: bool = False, settlement_delta: Decimal | None = None):
     """완전한 잔고와 같은 트랜잭션에서 관측한다. 최초·재연결은 기준 잔고만 저장한다."""
     if link["environment"] != "live" or link.get("product", "stocks") in {"krfuture", "gbfuture"}:
         return  # 선물 CASH 행은 평가액을 나타내는 합성 값이다.
@@ -424,21 +437,24 @@ async def observe(db, user: str, link: dict, positions: list[dict], previous: li
             await _trade_point(db, user, aid, {"fingerprint": fingerprint, "trade_json": "{}"}, trades, now)
         return
     state = dict(state)
+    if state["last_at"][:10] != now[:10]:
+        settlement_delta = None  # 날짜가 바뀌면 결제일 자체가 이동한다.
     old_cash = json.loads(state["cash_json"])
     def inventory(rows):
         return {(r["stock_code"], r["currency"]): (r["quantity"], r["avg_price"]) for r in rows if not r["stock_code"].startswith("CASH_")}
     changed = inventory(positions) != inventory(previous)
     for currency in old_cash.keys() | cash.keys():
         amount = _decimal(cash.get(currency)) - _decimal(old_cash.get(currency))
-        if amount:
+        if amount or (currency == "KRW" and settlement_delta):
             basis = max(abs(old_cash.get(currency, 0)), abs(cash.get(currency, 0)))
             limit = minor_limit(currency, basis, (fx_rates or {}).get(currency))
             await db.execute(
-                "INSERT INTO broker_cash_reviews (google_sub,account_id,fingerprint,from_at,to_at,currency,amount,unexplained,positions_changed,updated_at,cash_basis,minor_limit_native,review_after) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO broker_cash_reviews (google_sub,account_id,fingerprint,from_at,to_at,currency,amount,unexplained,positions_changed,updated_at,cash_basis,minor_limit_native,review_after,settlement_delta) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (user, aid, fingerprint, state["last_at"], now, currency, float(amount), float(amount), int(changed), now,
                  basis, float(limit) if limit else None,
-                 (datetime.fromisoformat(now) + timedelta(seconds=SETTLEMENT_WAIT_SECONDS)).isoformat() if settling and currency == "KRW" else None))
+                 (datetime.fromisoformat(now) + timedelta(seconds=SETTLEMENT_WAIT_SECONDS)).isoformat() if settling and currency == "KRW" else None,
+                 float(settlement_delta) if settlement_delta is not None and currency == "KRW" else None))
     await _trade_point(db, user, aid, state, trades, now)
     await _reconcile(db, user, aid, state, evidence, now)
     await db.execute("UPDATE broker_cash_review_state SET cash_json=?,last_at=? WHERE google_sub=? AND account_id=?", (json.dumps(cash), now, user, aid))
@@ -524,7 +540,7 @@ async def history(user: str, *, pending: bool = True, offset: int = 0, fx_rates:
                 automatic, required = "checking", False
             if pending and (not row["is_current"] or not required):
                 continue
-            item = {k: value for k, value in row.items() if k not in {"google_sub", "fingerprint", "is_current", "source_json"}}
+            item = {k: value for k, value in row.items() if k not in {"google_sub", "fingerprint", "is_current", "source_json", "settlement_delta"}}
             items.append({**item, "auto_resolution": automatic, "review_required": required,
                           "minor_limit": float(limits.get(key, 0))})
         count = len(items)

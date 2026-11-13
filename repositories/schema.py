@@ -1193,6 +1193,7 @@ CORE_COLUMN_MIGRATIONS: tuple[ColumnSpec, ...] = (
     ("broker_cash_reviews", "source_json", "TEXT NOT NULL DEFAULT '{}'"),
     ("broker_cash_review_state", "trade_json", "TEXT NOT NULL DEFAULT '{}'"),
     ("broker_cash_reviews", "trade_amount", "REAL"),
+    ("broker_cash_reviews", "settlement_delta", "REAL"),
     ("broker_cash_reviews", "review_after", "TEXT"),
     ("broker_cash_reviews", "cash_basis", "REAL"),
     ("broker_cash_reviews", "minor_limit_native", "REAL"),
