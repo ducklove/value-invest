@@ -901,7 +901,7 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
         <a class="lab-card" href="/screener" onclick="event.preventDefault(); switchView('screener');">
           <span class="lab-pill">유니버스 스캔</span>
           <h3>밸류 스크리너</h3>
-          <p>P/E·P/B·ROE·배당수익률 등 조건으로 KOSPI/KOSDAQ 투자가능 유니버스 전체를 거르는 스크리너입니다.</p>
+          <p>P/E·P/B·ROE·배당수익률에 더해 턴어라운드·배당 증가 같은 연도별 추세 조건으로 KOSPI/KOSDAQ 전 종목을 거르고, 관심종목으로 모아 둡니다.</p>
           <strong>열기 →</strong>
         </a>
         <a class="lab-card" href="/nps" onclick="event.preventDefault(); switchView('nps');">
@@ -1036,30 +1036,36 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
     <div class="screener-page">
       <div class="lab-inline-banner">
         <span>도구</span>
-        <strong>검색 대상 등 상세 안내는 아래 커버리지를 확인하세요.</strong>
+        <strong>현재 지표와 최근 사업연도 추세로 종목을 거릅니다.</strong>
         <a href="/labs" onclick="event.preventDefault(); switchView('labs');">도구로 돌아가기</a>
       </div>
-      <h2>밸류 스크리너</h2>
+      <div class="screener-head">
+        <h2>밸류 스크리너</h2>
+        <p>KOSPI·KOSDAQ 전 종목을 대상으로 합니다. 히스토리 조건은 누르면 바로 걸리고, 결과 표는 열 제목을 눌러 정렬합니다.</p>
+      </div>
       <div class="screener-coverage" id="screenerCoverage" aria-live="polite"></div>
-      <div class="screener-filters" id="screenerFilters"></div>
+      <section class="screener-panel" aria-labelledby="screenerConditionsTitle">
+        <div class="screener-panel-head">
+          <h3 id="screenerConditionsTitle">히스토리 조건</h3>
+          <span>연간 사업보고서 기준 · 여러 개를 고르면 모두 만족하는 종목만 남습니다</span>
+        </div>
+        <div class="screener-conditions" id="screenerConditions"></div>
+      </section>
+      <section class="screener-panel" aria-labelledby="screenerFiltersTitle">
+        <div class="screener-panel-head">
+          <h3 id="screenerFiltersTitle">수치 조건</h3>
+          <span>최소·최대 중 필요한 칸만 채우세요 · 값이 없는 종목은 그 조건에서 빠집니다</span>
+        </div>
+        <div class="screener-filters" id="screenerFilters"></div>
+      </section>
       <div class="screener-controls">
         <button class="bt-run" id="screenerRunBtn" type="button">스크린 실행</button>
         <button class="sc-btn-ghost" id="screenerResetBtn" type="button">초기화</button>
-        <label class="screener-sort">
-          정렬
-          <select id="screenerSortBy"></select>
-        </label>
-        <label class="screener-sort-dir">
-          방향
-          <select id="screenerSortDir">
-            <option value="desc">내림차순</option>
-            <option value="asc">오름차순</option>
-          </select>
-        </label>
+        <button class="screener-watch-toggle" id="screenerWatchOnlyBtn" type="button" aria-pressed="false" disabled>☆ 관심종목만 보기</button>
       </div>
       <div class="screener-status" id="screenerStatus" aria-live="polite"></div>
       <div class="screener-results" id="screenerResults">
-        <div class="screener-empty">조건을 설정하고 '스크린 실행'을 누르세요.</div>
+        <div class="screener-empty">히스토리 조건을 고르거나 수치 조건을 넣고 '스크린 실행'을 누르세요.</div>
       </div>
       <div class="screener-pager" id="screenerPager"></div>
     </div>

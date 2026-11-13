@@ -156,6 +156,21 @@ async def save_user_stock_preference(
         }
 
 
+async def get_starred_stock_codes(google_sub: str) -> list[str]:
+    """관심종목(``is_starred``) 코드 — 관심 탭과 같은 순서."""
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        SELECT stock_code
+        FROM user_stock_preferences
+        WHERE google_sub = ? AND is_starred = 1
+        ORDER BY CASE WHEN starred_order IS NULL THEN 1 ELSE 0 END, starred_order ASC, updated_at DESC
+        """,
+        (google_sub,),
+    )
+    return [row["stock_code"] for row in await cursor.fetchall()]
+
+
 async def get_cached_analyses(
     limit: int | None = None,
     include_quotes: bool = False,
@@ -168,13 +183,16 @@ async def get_cached_analyses(
         select_fields += ", payload_json"
 
     if google_sub and tab == "starred":
+        # 관심종목은 분석한 적 없는 종목도 보여 준다(스크리너에서 담은 종목). 이름은
+        # 분석 기록 → DART 코드표 → 코드 순으로 채우고, analyzed_at 은 비워 둔다.
         query = (
-            "SELECT a.stock_code, a.corp_name, a.analyzed_at"
+            "SELECT p.stock_code, COALESCE(a.corp_name, c.corp_name, p.stock_code) AS corp_name, a.analyzed_at"
             + (", a.payload_json" if include_quotes else "")
             + ", 1 AS is_starred"
             + ", COALESCE(p.note, '') AS note"
             + " FROM user_stock_preferences p"
-            + " JOIN analysis_meta a ON a.stock_code = p.stock_code"
+            + " LEFT JOIN analysis_meta a ON a.stock_code = p.stock_code"
+            + " LEFT JOIN corp_codes c ON c.stock_code = p.stock_code"
             + " WHERE p.google_sub = ? AND p.is_starred = 1"
             + " ORDER BY CASE WHEN p.starred_order IS NULL THEN 1 ELSE 0 END, p.starred_order ASC, p.updated_at DESC"
         )

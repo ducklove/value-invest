@@ -61,4 +61,11 @@ def _reset_short_lived_quote_caches():
     opportunities = sys.modules.get("services.ecosystem.opportunities")
     if opportunities is not None:
         opportunities.reset()
+    # 스크리너: 스냅샷+히스토리 유니버스 메모와 히스토리 수집 상태(메모리 사본·태스크).
+    screener = sys.modules.get("services.screener")
+    if screener is not None:
+        screener.reset_state()
+    screener_history = sys.modules.get("services.screener_history")
+    if screener_history is not None:
+        screener_history.reset_state()
     yield

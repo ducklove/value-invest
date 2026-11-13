@@ -11,6 +11,8 @@ import logging
 from datetime import date, datetime
 from typing import Any
 
+import httpx
+
 from core.errors import ExternalServiceError
 from domain.numbers import parse_number
 from services.market.sources import finance_pi
@@ -426,7 +428,10 @@ async def get_basic_fundamentals(
     *,
     as_of: date | datetime | str | None = None,
     fiscal_year: int | None = None,
+    timeout: float | None = None,
 ) -> dict[str, Any]:
+    """``timeout`` 을 주면 종목 수 기반 기본 제한 시간 대신 그 값을 쓴다
+    (스크리너 히스토리처럼 수백 종목을 한 번에 묻는 배치용)."""
     if isinstance(tickers, str):
         codes = [_normalize_ticker(tickers)]
     else:
@@ -442,7 +447,8 @@ async def get_basic_fundamentals(
         params["fiscal_year"] = int(fiscal_year)
 
     try:
-        payload = await _get_json("/api/fundamentals/basic", params, timeout=_fundamentals_timeout_for_count(len(codes)))
+        effective_timeout = timeout if timeout is not None else _fundamentals_timeout_for_count(len(codes))
+        payload = await _get_json("/api/fundamentals/basic", params, timeout=effective_timeout)
     except Exception as exc:
         # Fundamentals can be materially slower than price endpoints. Do not
         # trip the shared price cooldown for a fundamentals-only timeout.
@@ -458,6 +464,45 @@ async def get_basic_fundamentals(
         if item:
             normalized[code] = item
     return normalized
+
+
+async def get_dividend_history(
+    tickers: list[str] | tuple[str, ...],
+    *,
+    start_year: int,
+    end_year: int,
+    timeout: float | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """종목별 사업연도 주당배당 행을 finance-pi 에서 가져온다.
+
+    ``/api/fundamentals/dividends`` 응답의 ``dividends`` 맵(``{ticker: [row, ...]}``)을
+    요청한 코드 기준으로 돌려준다. 행은 OpenDART 배당 공시(alotMatter) 원본이라
+    같은 사업연도가 여러 보고서에 중복으로 실릴 수 있다 — 고르는 일은 호출부 몫.
+    """
+    codes = list(dict.fromkeys(_normalize_ticker(ticker) for ticker in tickers if _normalize_ticker(ticker)))
+    if not ENABLED or not codes or _cooldown_active():
+        return {}
+
+    params: dict[str, Any] = {
+        "ticker" if len(codes) == 1 else "tickers": codes[0] if len(codes) == 1 else ",".join(codes),
+        "start_year": int(start_year),
+        "end_year": int(end_year),
+    }
+    try:
+        payload = await _get_json(
+            "/api/fundamentals/dividends",
+            params,
+            timeout=timeout if timeout is not None else _fundamentals_timeout_for_count(len(codes)),
+        )
+    except (httpx.HTTPError, ValueError) as exc:
+        # 재무 조회와 같은 이유로 가격 쿨다운을 건드리지 않는다.
+        logger.warning("internal dividends API failed (%s): %s", ",".join(codes[:5]), exc)
+        raise ClosePriceClientError("internal dividends API failed") from exc
+
+    raw = payload.get("dividends") if isinstance(payload, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    return {code: rows for code in codes if isinstance(rows := raw.get(code), list) and rows}
 
 
 async def get_screener_snapshot(

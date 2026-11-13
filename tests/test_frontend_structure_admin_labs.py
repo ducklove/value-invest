@@ -167,12 +167,22 @@ def test_screener_labs_view_is_wired_as_deep_linkable_panel():
     assert "function fmtPct(" not in screener
     # 커버리지 안내(검색 대상 = finance-pi full-universe 스냅샷)가 표시된다.
     assert "screenerCoverage" in html
+    # 히스토리 조건 칩·관심종목 토글 컨테이너, 그리고 정렬은 선택 상자가 아니라 열 헤더다.
+    assert 'id="screenerConditions"' in html
+    assert 'id="screenerWatchOnlyBtn"' in html
+    assert 'id="screenerSortBy"' not in html
+    assert "function _renderScreenerConditions(" in screener
+    assert "/api/screener/watchlist" in screener
+    assert "data-sort=" in screener
 
     # 스타일: 페이지/필터 그리드/테이블/페이저.
     assert ".screener-page" in styles
     assert ".screener-filters" in styles
     assert ".screener-table" in styles
     assert ".screener-pager" in styles
+    assert ".screener-cond" in styles
+    assert ".sc-sort" in styles
+    assert ".sc-star" in styles
 
 def test_masters_labs_view_is_wired_as_deep_linkable_panel():
     html = (STATIC / "index.html").read_text(encoding="utf-8")

@@ -58,6 +58,7 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
     from core import http as http_manager
     from repositories import bootstrap, corp_codes
     from repositories import users as users_repo
+    from services import screener_history
     from services.dart import client as dart_client
     from services.market.sources import close_price as close_price_client
     from services.market.sources import kis_proxy as kis_proxy_client
@@ -74,6 +75,9 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
         await close_price_client.init_client()
         stack.push_async_callback(bootstrap.close_db)
         await bootstrap.init_db()
+        # 스크리너 히스토리 수집 태스크(요청이 띄운 백그라운드 작업)가 닫힌 DB 에 쓰지
+        # 않도록, LIFO 순서상 close_db 보다 먼저 멈춘다.
+        stack.push_async_callback(screener_history.shutdown)
         stack.push_async_callback(observability.flush_events)
         await ai_config.migrate_legacy_model_defaults()
         await users_repo.delete_expired_sessions()
