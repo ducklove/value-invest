@@ -21,7 +21,7 @@ import ai_config
 import observability
 from cache_layer import MemoryTTLCache
 from core.http import get_http_client
-from repositories import corp_codes
+from repositories import cache_values, corp_codes
 from repositories import dart_review as dart_review_repo
 from repositories import financial as financial_repo
 from repositories import wiki as wiki_repo
@@ -43,8 +43,22 @@ DART_REVIEW_TARGET_LIMIT = int(os.getenv("DART_REVIEW_TARGET_LIMIT", "12"))
 # model is cut off mid-JSON the parser falls back to dumping the raw blob into
 # summary_md, which the UI then renders as garbled markdown. A generous default
 # plus a larger one-shot retry keeps that failure mode rare.
-DART_REVIEW_MAX_TOKENS = int(os.getenv("DART_REVIEW_MAX_TOKENS", "4096"))
-DART_REVIEW_MAX_TOKENS_RETRY = int(os.getenv("DART_REVIEW_MAX_TOKENS_RETRY", "8000"))
+#
+# Hidden reasoning tokens are billed as output and count against this cap. A
+# model whose reasoning is mandatory (Gemini 4 Hydrogen) spent the whole 4096 /
+# 8000 budget thinking and returned a cut-off answer every time, so the budget
+# leaves room for reasoning on top of the ~3.5k-token JSON. It is only a cap:
+# a response that finishes earlier costs what it used.
+DART_REVIEW_MAX_TOKENS = int(os.getenv("DART_REVIEW_MAX_TOKENS", "10000"))
+DART_REVIEW_MAX_TOKENS_RETRY = int(os.getenv("DART_REVIEW_MAX_TOKENS_RETRY", "20000"))
+DART_REVIEW_REASONING_EFFORT = os.getenv("DART_REVIEW_REASONING_EFFORT", "low")
+# A filing whose review came back cut off is not cached, so every pipeline run
+# used to pay for the same failing calls again. Failed output is now remembered
+# per filing: the background pipeline waits out a cooldown between attempts and
+# gives up after a few. A manual request from the UI is never blocked.
+DART_REVIEW_MAX_FAILED_ATTEMPTS = int(os.getenv("DART_REVIEW_MAX_FAILED_ATTEMPTS", "2"))
+DART_REVIEW_FAILURE_COOLDOWN_S = float(os.getenv("DART_REVIEW_FAILURE_COOLDOWN_S", str(20 * 3600)))
+CACHE_NS_REVIEW_FAILURE = "dart_review.output_failure"
 
 _filings_cache = MemoryTTLCache("dart_report_review.filings", DART_FILINGS_CACHE_TTL_S, evict_expired_after=0)
 _pipeline_lock = asyncio.Lock()
@@ -52,6 +66,10 @@ _pipeline_lock = asyncio.Lock()
 
 class DartReportReviewError(RuntimeError):
     """Recoverable user-facing error for report review generation."""
+
+
+class DartReviewOutputError(DartReportReviewError):
+    """The model was called (and billed) but its answer was cut off or unparseable."""
 
 
 def _dart_key() -> str:
@@ -507,6 +525,7 @@ async def _call_openrouter(
         ],
         "temperature": 0.2,
         "max_tokens": max_tokens,
+        **ai_config.openrouter_reasoning_controls(model, effort=DART_REVIEW_REASONING_EFFORT),
     }
     try:
         result = await ai_client.post_chat_completion(
@@ -516,7 +535,6 @@ async def _call_openrouter(
             model=model,
             model_profile="dart_report_review",
             timeout=httpx.Timeout(120.0, read=120.0),
-            retry_without_reasoning=False,
         )
     except ai_client.MissingOpenRouterKeyError as exc:
         raise DartReportReviewError("OpenRouter API key is not configured.") from exc
@@ -530,6 +548,49 @@ async def _call_openrouter(
         "cost_usd": result["cost_usd"],
         "finish_reason": _finish_reason_from_response(result.get("data")),
     }
+
+
+def _failure_key(stock_code: str, rcept_no: str) -> str:
+    return f"{stock_code}:{rcept_no}"
+
+
+async def _output_failure(stock_code: str, rcept_no: str | None) -> dict[str, Any] | None:
+    if not rcept_no:
+        return None
+    entry = await cache_values.get_cache_value_entry(
+        CACHE_NS_REVIEW_FAILURE, _failure_key(stock_code, rcept_no), allow_stale=True
+    )
+    return entry.value if entry and isinstance(entry.value, dict) else None
+
+
+async def _record_output_failure(stock_code: str, rcept_no: str, usage: dict[str, Any]) -> None:
+    previous = await _output_failure(stock_code, rcept_no) or {}
+    await cache_values.set_cache_value(
+        CACHE_NS_REVIEW_FAILURE,
+        _failure_key(stock_code, rcept_no),
+        {
+            "attempts": int(previous.get("attempts") or 0) + 1,
+            "last_failed_at": datetime.now().isoformat(timespec="seconds"),
+            "model": usage.get("model"),
+            "finish_reason": usage.get("finish_reason"),
+            "tokens_out": usage.get("tokens_out"),
+        },
+    )
+
+
+def _failure_backoff_reason(failure: dict[str, Any] | None, *, now: datetime | None = None) -> str | None:
+    """Why the background pipeline must not retry this filing yet, or None."""
+    if not failure:
+        return None
+    if int(failure.get("attempts") or 0) >= DART_REVIEW_MAX_FAILED_ATTEMPTS:
+        return "output_failed_max_attempts"
+    try:
+        last = datetime.fromisoformat(str(failure.get("last_failed_at")))
+    except ValueError:
+        return None
+    if ((now or datetime.now()) - last).total_seconds() < DART_REVIEW_FAILURE_COOLDOWN_S:
+        return "output_failed_cooldown"
+    return None
 
 
 async def latest_review_status(stock_code: str) -> dict[str, Any]:
@@ -629,8 +690,10 @@ async def generate_review(stock_code: str, *, google_sub: str | None, force: boo
         )
         if _review_payload_is_broken(review_payload, finish_reason=usage.get("finish_reason")):
             # Never cache a truncated/garbled payload — that is exactly what made
-            # the broken review stick until a manual regeneration.
-            raise DartReportReviewError(
+            # the broken review stick until a manual regeneration. Remember the
+            # failure instead, so the pipeline stops paying for it every run.
+            await _record_output_failure(stock_code, primary["rcept_no"], usage)
+            raise DartReviewOutputError(
                 "AI 응답이 잘려 정상적인 리뷰를 만들지 못했습니다. 잠시 후 다시 시도해 주세요."
             )
 
@@ -658,11 +721,14 @@ async def generate_review(stock_code: str, *, google_sub: str | None, force: boo
         "created_at": datetime.now().isoformat(),
     }
     saved = await dart_review_repo.save_dart_report_review(review)
+    await cache_values.delete_cache_value(CACHE_NS_REVIEW_FAILURE, _failure_key(stock_code, primary["rcept_no"]))
     saved["cached"] = False
     return saved
 
 
 def _reason_from_error(exc: Exception) -> str:
+    if isinstance(exc, DartReviewOutputError):
+        return "output_truncated"
     message = str(exc)
     lowered = message.lower()
     if "opendart_api_key" in lowered or "openrouter api key" in lowered:
@@ -702,6 +768,17 @@ async def review_stock(
         }
     if status.get("status") == "no_report":
         return {"stock_code": code, "status": "skipped", "reason": "no_report"}
+    if not force:
+        failure = await _output_failure(code, latest.get("rcept_no"))
+        backoff = _failure_backoff_reason(failure)
+        if backoff:
+            return {
+                "stock_code": code,
+                "status": "skipped",
+                "reason": backoff,
+                "rcept_no": latest.get("rcept_no"),
+                "attempts": int((failure or {}).get("attempts") or 0),
+            }
     if not allow_generate:
         return {
             "stock_code": code,

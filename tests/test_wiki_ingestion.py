@@ -307,6 +307,65 @@ class WikiIngestionTests(TempDbMixin):
         self.assertEqual(e["target_price"], 95000.0)
         self.assertIn("핵심 요약", e["summary_md"])
 
+    async def test_summary_request_disables_hidden_reasoning(self):
+        post = AsyncMock(return_value={
+            "content": "### 핵심 요약\n본문\n### 주요 포인트\n- a\n",
+            "model": "qwen/qwen3.8-flash",
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "finish_reason": "stop",
+            "data": {},
+        })
+        with patch.object(wiki_ingestion.ai_client, "post_chat_completion", post):
+            summary = await wiki_ingestion.summarize_report(
+                {"title": "Q1 리뷰"}, "본문", model="qwen/qwen3.8-flash"
+            )
+
+        payload = post.await_args.kwargs["payload"]
+        # Reasoning left on ate the whole output cap and returned no text.
+        self.assertEqual(payload["reasoning"], {"effort": "none", "exclude": True})
+        self.assertEqual(payload["max_tokens"], wiki_ingestion.SUMMARY_MAX_TOKENS)
+        self.assertEqual(summary["key_points_md"], "- a")
+
+    async def test_empty_summary_stops_being_retried_after_max_attempts(self):
+        stock = "005930"
+        report = {
+            "pdf_url": "https://stock.pstatic.net/stock-research/empty.pdf",
+            "date": "2026-04-01", "firm": "미래에셋", "title": "Q1 리뷰",
+        }
+        empty = {"content": "", "model": "m", "input_tokens": 8000, "output_tokens": 2000,
+                 "finish_reason": "length", "data": {}}
+        post = AsyncMock(return_value=empty)
+        results = []
+        with patch.object(wiki_ingestion, "download_pdf", AsyncMock(return_value=SAMPLE_PDF_BYTES)), \
+             patch.object(wiki_ingestion, "parse_pdf_bytes", return_value="본문 추출 성공"), \
+             patch.object(wiki_ingestion.ai_client, "post_chat_completion", post):
+            for _ in range(wiki_ingestion.SUMMARY_MAX_FAILED_ATTEMPTS + 2):
+                results.append(await wiki_ingestion.ingest_pdf_for_report(stock, report, model="m"))
+
+        self.assertEqual(post.await_count, wiki_ingestion.SUMMARY_MAX_FAILED_ATTEMPTS)
+        self.assertEqual(results[0].get("failed"), "summarize")
+        self.assertEqual(results[-1].get("skipped"), "summary_failed_max_attempts")
+        self.assertEqual(await wiki_repo.get_wiki_entries(stock, limit=10), [])
+
+    async def test_transport_failure_does_not_count_toward_summary_cap(self):
+        stock = "005930"
+        report = {
+            "pdf_url": "https://stock.pstatic.net/stock-research/limit.pdf",
+            "date": "2026-04-01", "firm": "미래에셋", "title": "Q1 리뷰",
+        }
+        # e.g. the OpenRouter key limit (HTTP 403): nothing was billed, so the
+        # report must stay eligible once the outage is over.
+        summarize = AsyncMock(side_effect=RuntimeError("OpenRouter HTTP 403: Key limit exceeded"))
+        with patch.object(wiki_ingestion, "download_pdf", AsyncMock(return_value=SAMPLE_PDF_BYTES)), \
+             patch.object(wiki_ingestion, "parse_pdf_bytes", return_value="본문 추출 성공"), \
+             patch.object(wiki_ingestion, "summarize_report", summarize):
+            for _ in range(wiki_ingestion.SUMMARY_MAX_FAILED_ATTEMPTS + 2):
+                result = await wiki_ingestion.ingest_pdf_for_report(stock, report)
+
+        self.assertEqual(summarize.await_count, wiki_ingestion.SUMMARY_MAX_FAILED_ATTEMPTS + 2)
+        self.assertEqual(result.get("failed"), "summarize")
+
     async def test_ingest_offloads_pdf_parse_to_worker_thread(self):
         stock = "005930"
         report = {

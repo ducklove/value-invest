@@ -111,7 +111,7 @@ class DartReportReviewBrokenDetectionTests(unittest.TestCase):
         self.assertIsNone(dart_report_review._finish_reason_from_response(None))
 
 
-class DartReportReviewTruncationTests(unittest.IsolatedAsyncioTestCase):
+class DartReportReviewTruncationTests(TempDbMixin):
     BROKEN = (
         {"summary_md": '{"summary_md": "본문", "cards": [{"label":"매출"', "cards": []},
         {"model": "m", "tokens_in": 1, "tokens_out": 2, "cost_usd": 0.0, "finish_reason": "length"},
@@ -190,6 +190,50 @@ class DartReportReviewTruncationTests(unittest.IsolatedAsyncioTestCase):
         save.assert_awaited_once()
         self.assertEqual(saved["review_md"], "# 정상 리뷰")
 
+    async def test_persistent_truncation_is_remembered_per_filing(self):
+        call = AsyncMock(side_effect=[self.BROKEN, self.BROKEN])
+        save = AsyncMock(side_effect=lambda review: review)
+
+        with self.assertRaises(dart_report_review.DartReviewOutputError):
+            await self._run_generate(call, save)
+
+        failure = await dart_report_review._output_failure("005930", "r1")
+        self.assertEqual(failure["attempts"], 1)
+        self.assertEqual(failure["finish_reason"], "length")
+
+    async def test_successful_review_clears_remembered_failure(self):
+        save = AsyncMock(side_effect=lambda review: review)
+        with self.assertRaises(dart_report_review.DartReviewOutputError):
+            await self._run_generate(AsyncMock(side_effect=[self.BROKEN, self.BROKEN]), save)
+
+        await self._run_generate(AsyncMock(side_effect=[self.GOOD]), save)
+
+        self.assertIsNone(await dart_report_review._output_failure("005930", "r1"))
+
+    async def test_request_caps_reasoning_and_leaves_room_for_it(self):
+        post = AsyncMock(return_value={
+            "content": '{"summary_md": "# 리뷰"}',
+            "model": "google/gemini-4-hydrogen",
+            "input_tokens": 10,
+            "output_tokens": 20,
+            "cost_usd": 0.001,
+            "data": {"choices": [{"finish_reason": "stop"}]},
+        })
+        with (
+            patch.object(dart_report_review.ai_config, "get_model_for_feature", AsyncMock(return_value="google/gemini-4-hydrogen")),
+            patch.object(dart_report_review.ai_client, "post_chat_completion", post),
+        ):
+            review, usage = await dart_report_review._call_openrouter("프롬프트", google_sub=None)
+
+        payload = post.await_args.kwargs["payload"]
+        self.assertEqual(payload["reasoning"], {"effort": "low", "exclude": True})
+        # Reasoning tokens count against max_tokens: the cap must sit well above
+        # the ~3.5k-token JSON answer, or a reasoning model is cut off every time.
+        self.assertGreaterEqual(payload["max_tokens"], 8000)
+        self.assertNotIn("retry_without_reasoning", post.await_args.kwargs)
+        self.assertEqual(review["summary_md"], "# 리뷰")
+        self.assertEqual(usage["finish_reason"], "stop")
+
     async def test_latest_status_treats_broken_cache_as_missing(self):
         broken_cached = {
             "review": {"summary_md": '{"summary_md": "본문", "cards": ['},
@@ -248,7 +292,7 @@ class DartReportReviewCacheTests(TempDbMixin):
         self.assertEqual(loaded["model"], "deepseek/deepseek-v4-flash")
 
 
-class DartReportReviewPipelineTests(unittest.IsolatedAsyncioTestCase):
+class DartReportReviewPipelineTests(TempDbMixin):
     async def test_run_pipeline_skips_ready_and_generates_missing(self):
         async def fake_status(stock_code):
             if stock_code == "005930":
@@ -299,6 +343,83 @@ class DartReportReviewPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats["generated"], 2)
         self.assertEqual(stats["skipped"], 1)
         self.assertEqual(stats["skipped_by_reason"], {"target_limit_reached": 1})
+
+
+class DartReportReviewFailureBackoffTests(TempDbMixin):
+    """A filing whose review output failed must not be re-billed on every run."""
+
+    def _patches(self, generate):
+        async def fake_status(stock_code):
+            return {"status": "missing", "latest_report": {"rcept_no": "r1"}}
+
+        return (
+            patch.object(corp_codes, "get_corp_code", AsyncMock(return_value="00126380")),
+            patch.object(dart_report_review, "latest_review_status", side_effect=fake_status),
+            patch.object(dart_report_review, "generate_review", generate),
+        )
+
+    async def _run(self, generate, **kwargs):
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            for p in self._patches(generate):
+                stack.enter_context(p)
+            return await dart_report_review.run_pipeline(stock_codes=["005930"], **kwargs)
+
+    async def test_pipeline_skips_filing_during_cooldown(self):
+        await dart_report_review._record_output_failure("005930", "r1", {"finish_reason": "length"})
+        generate = AsyncMock()
+
+        stats = await self._run(generate)
+
+        generate.assert_not_awaited()
+        self.assertEqual(stats["skipped_by_reason"], {"output_failed_cooldown": 1})
+        self.assertEqual(stats["failed"], 0)
+
+    async def test_pipeline_retries_once_cooldown_has_passed(self):
+        await dart_report_review._record_output_failure("005930", "r1", {"finish_reason": "length"})
+        generate = AsyncMock(return_value={"stock_code": "005930", "rcept_no": "r1", "model": "m"})
+
+        with patch.object(dart_report_review, "DART_REVIEW_FAILURE_COOLDOWN_S", 0.0):
+            stats = await self._run(generate)
+
+        generate.assert_awaited_once()
+        self.assertEqual(stats["generated"], 1)
+
+    async def test_pipeline_gives_up_after_max_failed_attempts(self):
+        for _ in range(dart_report_review.DART_REVIEW_MAX_FAILED_ATTEMPTS):
+            await dart_report_review._record_output_failure("005930", "r1", {"finish_reason": "length"})
+        generate = AsyncMock()
+
+        with patch.object(dart_report_review, "DART_REVIEW_FAILURE_COOLDOWN_S", 0.0):
+            stats = await self._run(generate)
+
+        generate.assert_not_awaited()
+        self.assertEqual(stats["skipped_by_reason"], {"output_failed_max_attempts": 1})
+
+    async def test_forced_run_ignores_remembered_failure(self):
+        await dart_report_review._record_output_failure("005930", "r1", {"finish_reason": "length"})
+        generate = AsyncMock(return_value={"stock_code": "005930", "rcept_no": "r1", "model": "m"})
+
+        stats = await self._run(generate, force=True)
+
+        generate.assert_awaited_once()
+        self.assertEqual(stats["generated"], 1)
+
+    async def test_truncated_output_is_reported_with_its_own_reason(self):
+        generate = AsyncMock(side_effect=dart_report_review.DartReviewOutputError("AI 응답이 잘려"))
+
+        stats = await self._run(generate)
+
+        self.assertEqual(stats["failed_by_reason"], {"output_truncated": 1})
+
+    async def test_other_filing_of_same_stock_is_not_blocked(self):
+        await dart_report_review._record_output_failure("005930", "older-rcept", {"finish_reason": "length"})
+        generate = AsyncMock(return_value={"stock_code": "005930", "rcept_no": "r1", "model": "m"})
+
+        stats = await self._run(generate)
+
+        generate.assert_awaited_once()
+        self.assertEqual(stats["generated"], 1)
 
 
 class DartReportReviewRouteTests(unittest.IsolatedAsyncioTestCase):

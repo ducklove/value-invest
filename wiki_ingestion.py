@@ -62,6 +62,18 @@ def _default_per_stock_limit() -> int:
 
 
 DEFAULT_PER_STOCK_LIMIT = _default_per_stock_limit()
+# Output cap for one summary (a finished summary is ~700-1200 tokens). Hidden
+# reasoning is switched off for this call — with it on, a reasoning model spent
+# the whole cap thinking and returned no text, and since nothing was saved the
+# same report was paid for again on every run.
+SUMMARY_MAX_TOKENS = int(os.environ.get("WIKI_SUMMARY_MAX_TOKENS", "2000"))
+# A report whose summary came back empty this many times is left alone.
+SUMMARY_MAX_FAILED_ATTEMPTS = int(os.environ.get("WIKI_SUMMARY_MAX_FAILED_ATTEMPTS", "3"))
+CACHE_NS_SUMMARY_FAILURE = "wiki_ingestion.summary_failure"
+
+
+class EmptySummaryError(RuntimeError):
+    """The model was called (and billed) but returned no summary text."""
 # Parallelism for LLM calls — OpenRouter defaults can handle a few at once
 # and each call is a few seconds. Keep modest so a pipeline run doesn't
 # starve user-facing AI analysis.
@@ -193,8 +205,9 @@ async def summarize_report(meta: dict, text: str, model: str | None = None) -> d
             {"role": "system", "content": SUMMARY_SYSTEM},
             {"role": "user", "content": prompt},
         ],
-        "max_tokens": 1200,
+        "max_tokens": SUMMARY_MAX_TOKENS,
         "stream": False,
+        **ai_config.openrouter_reasoning_controls(model),
     }
     try:
         result = await ai_client.post_chat_completion(
@@ -213,7 +226,10 @@ async def summarize_report(meta: dict, text: str, model: str | None = None) -> d
 
     content = result["content"]
     if not content:
-        raise RuntimeError(f"OpenRouter response malformed: {result['data']}")
+        raise EmptySummaryError(
+            f"OpenRouter returned no summary text (finish_reason={result.get('finish_reason')}, "
+            f"tokens_out={result.get('output_tokens')})"
+        )
     summary_md, key_points_md = _split_summary_sections(content)
     return {
         "summary_md": summary_md,
@@ -336,8 +352,24 @@ async def ingest_pdf_for_report(
         return {"failed": "parse", "pdf_sha1": pdf_sha1, "error": parse_error}
 
     # Step 4: summarize
+    failure_key = f"{stock_code}:{pdf_sha1}"
+    failure_entry = await cache_values.get_cache_value_entry(
+        CACHE_NS_SUMMARY_FAILURE, failure_key, allow_stale=True
+    )
+    failed_attempts = int((failure_entry.value or {}).get("attempts") or 0) if failure_entry else 0
+    if failed_attempts >= SUMMARY_MAX_FAILED_ATTEMPTS:
+        return {"skipped": "summary_failed_max_attempts", "pdf_sha1": pdf_sha1}
     try:
         summary = await summarize_report(report_meta, text, model=model)
+    except EmptySummaryError as exc:
+        # Paid for but unusable: count it so the report is not retried forever.
+        await cache_values.set_cache_value(
+            CACHE_NS_SUMMARY_FAILURE,
+            failure_key,
+            {"attempts": failed_attempts + 1, "last_failed_at": now, "error": str(exc)[:300]},
+        )
+        logger.warning("summarize returned no text %s: %s", pdf_sha1, exc)
+        return {"failed": "summarize", "pdf_sha1": pdf_sha1, "error": str(exc)[:300]}
     except Exception as exc:
         logger.warning("summarize failed %s: %s", pdf_sha1, exc)
         return {"failed": "summarize", "pdf_sha1": pdf_sha1, "error": str(exc)[:300]}
