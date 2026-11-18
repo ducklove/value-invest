@@ -44,7 +44,7 @@ def _quote(row: dict) -> dict:
     change = _number(change_raw) if change_raw not in (None, "", "-") else None
     ratio = _number(ratio_raw) if ratio_raw not in (None, "", "-") else None
     movement = change if change is not None else ratio
-    return {
+    quote = {
         "value": f"{value:,.2f}",
         "change": f"{abs(change):,.2f}" if change is not None else "",
         "change_pct": f"{abs(ratio):.2f}%" if ratio is not None else "",
@@ -55,6 +55,9 @@ def _quote(row: dict) -> dict:
         "source": "naver_json",
         "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
+    if price_data_type := row.get("priceDataType"):
+        quote["price_data_type"] = price_data_type
+    return quote
 
 
 async def fetch_indicators(client: httpx.AsyncClient, codes: list[str], *, fx_max_age: float = FX_MAX_AGE_SECONDS) -> dict[str, dict]:

@@ -30,9 +30,11 @@ async def test_json_sources_batch_domestic_and_preserve_dates_units_and_delays()
         symbol = path.split("/")[-2] if path.endswith("/basic") else path.split("/")[-1]
         row = {**row, "reutersCode": symbol, "delayTime": 15}
         if symbol == "FX_JPYKRW":
-            row.update(closePrice="871.78", fluctuations="-3.31")
+            row.update(closePrice="871.78", fluctuations="-3.31", priceDataType="NOTICE_ROUND")
             del row["compareToPreviousClosePrice"]
             return httpx.Response(200, json={"exchangeInfo": row})
+        if symbol == ".DXY":
+            row["priceDataType"] = "DELAYED_PRICE"
         return httpx.Response(200, json=row)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
@@ -45,7 +47,10 @@ async def test_json_sources_batch_domestic_and_preserve_dates_units_and_delays()
     assert result["KOSPI"]["as_of"] == "2026-09-11T10:11:14+09:00"
     assert result["JPY_KRW"]["value"] == "871.78"  # 기존 시장바의 100엔 기준 유지
     assert result["JPY_KRW"]["change"] == "3.31"
+    assert result["JPY_KRW"]["price_data_type"] == "NOTICE_ROUND"
+    assert result["JPY_KRW"]["market_status"] == "OPEN"
     assert result["USD_IDX"]["delay_minutes"] == 15
+    assert result["USD_IDX"]["price_data_type"] == "DELAYED_PRICE"
     assert result["SPX"]["source"] == "naver_json"
     assert result["SPX"]["fetched_at"]
 

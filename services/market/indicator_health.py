@@ -3,11 +3,13 @@
 import asyncio
 import logging
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 
 import httpx
 
 import observability
+from domain.market_calendar import is_trading_day
+from domain.timeutil import KST
 from repositories import cache_values, users
 from services.market import naver_indicators
 from services.notifications import channels
@@ -17,6 +19,8 @@ NAMESPACE = "market_indicator_health"
 KEY = "status"
 CODES = sorted(naver_indicators.CODES | {"CMDT_GC", "OIL_CL"})
 ALERT_AFTER_SECONDS = 600
+FX_NOTICE_SESSION_START = time(9)
+FX_NOTICE_CHECK_FROM = time(11)
 
 
 def _time(value):
@@ -27,11 +31,31 @@ def _time(value):
         return None
 
 
+def _notice_round_problem(row: dict, now: datetime) -> str | None:
+    stamp = _time(row.get("as_of"))
+    if stamp is None or stamp > now:
+        return "고시환율 기준 시각 오류"
+
+    # 네이버 NOTICE_ROUND의 OPEN은 거래소 세션 표시가 아니다. 첫 주간 고시에는
+    # 2시간의 여유를 두고, 주말·휴장일에는 마지막 영업일의 고시를 허용한다.
+    local_now = now.astimezone(KST)
+    expected_day = local_now.date()
+    if local_now.time() < FX_NOTICE_CHECK_FROM:
+        expected_day -= timedelta(days=1)
+    while expected_day.weekday() >= 5 or is_trading_day(expected_day) is False:
+        expected_day -= timedelta(days=1)
+    if stamp < datetime.combine(expected_day, FX_NOTICE_SESSION_START, KST):
+        return "영업일 고시환율 미갱신"
+    return None
+
+
 def problem(row: dict, now: datetime) -> str | None:
     if not row.get("value") or row.get("_stale"):
         return "수집 실패 · 이전 값" if row.get("value") else "시세 누락"
     if row.get("_degraded"):
         return "주 공급원 실패 · 대체 시세 사용"
+    if row.get("price_data_type") == "NOTICE_ROUND":
+        return _notice_round_problem(row, now)
     # 거래 중이라고 명시한 시세만 검사한다. 휴장·장 마감 시세를 오류로 세지 않는다.
     if row.get("market_status") == "OPEN":
         stamp = _time(row.get("as_of"))
@@ -52,13 +76,13 @@ async def _notify(text: str, key: str) -> int:
 async def check_once(*, now: datetime | None = None) -> dict:
     from services.market import indicators as market_indicators
 
-    now = now or datetime.now(timezone.utc)
     previous_entry = await cache_values.get_cache_value_entry(NAMESPACE, KEY, allow_stale=True)
     previous = previous_entry.value if previous_entry else {}
     try:
         quotes = await asyncio.wait_for(market_indicators.fetch_indicators(CODES), timeout=50)
     except (httpx.HTTPError, TimeoutError):
         quotes = {}
+    now = now or datetime.now(timezone.utc)
     issues = {}
     for code in CODES:
         row = quotes.get(code) or {}
