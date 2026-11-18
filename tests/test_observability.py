@@ -244,34 +244,26 @@ class BatchStatusDataFreshnessTests(TempDbMixin):
         self.assertIsNone(await admin_route._latest_data_date_for("portfolio-snapshot"))
 
     def test_staleness_flags_missing_when_no_data(self):
-        result = admin_route._compute_staleness("portfolio-snapshot", None)
+        with self._morning_kst():
+            result = admin_route._compute_staleness("portfolio-snapshot", None)
         self.assertEqual(result["level"], "missing")
         self.assertIn("데이터 없음", result["note"])
 
     @staticmethod
     def _morning_kst():
-        """portfolio-snapshot 의 기대일은 정산 시각(장 마감 후)에 오늘로 넘어간다.
-        아래 두 테스트는 '직전 평일' 규칙을 검증하므로 오늘 오전으로 고정한다
-        (예전에는 오후에 돌리면 실패했다)."""
+        """휴장일이나 장 마감 여부가 기대일을 바꾸지 않도록 정규 거래일 오전으로 고정한다."""
         from domain.timeutil import KST
 
         return patch(
             "services.portfolio.time_windows.now_kst",
-            return_value=datetime.combine(date.today(), datetime.min.time(), KST).replace(hour=9),
+            return_value=datetime(2026, 4, 22, 9, tzinfo=KST),
         )
 
     def test_staleness_ok_when_latest_matches_expected(self):
-        # expected_latest is always the most recent weekday <= today-1
-        # (or today if it's a weekend). Pass that same date as latest
-        # and we should land on level=ok.
-        today = date.today()
-        probe = today - timedelta(days=1) if today.weekday() < 5 else today
-        while probe.weekday() >= 5:
-            probe -= timedelta(days=1)
-        latest = probe.isoformat()
         with self._morning_kst():
-            result = admin_route._compute_staleness("portfolio-snapshot", latest)
+            result = admin_route._compute_staleness("portfolio-snapshot", "2026-04-21")
         self.assertEqual(result["level"], "ok")
+        self.assertEqual(result["expected_latest"], "2026-04-21")
         self.assertEqual(result["trading_days_behind"], 0)
 
     def test_staleness_counts_trading_days_only(self):

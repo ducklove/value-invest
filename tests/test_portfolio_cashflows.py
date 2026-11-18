@@ -1,7 +1,9 @@
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
 from _harness import TempDbMixin, seed_user
 
+from domain.timeutil import KST
 from repositories import db as db_repo
 from repositories import portfolio as portfolio_repo
 from repositories import snapshots as snapshots_repo
@@ -48,17 +50,15 @@ class PortfolioCashflowTransactionTests(TempDbMixin):
         self.assertIsNone(await portfolio_repo.get_portfolio_item("u1", "CASH_KRW"))
 
     async def test_delete_cashflow_and_sync_cash_reverses_cash_position_atomically(self):
-        result = await snapshots_repo.add_cashflow_and_sync_cash(
-            "u1",
-            "2026-05-28",
-            "deposit",
-            1500,
-            None,
-            1000,
-            1.5,
-        )
+        async with db_repo.transaction() as db:
+            await db.execute("UPDATE settlement_history_start SET started_at='2026-05-27T00:00:00.000'")
+        with patch.object(snapshots_repo, "datetime") as clock:
+            clock.now.return_value = datetime(2026, 5, 28, 10, tzinfo=KST)
+            result = await snapshots_repo.add_cashflow_and_sync_cash(
+                "u1", "2026-05-28", "deposit", 1500, None, 1000, 1.5,
+            )
+            deleted = await snapshots_repo.delete_cashflow_and_sync_cash("u1", result["id"])
 
-        deleted = await snapshots_repo.delete_cashflow_and_sync_cash("u1", result["id"])
         cash_item = await portfolio_repo.get_portfolio_item("u1", "CASH_KRW")
 
         self.assertTrue(deleted)
