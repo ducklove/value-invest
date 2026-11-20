@@ -87,9 +87,9 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                 from services.brokers.futures_underlyings import underlying_codes
                 futures_mapping = await underlying_codes()
             trades = None
-            review_trades = (include_activity and link.get("provider", "namuh") == "namuh" and link["environment"] == "live"
-                    and link.get("product", "stocks") == "stocks"
-                    and all(key in balances.get("KRW", {}) for key in ("nxt_dd_dca", "nxt2_dd_dca")))
+            review_namuh_stocks = (include_activity and link.get("provider", "namuh") == "namuh"
+                                   and link["environment"] == "live" and link.get("product", "stocks") == "stocks")
+            review_trades = review_namuh_stocks and all(key in balances.get("KRW", {}) for key in ("nxt_dd_dca", "nxt2_dd_dca"))
             if review_trades:
                 try:
                     # 거래내역의 5분 제한과 무관하게 체결 직후 조회한다. D+2 잔고는 이미 매매를 포함한다.
@@ -125,9 +125,12 @@ async def sync_account(user: str, aid: str, *, include_activity: bool = False, s
                     if not row["stock_code"].startswith("CASH_") and not is_futures_value(row["stock_code"]) and any(r["stock_code"] == row["stock_code"] and r["quantity"] * row["quantity"] < 0 for r in other):
                         raise BrokerError("다른 계좌의 공매도 잔고와 충돌하여 동기화를 보류했습니다.")
                 now = datetime.now(timezone.utc).isoformat()
-                settlement_delta = cash_trades.settlement_delta(json.loads(current["balances_json"]), balances) if review_trades else None
+                previous_balances = json.loads(current["balances_json"]) if review_namuh_stocks else {}
+                settlement_delta = cash_trades.settlement_delta(previous_balances, balances) if review_trades else None
+                foreign_settling = cash_trades.pending_foreign_settlements(previous_balances, balances) if review_namuh_stocks else set()
                 await broker_cash_reviews.observe(db, user, current, rows, previous, fx_rates=review_fx,
-                                                  trades=trades, settling=review_trades, settlement_delta=settlement_delta)
+                                                  trades=trades, settling=review_trades, settlement_delta=settlement_delta,
+                                                  foreign_settling=foreign_settling)
                 if isinstance(entries, activity.ActivityBatch):
                     await broker_cash_reviews.reconcile_related(db, user)
                 created = {r["stock_code"]: r["created_at"] for r in previous}

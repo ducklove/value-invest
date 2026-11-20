@@ -138,3 +138,19 @@ def test_transfer_requires_explicit_label_verified_balance_and_hashed_parties():
     assert activity.cash_source_summary({**row, "trd_af_dca": 10}, LINK, {"trd_af_dca": 100000}) is None
     assert activity.cash_source_summary({**row, "cli_pe_fnm": ""}, LINK, {"trd_af_dca": 100000}) is None
     assert activity.cash_source_summary({**row, "sps_cd_krl_anm": "대체출금취소"}, LINK, {"trd_af_dca": 100000}) is None
+
+
+async def test_overseas_trade_uses_verified_net_and_deduplicates_pages():
+    row = {"trd_dt": "20261102", "ral_trd_dt": "20261030", "trd_sno": "00015",
+           "cur_cd_nm": "USD", "act_trd_tp_nm": "매수", "sps_cd_nm": "외화증권매수",
+           "fc_trd_amt": 1001.25, "fc_amt": 1000, "trd_bf_fc_dca": 1500, "trd_af_fc_dca": 498.75,
+           "trd_qty": 2, "trd_bf_bnc_qty": 10, "trd_af_bnc_qty": 12}
+    pages = [{"Output_0": [row]}, {"Output_0": [row, {**row, "trd_sno": "00016", "trd_af_fc_dca": 500}]}]
+    with patch.object(activity.namuh, "pages", AsyncMock(side_effect=[[{"Output_0": []}], pages])) as query:
+        day = date(2026, 11, 2)
+        batch = await activity.fetch("user", {**LINK, "product": "stocks"}, day, day)
+    assert query.await_args.args[3]["act_trd_cfc_cd"] == "00"
+    assert batch == []
+    assert batch.cash_summaries == [{"booked_date": "2026-11-02", "date": "2026-10-30", "currency": "USD",
+                                     "kind": "foreign_trade", "amount": -1001.25,
+                                     "parts": [{"serial": 15, "amount": -1001.25, "before": 1500, "after": 498.75}]}]

@@ -33,8 +33,8 @@ class CashReviewTests(TempDbMixin):
         calendar.start()
         self.addCleanup(calendar.stop)
 
-    async def sync(self, *rows, entries=None):
-        with patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(list(rows), {}))), \
+    async def sync(self, *rows, entries=None, balances=None):
+        with patch.object(sync, "fetch_snapshot", AsyncMock(return_value=(list(rows), balances or {}))), \
              patch.object(activity, "fetch", AsyncMock(return_value=entries if entries is not None else [])), \
              patch.object(sync, "ACTIVITY_MIN_INTERVAL", 0):
             return await sync.sync_account("u1", self.aid, include_activity=entries is not None)
@@ -168,6 +168,27 @@ class CashReviewTests(TempDbMixin):
         await self.trade_sync(9999500, buy=10000000, charges=500)
         row = (await broker_cash_reviews.history("u1", pending=False))["items"][0]
         self.assertEqual((row["auto_resolution"], row["unexplained"]), ("confirmed", 0))
+
+    async def test_overseas_trades_wait_for_nh_ledger_then_match_exact_cash_intervals(self):
+        day = date.fromisoformat(stamp()[:10])
+        empty = activity.ActivityBatch([], [], day, day)
+        await self.sync(cash(5000, "USD"), entries=empty, balances={"USD": {"fc_dca": 5000, "stl_af_fc_dca": 5000}})
+        await self.sync(cash(2000, "USD"), entries=empty, balances={"USD": {"fc_dca": 5000, "stl_af_fc_dca": 2000}})
+        waiting = (await broker_cash_reviews.history("u1", pending=False))["items"][0]
+        self.assertEqual(waiting["auto_resolution"], "checking")
+        await self.sync(cash(5000, "USD"), entries=empty, balances={"USD": {"fc_dca": 8000, "stl_af_fc_dca": 5000}})
+        self.assertEqual([r["amount"] for r in await self.pending()], [3000])
+        parts = [{"serial": 1, "before": 5000, "after": 3999, "amount": -1001},
+                 {"serial": 2, "before": 3999, "after": 2000, "amount": -1999},
+                 {"serial": 3, "before": 10000, "after": 13000, "amount": 3000}]
+        evidence = activity.ActivityBatch([], [{"kind": "foreign_trade", "currency": "USD", "amount": 0,
+                                                 "date": day.isoformat(), "booked_date": day.isoformat(), "parts": parts}], day, day)
+        for _ in range(2):
+            await self.sync(cash(5000, "USD"), entries=evidence, balances={"USD": {"fc_dca": 8000, "stl_af_fc_dca": 5000}})
+            rows = (await broker_cash_reviews.history("u1", pending=False))["items"]
+            self.assertEqual([(r["unexplained"], r["auto_resolution"]) for r in rows], [(3000, None), (0, "confirmed")])
+        self.assertEqual((await account_holdings.list_positions("u1", self.aid))[0]["quantity"], 5000)
+        self.assertEqual(await snapshots.get_cashflows("u1"), [])
 
     async def test_legacy_interleaved_trades_and_separate_mmw_are_repaired_and_stay_confirmed(self):
         balance = 20000000

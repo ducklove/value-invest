@@ -155,9 +155,9 @@ async def test_legacy_segment_preserved_without_fake_transition_return(temp_db):
 def test_holiday_and_explicit_close_override(monkeypatch):
     assert regular_close.closing_at("2026-10-05") is None
     with pytest.raises(ValueError, match="수능일"):
-        regular_close.closing_at("2026-11-19")
-    monkeypatch.setenv("PORTFOLIO_MARKET_SESSIONS", '{"2026-11-19":"16:30"}')
-    assert regular_close.closing_at("2026-11-19").hour == 16
+        regular_close.closing_at("2027-11-18")
+    monkeypatch.setenv("PORTFOLIO_MARKET_SESSIONS", '{"2027-11-18":"16:30"}')
+    assert regular_close.closing_at("2027-11-18").hour == 16
 
 
 @pytest.mark.asyncio

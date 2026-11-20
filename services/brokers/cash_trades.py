@@ -13,6 +13,14 @@ from services.brokers.symbols import summary
 PATH = "/krstock/inquiry/v1/realizedPnl"
 
 
+def pending_foreign_settlements(previous: dict, current: dict) -> set[str]:
+    """실제 외화예수금은 그대로이고 결제 후 예수금만 달라진 통화."""
+    return {currency for currency, after in current.items()
+            if isinstance(after, dict) and "fc_dca" in after and "stl_af_fc_dca" in after
+            and (before := previous.get(currency, {})).get("fc_dca") == after["fc_dca"]
+            and "stl_af_fc_dca" in before and before["stl_af_fc_dca"] != after["stl_af_fc_dca"]}
+
+
 def settlement_delta(previous: dict, current: dict) -> Decimal | None:
     """잔고 응답 두 개의 D+2−D+1 차이 변화. 장중 매매 합계가 늦어도 보존한다."""
     def spread(balances):

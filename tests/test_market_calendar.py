@@ -16,6 +16,7 @@ from services import data_quality
 from services.portfolio.time_windows import KST
 
 CSAT_2026 = "2026-11-19"
+UNCONFIRMED_CSAT = "2027-11-18"
 _NO_OVERRIDES = {k: v for k, v in os.environ.items() if k != market_calendar.SESSIONS_ENV}
 
 
@@ -48,15 +49,15 @@ class HolidayTableCoverageTests(unittest.TestCase):
 
 
 class CsatSessionTests(unittest.TestCase):
-    def test_csat_2026_raises_without_override_and_is_value_error(self):
+    def test_unconfirmed_csat_raises_without_override_and_is_value_error(self):
         with patch.dict(os.environ, _env(), clear=True):
             with self.assertRaises(MarketCalendarUnknown) as ctx:
-                closing_at(CSAT_2026)
+                closing_at(UNCONFIRMED_CSAT)
         self.assertIsInstance(ctx.exception, ValueError)  # 기존 except ValueError 경로 유지
         self.assertIn("수능일", str(ctx.exception))
 
     def test_override_sets_close_or_holiday(self):
-        with patch.dict(os.environ, _env({CSAT_2026: "16:30"}), clear=True):
+        with patch.dict(os.environ, _env(), clear=True):
             close = closing_at(CSAT_2026)
         self.assertEqual((close.hour, close.minute), (16, 30))
         self.assertEqual(close.tzinfo, KST)
@@ -77,8 +78,8 @@ class CsatSessionTests(unittest.TestCase):
         self.assertFalse(market_calendar.is_csat_candidate(date(2026, 11, 20)))
 
     def test_unconfigured_special_sessions_window(self):
-        self.assertEqual(market_calendar.unconfigured_special_sessions(date(2026, 10, 20), 30, {}), [date(2026, 11, 19)])
-        self.assertEqual(market_calendar.unconfigured_special_sessions(date(2026, 11, 19), 30, {}), [date(2026, 11, 19)])
+        self.assertEqual(market_calendar.unconfigured_special_sessions(date(2026, 10, 20), 30, {}), [])
+        self.assertEqual(market_calendar.unconfigured_special_sessions(date(2026, 11, 19), 30, {}), [])
         self.assertEqual(market_calendar.unconfigured_special_sessions(date(2026, 9, 30), 30, {}), [])
         self.assertEqual(market_calendar.unconfigured_special_sessions(date(2026, 11, 20), 30, {}), [])
         self.assertEqual(
@@ -94,12 +95,12 @@ class CalendarCoverageCheckTests(unittest.IsolatedAsyncioTestCase):
             return await data_quality.check_market_calendar_coverage(now=now)
 
     async def test_warns_30_days_before_unconfigured_csat(self):
-        result = await self._check(datetime(2026, 10, 20, 20, 30))
+        result = await self._check(datetime(2027, 10, 19, 20, 30))
         self.assertEqual(result["check"], "market_calendar_coverage")
         self.assertEqual(result["status"], "warn")
-        self.assertIn(CSAT_2026, result["detail"])
+        self.assertIn(UNCONFIRMED_CSAT, result["detail"])
         self.assertIn("PORTFOLIO_MARKET_SESSIONS", result["detail"])
-        self.assertEqual(result["value"], [CSAT_2026])
+        self.assertEqual(result["value"], [UNCONFIRMED_CSAT])
 
     async def test_ok_when_override_set_or_out_of_window(self):
         self.assertEqual((await self._check(datetime(2026, 10, 20, 20, 30), {CSAT_2026: "16:30"}))["status"], "ok")
@@ -123,8 +124,8 @@ def _post(path: str):
                     "client": ("127.0.0.1", 1), "server": ("127.0.0.1", 3691), "scheme": "https"})
 
 
-CSAT_EVENING = datetime(2026, 11, 19, 20, 10, tzinfo=KST)
-CSAT_BRIEFING = datetime(2026, 11, 19, 15, 50, tzinfo=KST)
+CSAT_EVENING = datetime(2027, 11, 18, 20, 10, tzinfo=KST)
+CSAT_BRIEFING = datetime(2027, 11, 18, 15, 50, tzinfo=KST)
 
 
 class CsatDayScheduledJobsTests(TempDbMixin):
@@ -168,12 +169,13 @@ class CsatDayScheduledJobsTests(TempDbMixin):
                                               "daily briefing send")
 
     async def test_data_quality_timer_reports_error_results_not_exception(self):
-        with patch("services.market.indicator_health.summary",
+        with patch.dict(market_calendar.HOLIDAYS, {2028: frozenset()}), \
+             patch("services.market.indicator_health.summary",
                    new=AsyncMock(return_value={"check": "market_indicators", "status": "ok", "detail": "", "value": 0})):
             out = await data_quality.run_all_checks(now=CSAT_EVENING.replace(tzinfo=None), record=False)
         by_check = {r["check"]: r for r in out["results"]}
         self.assertEqual(by_check["market_calendar_coverage"]["status"], "warn")
-        self.assertIn(CSAT_2026, by_check["market_calendar_coverage"]["detail"])
+        self.assertIn(UNCONFIRMED_CSAT, by_check["market_calendar_coverage"]["detail"])
         self.assertEqual(by_check["nav_snapshot_freshness"]["status"], "error")
         self.assertIn("수능일", by_check["nav_snapshot_freshness"]["detail"])
 

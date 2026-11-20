@@ -11,6 +11,7 @@ from domain.broker_activity import stamp as stamp
 from domain.timeutil import KST
 from repositories.broker_secrets import BrokerError
 from services.brokers import namuh
+from services.portfolio.currencies import CURRENCY_TO_FX_CODE
 
 
 def digest(value) -> str:
@@ -464,13 +465,35 @@ async def _domestic_dividends(user: str, link: dict, start: date, end: date, col
         start = until + timedelta(days=1)
 
 
-async def _overseas_dividends(user: str, link: dict, start: date, end: date, collected: dict):
+def _overseas_trade(row: dict) -> tuple[tuple, dict] | None:
+    """외화 결제 순액은 거래 전후 예수금과 수량의 방향까지 맞을 때만 보존한다."""
+    side = {("매수", "외화증권매수"): -1, ("매도", "외화증권매도"): 1}.get(
+        (_compact(row.get("act_trd_tp_nm")), _compact(row.get("sps_cd_nm"))))
+    if side is None:
+        return None
+    booked, actual = _ymd(row, "trd_dt"), _ymd(row, "ral_trd_dt")
+    serial = str(row.get("trd_sno") or "").strip()
+    currency = str(row.get("cur_cd_nm") or "").strip().upper()
+    if not booked or not actual or actual > booked or not re.fullmatch(r"[0-9]{1,5}", serial) or currency not in CURRENCY_TO_FX_CODE:
+        return None
+    net, before, after, qty, old_qty, new_qty = (_lenient(row, key) for key in
+        ("fc_trd_amt", "trd_bf_fc_dca", "trd_af_fc_dca", "trd_qty", "trd_bf_bnc_qty", "trd_af_bnc_qty"))
+    if (None in (net, before, after, qty, old_qty, new_qty) or net <= 0 or qty <= 0
+            or after - before != side * net or new_qty - old_qty != side * -qty):
+        return None
+    return (booked, actual, currency, "foreign_trade"), {
+        "serial": int(serial), "amount": float(side * net), "before": float(before), "after": float(after),
+    }
+
+
+async def _overseas_activity(user: str, link: dict, start: date, end: date, collected: dict) -> list[dict]:
     pages = await namuh.pages(user, link["credential_id"], GB_DAILY, {
         "act_no": link["account_no"], "iqr_sta_dt": start.strftime("%Y%m%d"), "iqr_end_dt": end.strftime("%Y%m%d"),
-        # 01=입금, 00001=외화주식. 해외 ETF 분배금도 외화주식 입금으로 온다(운영 확인).
-        "act_trd_cfc_cd": "01", "iem_mlf_cd": "00001", "iem_cd": "",
+        # 00=전체, 00001=외화주식. 매매는 예수금 대조에만 쓰고 배당만 원장에 기록한다.
+        "act_trd_cfc_cd": "00", "iem_mlf_cd": "00001", "iem_cd": "",
     }, "live")
     codes: dict[tuple, str] = {}
+    trades: dict[tuple, tuple] = {}
     for page in pages:
         _check_message(page)
         rows = page.get("Output_0")
@@ -481,6 +504,15 @@ async def _overseas_dividends(user: str, link: dict, start: date, end: date, col
         for row in rows:
             if not isinstance(row, dict):
                 raise BrokerError("NH 해외 거래내역 형식이 올바르지 않습니다.")
+            trade = _overseas_trade(row)
+            if trade:
+                key, part = trade
+                if not start.isoformat() <= key[0] <= end.isoformat():
+                    raise BrokerError("NH 조회 기간 밖의 해외 매매가 반환되었습니다.")
+                identity = (key[0], part["serial"])
+                if identity in trades and trades[identity] != trade:
+                    raise BrokerError("같은 일련번호의 NH 해외 매매 내용이 다릅니다.")
+                trades[identity] = trade
             if not overseas_dividend(row, link):
                 continue
             currency = str(row.get("cur_cd_nm") or "").strip().upper()
@@ -491,10 +523,16 @@ async def _overseas_dividends(user: str, link: dict, start: date, end: date, col
             if not start.isoformat() <= data["booked_date"] <= end.isoformat():
                 raise BrokerError("NH 조회 기간 밖의 거래가 반환되었습니다.")
             _put(collected, data)
+    groups: dict[tuple, list] = {}
+    for key, part in (trades[identity] for identity in sorted(trades)):
+        groups.setdefault(key, []).append(part)
+    return [dict(zip(("booked_date", "date", "currency", "kind"), key),
+                 amount=float(sum(Decimal(str(part["amount"])) for part in parts)), parts=parts)
+            for key, parts in groups.items()]
 
 
 async def fetch(user: str, link: dict, start: date, end: date) -> list[dict]:
-    """확정 배당과 사유 대조용 일별 수입 합계. 일반 거래 원장은 계속 보류한다."""
+    """확정 배당과 예수금 변동 대조에 쓰는 별도 근거를 조회한다."""
     if link["environment"] != "live":
         raise BrokerError("NH 종합거래내역은 실계좌에서만 제공됩니다.")
     if start > end or end > datetime.now(KST).date() or (end - start).days > 366:
@@ -503,8 +541,8 @@ async def fetch(user: str, link: dict, start: date, end: date) -> list[dict]:
     cash_summaries = {}
     cash_parts = {}
     await _domestic_dividends(user, link, start, end, collected, cash_summaries, cash_parts)
-    if link.get("product", "stocks") == "stocks":
-        await _overseas_dividends(user, link, start, end, collected)
     summaries = [dict(zip(("booked_date", "date", "currency", "kind"), key), amount=float(amount), parts=cash_parts[key])
                  for key, amount in cash_summaries.items() if amount is not None]
+    if link.get("product", "stocks") == "stocks":
+        summaries.extend(await _overseas_activity(user, link, start, end, collected))
     return ActivityBatch(collected.values(), summaries, start, end)

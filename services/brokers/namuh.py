@@ -16,7 +16,7 @@ LIVE = "https://api.nhplug.com:8443"
 MOCK = "https://moapi.nhplug.com:8443"
 # 모의 서버는 아래 시세 API를 IGW40023으로 거절한다. 계좌 조회 환경과 분리한다.
 MARKET_DATA_PATHS = frozenset({"/krstock/quote/v1/currentPrice", "/krfuture/quote/v1/day"})
-# 해외주식 일별거래내역은 배당 입금 가져오기 전용 조회다(거래 일련번호·적용환율 포함).
+# 해외주식 일별거래내역은 배당 가져오기와 결제 예수금 대조에 사용한다.
 READ_PATHS = frozenset({"/n2/acctinfo", "/common/inquiry/v1/totalTransaction", "/gbstock/inquiry/v1/dailyTransaction",
                         "/krstock/inquiry/v1/realizedPnl",
                         # 기간 손익 조회는 실현손익 원장 전용이다(services/brokers/realized_pnl.py).

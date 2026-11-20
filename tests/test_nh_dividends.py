@@ -145,7 +145,7 @@ class NHDividendTests(TempDbMixin):
         first_total = next(body for path, body in fake.calls if path == TOTAL)
         self.assertEqual(first_total["iqr_sta_dt"], ymd(TODAY - timedelta(days=365)))
         daily = next(body for path, body in fake.calls if path == activity.GB_DAILY)
-        self.assertEqual((daily["act_trd_cfc_cd"], daily["iem_mlf_cd"], daily["iqr_sta_dt"]), ("01", "00001", ymd(TODAY - timedelta(days=365))))
+        self.assertEqual((daily["act_trd_cfc_cd"], daily["iem_mlf_cd"], daily["iqr_sta_dt"]), ("00", "00001", ymd(TODAY - timedelta(days=365))))
         self.assertEqual(len(await self.rows()), 4)
         # 같은 60초 동기화는 재조회하지 않는다(잔고만 갱신).
         calls = len(fake.calls)

@@ -48,7 +48,11 @@ async def load(user: str, cutoff: str) -> dict:
     if not start or start["started_at"] > cutoff:
         raise ValueError("해당 마감 시각의 잔고 변경 이력이 없습니다. 현재 잔고로 소급 정산하지 않습니다.")
     rows = await (await db.execute(
-        "SELECT table_name,payload FROM (SELECT *,ROW_NUMBER() OVER(PARTITION BY table_name,row_key ORDER BY recorded_at DESC,id DESC) AS n FROM settlement_versions WHERE google_sub=? AND recorded_at<=?) WHERE n=1 AND payload IS NOT NULL",
+        "SELECT version.table_name,version.payload FROM ("
+        "SELECT id,ROW_NUMBER() OVER(PARTITION BY table_name,row_key ORDER BY recorded_at DESC,id DESC) AS n "
+        "FROM settlement_versions WHERE google_sub=? AND recorded_at<=?"
+        ") latest JOIN settlement_versions version ON version.id=latest.id "
+        "WHERE latest.n=1 AND version.payload IS NOT NULL",
         (user, cutoff),
     )).fetchall()
     result = {table: [] for table in TABLES}

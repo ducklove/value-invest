@@ -2,10 +2,10 @@
 
 특수 세션일(현재는 수능일 후보: 11월 셋째 주 목요일, 15~21일)은 개장·마감
 시각이 KRX 공지로 바뀌므로 추정하지 않는다. ``closing_at`` 은 그런 날에
-``PORTFOLIO_MARKET_SESSIONS`` override 가 없으면 ``MarketCalendarUnknown``
+확정 일정이나 ``PORTFOLIO_MARKET_SESSIONS`` override 가 없으면 ``MarketCalendarUnknown``
 (ValueError 하위 클래스)을 던지고, 정기 작업은 이를 로그된 실패로 처리한다.
-운영자는 KRX 공지를 확인해 .env 에 예) ``PORTFOLIO_MARKET_SESSIONS={"2026-11-19":"16:30"}``
-(값은 정규장 마감 HH:MM, 휴장이면 빈 문자열/null)을 설정한다.
+공지로 확정된 일정은 ``ANNOUNCED_SESSIONS``에 등록한다. 운영 환경의 override는
+추가 일정이나 정정에 사용한다(마감 HH:MM, 휴장이면 빈 문자열/null).
 ``services.data_quality.check_market_calendar_coverage`` 가 30일 전부터
 미설정 특수 세션일을 경고한다.
 """
@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta
 
 from domain.timeutil import KST
 
-CALENDAR_VERSION = "krx-2026-2027-reviewed-20260916"
+CALENDAR_VERSION = "krx-2026-2027-reviewed-20261119"
 # 공휴일·대체공휴일 + 근로자의 날·연말 휴장. 임시 휴장은 확인 후 추가한다.
 # 2026: finance-pi 달력과 대조, 제헌절 포함.
 # 2027: 우주항공청 2026-06-29 월력요항과 KRX 휴장 규칙.
@@ -30,6 +30,8 @@ HOLIDAYS = {
                     "10-09 10-11 12-25 12-27 12-31".split()),
 }
 
+# https://kind.krx.co.kr/external/2026/11/05/000141/20261105000216/99303.htm
+ANNOUNCED_SESSIONS = {"2026-11-19": "16:30"}
 SESSIONS_ENV = "PORTFOLIO_MARKET_SESSIONS"
 
 
@@ -53,7 +55,7 @@ def is_csat_candidate(day: date) -> bool:
 
 def closing_at(day: str) -> datetime | None:
     parsed = date.fromisoformat(day)
-    overrides = session_overrides()
+    overrides = ANNOUNCED_SESSIONS | session_overrides()
     if day in overrides:
         clock = overrides[day]
         return datetime.fromisoformat(f"{day}T{clock}:00").replace(tzinfo=KST) if clock else None
@@ -84,7 +86,7 @@ def unconfigured_special_sessions(start: date, days: int, overrides: dict | None
 
     주말·등록된 휴장일은 closing_at 이 먼저 None 을 돌려주므로 제외한다.
     """
-    overrides = session_overrides() if overrides is None else overrides
+    overrides = ANNOUNCED_SESSIONS | (session_overrides() if overrides is None else overrides)
     found = []
     for offset in range(days + 1):
         day = start + timedelta(days=offset)

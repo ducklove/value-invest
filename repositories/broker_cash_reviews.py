@@ -13,6 +13,7 @@ from repositories.db import read_snapshot, transaction
 
 TRADE_KINDS = {"trade_buy", "trade_sell", "trade_charges"}
 SETTLEMENT_WAIT_SECONDS = 300
+FOREIGN_SETTLEMENT_WAIT_DAYS = 4
 
 # direction: 1=입금, -1=출금, 0=양방향. 사유 선택 자체를 기록하고 기타만 설명을 요구한다.
 CATEGORIES = {
@@ -154,6 +155,10 @@ async def _evidence(db, user: str, aid: str, fp: str) -> dict:
         result[key] = {"date": row["date"], "effects": {row["currency"]: row["amount"]}, "summary": True}
         if parts:
             result[key]["parts"] = parts
+        if row["kind"] == "foreign_trade":
+            # 해외 거래일과 한국 잔고 관측일 사이의 자정 경계를 포함한다.
+            result[key]["from_date"] = (date.fromisoformat(row["date"]) - timedelta(days=1)).isoformat()
+            result[key]["until"] = (date.fromisoformat(row["booked_date"]) + timedelta(days=1)).isoformat()
         if row["kind"] == "mmw_interest":
             previous = previous_mmw.get(row["currency"])
             # MMW는 휴일 평가이자를 다음 상환일에 합산한다. 원문 금액을 날짜별로 추정 배분하지 않는다.
@@ -236,6 +241,49 @@ def _source_allocations(rows, pools: dict, evidence: dict) -> tuple[dict, dict]:
             if not progress:
                 break
     return allocations, proofs
+
+
+def _foreign_trade_proofs(rows, state: dict, evidence: dict, baseline: dict) -> dict:
+    """거래 전후 외화잔고가 관측 구간 양 끝과 일치하는 유일한 매매 묶음만 사용한다."""
+    sources = [(key, source) for key, source in evidence.items() if key.endswith(":foreign_trade")]
+    if not sources:
+        return {}
+    aid = state["account_id"]
+    intervals = _recover_cash_intervals(reversed(rows), {aid: state})
+    by_opening_balance = defaultdict(list)
+    for row in rows:
+        if row["id"] in intervals and row["currency"] != "KRW" and not row["trade_amount"]:
+            before, _ = intervals[row["id"]]
+            by_opening_balance[row["currency"], before].append(row)
+    proposals = defaultdict(list)
+    references = defaultdict(int)
+    for key, source in sources:
+        currency = next(iter(source["effects"]))
+        known = {part["serial"] for part in baseline.get(key, {}).get("parts", [])}
+        parts = [part for part in source.get("parts", []) if part["serial"] not in known]
+        if len(parts) > 200:
+            continue
+        for start, part in enumerate(parts):
+            before = _decimal(part["before"])
+            candidates = [row for row in by_opening_balance[currency, before]
+                          if source["from_date"] <= row["to_at"][:10] and row["from_at"][:10] <= source["until"]]
+            if not candidates:
+                continue
+            previous = before
+            for end in range(start, len(parts)):
+                item = parts[end]
+                if _decimal(item["before"]) != previous:
+                    break
+                previous = _decimal(item["after"])
+                for row in candidates:
+                    if previous == intervals[row["id"]][1] and previous != before:
+                        ids = [(key, piece["serial"]) for piece in parts[start:end + 1]]
+                        proposals[row["id"]].append((key, parts[start:end + 1], ids))
+                        for ref in ids:
+                            references[ref] += 1
+    return {rid: {"key": matches[0][0], "parts": matches[0][1]}
+            for rid, matches in proposals.items()
+            if len(matches) == 1 and all(references[ref] == 1 for ref in matches[0][2])}
 
 
 def _mmw_allocations(rows, pools: dict, evidence: dict, receipts: dict) -> dict:
@@ -340,6 +388,8 @@ async def _reconcile(db, user: str, aid: str, state: dict, evidence: dict, now: 
     baseline = json.loads(state["baseline_json"])
     pools = {}
     for key, new in evidence.items():
+        if key.endswith(":foreign_trade"):
+            continue  # 해외 매매 근거는 잔고 전후 일치로만 사용한다.
         if key in baseline and not new.get("summary"):
             continue
         day = new.get("date")
@@ -356,6 +406,11 @@ async def _reconcile(db, user: str, aid: str, state: dict, evidence: dict, now: 
         "SELECT * FROM broker_cash_reviews WHERE google_sub=? AND account_id=? AND fingerprint=? ORDER BY id",
         (user, aid, state["fingerprint"]))).fetchall()
     receipts, proofs = _source_allocations(rows, pools, evidence)
+    foreign_proofs = _foreign_trade_proofs(rows, {**state, "account_id": aid}, evidence, baseline)
+    for row in rows:
+        if row["id"] in foreign_proofs and row["id"] not in proofs:
+            proofs[row["id"]] = foreign_proofs[row["id"]]
+            receipts[row["id"]] = _decimal(row["amount"])
     mmw = {**receipts, **_mmw_allocations(rows, pools, evidence, receipts)}
     # MMW 공제·분배금 등 정확히 맞는 별도 내역은 매매 관측 그룹에서 분리한다.
     has_trades = any(key[2].startswith("summary:") and key[2].rsplit(":", 1)[-1] in TRADE_KINDS and amount
@@ -418,7 +473,8 @@ async def _reconcile(db, user: str, aid: str, state: dict, evidence: dict, now: 
 
 
 async def observe(db, user: str, link: dict, positions: list[dict], previous: list[dict], *, fx_rates: dict | None = None,
-                  trades: list[dict] | None = None, settling: bool = False, settlement_delta: Decimal | None = None):
+                  trades: list[dict] | None = None, settling: bool = False, settlement_delta: Decimal | None = None,
+                  foreign_settling: set[str] | None = None):
     """완전한 잔고와 같은 트랜잭션에서 관측한다. 최초·재연결은 기준 잔고만 저장한다."""
     if link["environment"] != "live" or link.get("product", "stocks") in {"krfuture", "gbfuture"}:
         return  # 선물 CASH 행은 평가액을 나타내는 합성 값이다.
@@ -448,15 +504,20 @@ async def observe(db, user: str, link: dict, positions: list[dict], previous: li
         if amount or (currency == "KRW" and settlement_delta):
             basis = max(abs(old_cash.get(currency, 0)), abs(cash.get(currency, 0)))
             limit = minor_limit(currency, basis, (fx_rates or {}).get(currency))
+            wait = None
+            if settling and currency == "KRW":
+                wait = timedelta(seconds=SETTLEMENT_WAIT_SECONDS)
+            elif currency in (foreign_settling or ()):
+                wait = timedelta(days=FOREIGN_SETTLEMENT_WAIT_DAYS)
             await db.execute(
                 "INSERT INTO broker_cash_reviews (google_sub,account_id,fingerprint,from_at,to_at,currency,amount,unexplained,positions_changed,updated_at,cash_basis,minor_limit_native,review_after,settlement_delta) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (user, aid, fingerprint, state["last_at"], now, currency, float(amount), float(amount), int(changed), now,
                  basis, float(limit) if limit else None,
-                 (datetime.fromisoformat(now) + timedelta(seconds=SETTLEMENT_WAIT_SECONDS)).isoformat() if settling and currency == "KRW" else None,
+                 (datetime.fromisoformat(now) + wait).isoformat() if wait else None,
                  float(settlement_delta) if settlement_delta is not None and currency == "KRW" else None))
     await _trade_point(db, user, aid, state, trades, now)
-    await _reconcile(db, user, aid, state, evidence, now)
+    await _reconcile(db, user, aid, {**state, "cash_json": json.dumps(cash), "last_at": now}, evidence, now)
     await db.execute("UPDATE broker_cash_review_state SET cash_json=?,last_at=? WHERE google_sub=? AND account_id=?", (json.dumps(cash), now, user, aid))
 
 
@@ -473,8 +534,8 @@ async def reconcile_related(db, user: str):
                          await _evidence(db, user, state["account_id"], state["fingerprint"]), stamp())
 
 
-def _recover_cash_bases(rows: list[dict], states: dict) -> dict[int, float]:
-    """마지막 현금에서 원래 순변동을 역산한다. 현재 잔고를 과거 잔고로 대체하지 않는다."""
+def _recover_cash_intervals(rows, states: dict) -> dict[int, tuple[Decimal, Decimal]]:
+    """마지막 현금에서 관측별 원래 순변동을 역으로 적용해 전후 잔고를 복원한다."""
     recovered = {}
     running = {}
     invalid = set()
@@ -496,7 +557,7 @@ def _recover_cash_bases(rows: list[dict], states: dict) -> dict[int, float]:
         if row["cash_basis"] is not None and abs(basis - _decimal(row["cash_basis"])) > Decimal("0.000001"):
             invalid.add(key)  # 저장된 기준과 다르면 누락·변경된 이력을 억지로 복원하지 않는다.
             continue
-        recovered[row["id"]] = float(basis)
+        recovered[row["id"]] = (before, after)
         running[key] = before
     return recovered
 
@@ -513,10 +574,10 @@ async def history(user: str, *, pending: bool = True, offset: int = 0, fx_rates:
         rows = [dict(row) for row in await (await db.execute(query, (user,))).fetchall()]
         states = {row["account_id"]: dict(row) for row in await (await db.execute(
             "SELECT * FROM broker_cash_review_state WHERE google_sub=?", (user,))).fetchall()}
-        recovered = _recover_cash_bases(rows, states)
+        recovered = _recover_cash_intervals(rows, states)
         for row in rows:
-            if row["cash_basis"] is None:
-                row["cash_basis"] = recovered.get(row["id"])
+            if row["cash_basis"] is None and row["id"] in recovered:
+                row["cash_basis"] = float(max(map(abs, recovered[row["id"]])))
         totals = defaultdict(Decimal)
         limits = {}
         for row in rows:
