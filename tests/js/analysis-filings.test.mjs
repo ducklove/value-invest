@@ -154,3 +154,142 @@ test("renderReportsTable: 정적 thead th 에 scope=col 을 렌더 시점에 보
 
   assert.ok(ths.every((th) => th.getAttribute("scope") === "col"), "렌더 후 모든 머리글이 scope=col");
 });
+
+// ── DART 공시 AI 리뷰: 블록 형식(blocks/v1) 본문 렌더 ──────────────────────
+// index.html 의 #filingReviewSection 마크업 사본에 실제 utils/analysis-filings
+// 스크립트를 태우고 renderFilingReview 결과 DOM 을 검사한다.
+function buildReviewWindow() {
+  const dom = new JSDOM(`<!doctype html><html><body>
+    <div class="filing-review-section" id="filingReviewSection" style="display:none;">
+      <span id="filingReviewMeta"></span>
+      <button id="filingReviewGenerateBtn" type="button" style="display:none;"></button>
+      <a id="filingReviewSource" href="#" style="display:none;">DART 원문</a>
+      <div id="filingReviewStatus" role="status"></div>
+      <div id="filingReviewCards"></div>
+      <div class="filing-review-body" id="filingReviewBody"></div>
+      <div id="filingReviewTrends"></div>
+      <details id="filingReviewDetails" style="display:none;"><div id="filingReviewDetailsBody"></div></details>
+    </div>
+  </body></html>`, { runScripts: "dangerously", url: "https://app.example.com/" });
+  const w = dom.window;
+  for (const src of [read("vendor/marked.js"), read("vendor/purify.js"), read("utils.js"), read("analysis-filings.js")]) {
+    const s = w.document.createElement("script");
+    s.textContent = src;
+    w.document.body.appendChild(s);
+  }
+  return w;
+}
+
+const BLOCKS = [
+  { type: "card", label: "부채비율", value: "7.9%", tone: "good", detail: "개선" },
+  { type: "trend", label: "부채비율", unit: "%", note: "", before: { label: "2025 말", value: 9.01 }, after: { label: "2026 3Q", value: 7.91 } },
+  { type: "text", md: "자본총계 **66.65조 원**으로 확대" },
+  { type: "section", title: "재무안정성·현금흐름" },
+  { type: "table", columns: ["구분", "2025 말", "2026 3Q", "비고"], rows: [["부채총계", "2조 5,214억 원", "5조 2,729억 원", "증가"], ["부채비율", "9.01%", "**7.91%**", "우수"]], note: "단위 원" },
+  { type: "section", title: "리스크" },
+  { type: "bullets", items: ["커머스 매출 감소", "연대보증 의무"] },
+  { type: "checklist", items: ["현금흐름표 확인", "매출 반등 여부"] },
+  { type: "changes", items: ["부채비율 7.5% → 7.9%"] },
+  { type: "limits", text: "손익계산서 본문 없음" },
+];
+
+function blockReview(overrides = {}) {
+  return {
+    stock_code: "402340",
+    rcept_no: "r1",
+    report_name: "분기보고서 (2026.09)",
+    report_date: "2026-11-14",
+    review_md: "## 재무안정성·현금흐름\n(파생 마크다운)",
+    review: {
+      format: "blocks/v1",
+      blocks: BLOCKS,
+      truncated: false,
+      cards: [{ label: "부채비율", value: "7.9%", tone: "good", detail: "개선" }],
+      metric_trends: [BLOCKS[1]],
+      source_limits: "손익계산서 본문 없음",
+      summary_md: "(파생 마크다운)",
+      ...overrides,
+    },
+  };
+}
+
+test("renderFilingReview: 블록 리뷰는 파생 마크다운이 아니라 블록으로 본문을 그린다", () => {
+  const w = buildReviewWindow();
+  w.renderFilingReview(blockReview(), { cached: true });
+  const body = w.document.getElementById("filingReviewBody");
+
+  assert.doesNotMatch(body.textContent, /파생 마크다운/);
+  const lead = body.querySelector("p.frb-lead");
+  assert.ok(lead, "첫 section 앞 text 는 리드 문단");
+  assert.equal(lead.querySelector("strong").textContent, "66.65조 원");
+  assert.deepEqual([...body.querySelectorAll("h3.frb-section")].map((h) => h.textContent),
+    ["재무안정성·현금흐름", "리스크", "다음 체크포인트", "이전 보고서 대비 변화"]);
+  assert.equal(body.querySelectorAll(".frb-bullets li").length, 2);
+  assert.equal(body.querySelectorAll(".frb-checklist li").length, 2);
+  assert.equal(body.querySelectorAll(".frb-changes li").length, 1);
+  // card/trend/limits 는 본문에 다시 그리지 않는다(카드 줄·지표 차트·상세 영역 담당).
+  assert.doesNotMatch(body.textContent, /손익계산서 본문 없음/);
+  assert.equal(w.document.querySelectorAll("#filingReviewCards .filing-review-card.good").length, 1);
+  assert.match(w.document.getElementById("filingReviewTrends").innerHTML, /mt-item/);
+  assert.equal(body.querySelector(".frb-truncated"), null);
+});
+
+test("renderFilingReview: 표는 첫 열을 행 머리글로, 수치 열은 우측·설명 열은 좌측 정렬 클래스로 그린다", () => {
+  const w = buildReviewWindow();
+  w.renderFilingReview(blockReview());
+  const table = w.document.querySelector("#filingReviewBody .frb-table-wrap table.frb-table");
+  assert.ok(table);
+  const head = [...table.querySelectorAll("thead th")];
+  assert.ok(head.every((th) => th.getAttribute("scope") === "col"));
+  assert.deepEqual(head.map((th) => th.className), ["", "frb-num", "frb-num", "frb-text"]);
+  const firstRow = table.querySelector("tbody tr");
+  assert.equal(firstRow.querySelector("th").getAttribute("scope"), "row");
+  assert.equal(firstRow.querySelector("th").textContent, "부채총계");
+  assert.equal(table.querySelectorAll("tbody tr")[1].querySelector("td.frb-num strong").textContent, "7.91%");
+  assert.equal(w.document.querySelector("#filingReviewBody .frb-note").textContent, "단위 원");
+});
+
+test("renderFilingReview: 블록 문자열의 HTML 은 이스케이프되고 **굵게** 만 살아남는다", () => {
+  const w = buildReviewWindow();
+  const blocks = [
+    { type: "text", md: '<img src=x onerror="window.__xss=1">**<b>굵게</b>**' },
+    { type: "section", title: "<script>t</script>" },
+    { type: "table", columns: ["<i>a</i>", "b"], rows: [["<a href='javascript:1'>x</a>", "1"]] },
+    { type: "bullets", items: ["<svg onload=alert(1)>"] },
+  ];
+  w.renderFilingReview(blockReview({ blocks }));
+  const body = w.document.getElementById("filingReviewBody");
+  assert.equal(body.querySelectorAll("img, script, svg, a, b, i").length, 0);
+  assert.equal(body.querySelector("strong").textContent, "<b>굵게</b>");
+  assert.match(body.querySelector("h3").textContent, /<script>t<\/script>/);
+  assert.equal(w.__xss, undefined);
+});
+
+test("renderFilingReview: 잘린 블록 리뷰는 본문 끝에 잘림 안내를 붙인다", () => {
+  const w = buildReviewWindow();
+  w.renderFilingReview(blockReview({ truncated: true }));
+  const notice = w.document.querySelector("#filingReviewBody .frb-truncated");
+  assert.ok(notice);
+  assert.match(notice.textContent, /뒷부분 일부가 빠졌을 수 있습니다/);
+});
+
+test("renderFilingReview: 블록 형식 이전 리뷰는 기존처럼 마크다운 본문을 렌더한다", () => {
+  const w = buildReviewWindow();
+  w.renderFilingReview({
+    stock_code: "005930",
+    report_name: "분기보고서 (2026.03)",
+    review_md: "## 요약\n\n| 구분 | 값 |\n|---|---|\n| 매출 | 10조 |",
+    review: { summary_md: "## 요약", cards: [{ label: "매출", value: "증가", tone: "good" }] },
+  });
+  const body = w.document.getElementById("filingReviewBody");
+  assert.equal(body.querySelector("h2").textContent, "요약");
+  assert.equal(body.querySelectorAll("table td").length, 2);
+  assert.equal(body.querySelector(".frb-section"), null);
+  assert.equal(w.document.querySelectorAll("#filingReviewCards .filing-review-card").length, 1);
+});
+
+test("renderFilingReview: 블록이 비어 있으면 마크다운 본문으로 물러선다", () => {
+  const w = buildReviewWindow();
+  w.renderFilingReview(blockReview({ blocks: [{ type: "card", label: "x", value: "y" }] }));
+  assert.match(w.document.getElementById("filingReviewBody").textContent, /파생 마크다운/);
+});

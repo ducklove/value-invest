@@ -38,11 +38,11 @@ COMPARISON_REPORT_COUNT = int(os.getenv("DART_REVIEW_COMPARISON_REPORTS", "2"))
 REPORT_LOOKBACK_DAYS = int(os.getenv("DART_REVIEW_LOOKBACK_DAYS", "1100"))
 DART_FILINGS_CACHE_TTL_S = int(os.getenv("DART_REVIEW_FILINGS_CACHE_TTL_S", "600"))
 DART_REVIEW_TARGET_LIMIT = int(os.getenv("DART_REVIEW_TARGET_LIMIT", "12"))
-# Output budget for the review JSON. The summary_md (markdown tables + bars),
-# cards, watch_items and comparison_notes routinely exceed a small cap; when the
-# model is cut off mid-JSON the parser falls back to dumping the raw blob into
-# summary_md, which the UI then renders as garbled markdown. A generous default
-# plus a larger one-shot retry keeps that failure mode rare.
+# Output budget for the review. The answer is JSON Lines blocks (see
+# BLOCKS_FORMAT below): a cut-off answer keeps its complete blocks and is only
+# retried, with the larger budget, when too little of it survived. The older
+# single-object JSON lost everything when cut off, which is why the budget is
+# generous.
 #
 # Hidden reasoning tokens are billed as output and count against this cap. A
 # model whose reasoning is mandatory (Gemini 4 Hydrogen) spent the whole 4096 /
@@ -59,6 +59,50 @@ DART_REVIEW_REASONING_EFFORT = os.getenv("DART_REVIEW_REASONING_EFFORT", "low")
 DART_REVIEW_MAX_FAILED_ATTEMPTS = int(os.getenv("DART_REVIEW_MAX_FAILED_ATTEMPTS", "2"))
 DART_REVIEW_FAILURE_COOLDOWN_S = float(os.getenv("DART_REVIEW_FAILURE_COOLDOWN_S", str(20 * 3600)))
 CACHE_NS_REVIEW_FAILURE = "dart_review.output_failure"
+
+# Review output format. The model answers in JSON Lines, one block per line,
+# from a small fixed catalog (the A2UI idea: the model composes the page from
+# components the client already knows how to draw, and each one is validated on
+# its own). A cut-off answer loses only its unfinished last line instead of the
+# whole review, and tables arrive as data rather than model-written markdown.
+BLOCKS_FORMAT = "blocks/v1"
+CONTENT_BLOCK_TYPES = ("text", "bullets", "table", "checklist", "changes")
+CARD_TONES = ("good", "watch", "bad", "neutral")
+MAX_BLOCKS = 60
+MAX_CARDS = 8
+MAX_TRENDS = 8
+MAX_TABLE_COLUMNS = 6
+MAX_TABLE_ROWS = 15
+MAX_LIST_ITEMS = 10
+# A cut-off answer is still kept when it got at least this far; anything less
+# counts as a failed review and is retried like before.
+MIN_USABLE_CARDS = 1
+MIN_USABLE_CONTENT_BLOCKS = 2
+CHECKLIST_TITLE = "다음 체크포인트"
+CHANGES_TITLE = "이전 보고서 대비 변화"
+
+
+def _block_example(block: dict[str, Any]) -> str:
+    return json.dumps(block, ensure_ascii=False)
+
+
+BLOCK_EXAMPLE_CARD = _block_example(
+    {"type": "card", "label": "부채비율", "value": "45.0%", "tone": "good", "detail": "전기말 52.0%에서 개선"}
+)
+BLOCK_EXAMPLE_TREND = _block_example({
+    "type": "trend", "label": "영업이익률", "unit": "%", "note": "한 줄 코멘트(선택)",
+    "before": {"label": "2025 연간", "value": 13.1}, "after": {"label": "2026 1분기", "value": 42.8},
+})
+BLOCK_EXAMPLE_TEXT = _block_example({"type": "text", "md": "한눈 요약 2~3문장. **핵심 수치**는 굵게."})
+BLOCK_EXAMPLE_SECTION = _block_example({"type": "section", "title": "실적·수익성"})
+BLOCK_EXAMPLE_TABLE = _block_example({
+    "type": "table", "columns": ["구분", "직전 기간", "이번 기간", "비고"],
+    "rows": [["매출액", "1조 2,000억 원", "1조 3,500억 원", "12.5% 증가"]], "note": "표 아래 한 줄 설명(선택)",
+})
+BLOCK_EXAMPLE_BULLETS = _block_example({"type": "bullets", "items": ["근거가 있는 항목 1", "항목 2"]})
+BLOCK_EXAMPLE_CHECKLIST = _block_example({"type": "checklist", "items": ["다음 보고서에서 확인할 것"]})
+BLOCK_EXAMPLE_CHANGES = _block_example({"type": "changes", "items": ["이전 보고서 대비 달라진 점"]})
+BLOCK_EXAMPLE_LIMITS = _block_example({"type": "limits", "text": "사용한 원문 범위와 한계"})
 
 _filings_cache = MemoryTTLCache("dart_report_review.filings", DART_FILINGS_CACHE_TTL_S, evict_expired_after=0)
 _pipeline_lock = asyncio.Lock()
@@ -346,33 +390,36 @@ def _build_prompt(
 요구사항:
 - 주 보고서가 핵심 재료입니다. 비교 보고서는 변화/반복 리스크를 확인하는 보조 근거로만 쓰세요.
 - 근거가 없는 추정은 금지하고, 불확실한 경우 "보고서에서 명확히 확인되지 않음"이라고 쓰세요.
-- 투자 판단에 유용한 순서로 재구성하세요: 한눈 요약, 실적/수익성, 재무안정성/현금흐름, 사업부/제품, 리스크, 다음 체크포인트.
-- 신호등 카드와 체크리스트, 표처럼 웹에서 바로 렌더링하기 좋은 형태로 만드세요.
-- 핵심 지표의 직전 대비 변화는 summary_md에 텍스트 막대(█ 등)로 그리지 말고, 반드시
-  별도의 metric_trends 배열로만 제공하세요. 화면에서 막대 그래프로 렌더링됩니다.
+- 같은 내용을 여러 블록에 반복하지 마세요.
 - 반드시 한국어로 답하세요.
-- 아래 JSON만 반환하세요. JSON 밖 설명/마크다운 코드펜스는 쓰지 마세요.
 
-반환 JSON 스키마:
-{{
-  "summary_md": "마크다운 본문. 표와 산문 위주. 텍스트 막대 그래프는 넣지 마세요.",
-  "cards": [
-    {{"label": "핵심 항목", "value": "짧은 값", "tone": "good|watch|bad|neutral", "detail": "한 줄 해석"}}
-  ],
-  "metric_trends": [
-    {{"label": "영업이익률", "unit": "%", "note": "한 줄 코멘트(선택)",
-      "before": {{"label": "2025 연간", "value": 13.1}},
-      "after": {{"label": "2026 1분기", "value": 42.8}}}}
-  ],
-  "watch_items": ["확인해야 할 항목"],
-  "comparison_notes": ["전/이전 보고서 대비 확인 사항"],
-  "source_limits": "사용한 원문 범위와 한계"
-}}
+출력 형식 — JSON Lines:
+- 한 줄에 JSON 객체(블록) 하나씩 출력하세요. 배열이나 바깥 객체로 감싸지 말고,
+  코드펜스·설명 문장도 쓰지 마세요. 객체 안에서 줄을 바꾸지 마세요.
+- 블록은 아래 순서대로 출력하세요. 응답이 중간에 잘려도 앞쪽 블록은 그대로 화면에 쓰입니다.
+- 문자열 안의 마크다운은 **굵게** 강조만 쓰세요. 제목·목록·표는 마크다운이 아니라
+  해당 블록으로 만드세요. 텍스트 막대(█ 등)는 쓰지 마세요.
 
-metric_trends 작성 규칙:
-- 투자 판단에 중요한 지표 2~5개의 직전 대비 변화만 담으세요(영업이익률·매출·핵심 사업부 비중 등).
-- value 는 단위 기호 없이 숫자만 쓰고, 단위는 unit 에 따로 쓰세요(예: "%", "조", "억").
-- before/after 의 label 에는 비교 시점을 쓰세요(예: "2025 연간", "2026 1분기").
+블록 종류와 순서:
+1. card 3~6개 — 투자 판단에 가장 중요한 항목을 신호등 카드로. tone 은 good|watch|bad|neutral.
+{BLOCK_EXAMPLE_CARD}
+2. trend 2~5개 — 핵심 지표(영업이익률·매출·핵심 사업부 비중 등)의 직전 대비 변화. 화면에서 막대 그래프로 그려집니다.
+   value 는 단위 없이 숫자만, 단위는 unit 에("%", "조", "억"). before/after 의 label 에는 비교 시점("2025 연간", "2026 1분기").
+{BLOCK_EXAMPLE_TREND}
+3. text 1개 — 한눈 요약 2~3문장.
+{BLOCK_EXAMPLE_TEXT}
+4. 다음 네 섹션을 이 순서로: 실적·수익성 / 재무안정성·현금흐름 / 사업부·제품 / 리스크.
+   각 섹션은 section 블록 뒤에 text·bullets·table 블록 1~3개. 수치 비교는 table 로 쓰세요.
+   table 의 첫 열은 항목명, 열 2~6개, 행 12개 이하, 셀은 문자열. note 는 표 아래 한 줄 설명(선택).
+{BLOCK_EXAMPLE_SECTION}
+{BLOCK_EXAMPLE_TABLE}
+{BLOCK_EXAMPLE_BULLETS}
+5. checklist 1개 — 다음 보고서·공시에서 확인할 체크포인트.
+{BLOCK_EXAMPLE_CHECKLIST}
+6. changes 1개 — 비교 보고서 대비 달라진 점과 반복되는 리스크.
+{BLOCK_EXAMPLE_CHANGES}
+7. limits 1개 — 사용한 원문 범위와 한계.
+{BLOCK_EXAMPLE_LIMITS}
 
 {financial_context}
 
@@ -382,19 +429,6 @@ metric_trends 작성 규칙:
 ## 주 보고서 원문 발췌
 {primary_text[:PRIMARY_TEXT_CHARS]}
 """.strip()
-
-
-def _strip_json_fence(text: str) -> str:
-    text = (text or "").strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?", "", text, flags=re.IGNORECASE).strip()
-        text = re.sub(r"```$", "", text).strip()
-    if not text.startswith("{"):
-        start = text.find("{")
-        end = text.rfind("}")
-        if start >= 0 and end > start:
-            text = text[start:end + 1]
-    return text
 
 
 def _coerce_number(value: Any) -> float | None:
@@ -422,33 +456,241 @@ def _normalize_metric_trends(raw: Any) -> list[dict[str, Any]]:
         return []
     out: list[dict[str, Any]] = []
     for item in raw:
-        if not isinstance(item, dict):
+        trend = _normalize_trend(item)
+        if trend is None:
             continue
-        before = item.get("before") if isinstance(item.get("before"), dict) else {}
-        after = item.get("after") if isinstance(item.get("after"), dict) else {}
-        bv = _coerce_number(before.get("value"))
-        av = _coerce_number(after.get("value"))
-        if bv is None and av is None:
-            continue
-        out.append({
-            "label": str(item.get("label") or "")[:40],
-            "unit": str(item.get("unit") or "")[:8],
-            "note": str(item.get("note") or "")[:80],
-            "before": {"label": str(before.get("label") or "")[:24], "value": bv},
-            "after": {"label": str(after.get("label") or "")[:24], "value": av},
-        })
-        if len(out) >= 8:
+        out.append(trend)
+        if len(out) >= MAX_TRENDS:
             break
     return out
 
 
+def _normalize_trend(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    before = item.get("before") if isinstance(item.get("before"), dict) else {}
+    after = item.get("after") if isinstance(item.get("after"), dict) else {}
+    bv = _coerce_number(before.get("value"))
+    av = _coerce_number(after.get("value"))
+    if bv is None and av is None:
+        return None
+    return {
+        "label": str(item.get("label") or "")[:40],
+        "unit": str(item.get("unit") or "")[:8],
+        "note": str(item.get("note") or "")[:80],
+        "before": {"label": str(before.get("label") or "")[:24], "value": bv},
+        "after": {"label": str(after.get("label") or "")[:24], "value": av},
+    }
+
+
+_BLOCK_BAR_CHARS = re.compile(r"[▀-▟]+")
+
+
+def _clean_text(value: Any, limit: int) -> str:
+    """One display string from model output: no block-bar glyphs, capped length."""
+    if isinstance(value, bool) or value is None:
+        return ""
+    if isinstance(value, (int, float)):
+        value = f"{value:,}" if isinstance(value, int) else str(value)
+    if not isinstance(value, str):
+        return ""
+    text = _BLOCK_BAR_CHARS.sub("", value).strip()
+    if len(text) > limit:
+        text = text[: limit - 1].rstrip() + "…"
+    return text
+
+
+def _clean_items(value: Any, *, limit: int = 300) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    items = [_clean_text(item, limit) for item in value]
+    return [item for item in items if item][:MAX_LIST_ITEMS]
+
+
+def _normalize_block(raw: Any) -> dict[str, Any] | None:
+    """Validate one model block against the catalog; None drops it."""
+    if not isinstance(raw, dict):
+        return None
+    kind = raw.get("type")
+    if kind == "card":
+        label = _clean_text(raw.get("label"), 40)
+        value = _clean_text(raw.get("value"), 40)
+        if not (label or value):
+            return None
+        tone = str(raw.get("tone") or "neutral").strip().lower()
+        return {
+            "type": "card",
+            "label": label,
+            "value": value,
+            "tone": tone if tone in CARD_TONES else "neutral",
+            "detail": _clean_text(raw.get("detail"), 120),
+        }
+    if kind == "trend":
+        trend = _normalize_trend(raw)
+        return {"type": "trend", **trend} if trend else None
+    if kind == "section":
+        title = _clean_text(raw.get("title"), 40)
+        return {"type": "section", "title": title} if title else None
+    if kind == "text":
+        md = _clean_text(raw.get("md") if raw.get("md") is not None else raw.get("text"), 1500)
+        return {"type": "text", "md": md} if md else None
+    if kind in ("bullets", "checklist", "changes"):
+        items = _clean_items(raw.get("items"))
+        if not items:
+            return None
+        block: dict[str, Any] = {"type": kind, "items": items}
+        title = _clean_text(raw.get("title"), 40)
+        if title and kind != "bullets":
+            block["title"] = title
+        return block
+    if kind == "table":
+        columns = [_clean_text(col, 40) for col in raw.get("columns") or []][:MAX_TABLE_COLUMNS]
+        rows_raw = raw.get("rows") if isinstance(raw.get("rows"), list) else []
+        if len(columns) < 2 or not rows_raw:
+            return None
+        width = len(columns)
+        rows: list[list[str]] = []
+        for row in rows_raw:
+            if not isinstance(row, list):
+                continue
+            cells = [_clean_text(cell, 80) for cell in row[:width]]
+            cells += [""] * (width - len(cells))
+            if any(cells):
+                rows.append(cells)
+            if len(rows) >= MAX_TABLE_ROWS:
+                break
+        if not rows:
+            return None
+        block = {"type": "table", "columns": columns, "rows": rows}
+        note = _clean_text(raw.get("note"), 160)
+        if note:
+            block["note"] = note
+        return block
+    if kind == "limits":
+        text = _clean_text(raw.get("text"), 400)
+        return {"type": "limits", "text": text} if text else None
+    return None
+
+
+def _scan_json_objects(text: str) -> list[Any]:
+    """Every top-level JSON object in ``text``, in order.
+
+    Tolerates the shapes models actually produce instead of clean JSON Lines:
+    prose or code fences around the objects, an array wrapper, several objects
+    on one line, pretty-printed objects. An object that does not parse (the
+    cut-off last line) is skipped and the scan resumes at the next ``{``, so a
+    truncated wrapper still yields the complete blocks nested inside it.
+    """
+    decoder = json.JSONDecoder()
+    objects: list[Any] = []
+    pos = text.find("{")
+    while pos >= 0:
+        try:
+            obj, end = decoder.raw_decode(text, pos)
+        except ValueError:
+            pos = text.find("{", pos + 1)
+            continue
+        objects.append(obj)
+        pos = text.find("{", end)
+    return objects
+
+
+def _blocks_to_markdown(blocks: list[dict[str, Any]]) -> str:
+    """Markdown rendering of the document blocks, for ``review_md`` (wiki Q&A
+    grounding) and any reader that predates the block format."""
+    parts: list[str] = []
+    for block in blocks:
+        kind = block.get("type")
+        if kind == "section":
+            parts.append(f"## {block['title']}")
+        elif kind == "text":
+            parts.append(block["md"])
+        elif kind == "bullets":
+            parts.append("\n".join(f"- {item}" for item in block["items"]))
+        elif kind in ("checklist", "changes"):
+            title = block.get("title") or (CHECKLIST_TITLE if kind == "checklist" else CHANGES_TITLE)
+            parts.append(f"## {title}\n" + "\n".join(f"- {item}" for item in block["items"]))
+        elif kind == "table":
+            def row_md(cells: list[str]) -> str:
+                return "| " + " | ".join(cell.replace("|", "/") for cell in cells) + " |"
+            lines = [row_md(block["columns"]), "|" + "---|" * len(block["columns"])]
+            lines += [row_md(row) for row in block["rows"]]
+            if block.get("note"):
+                lines.append(f"\n{block['note']}")
+            parts.append("\n".join(lines))
+    return "\n\n".join(parts).strip()
+
+
+def _blocks_usable(blocks: Any) -> bool:
+    if not isinstance(blocks, list):
+        return False
+    cards = sum(1 for block in blocks if isinstance(block, dict) and block.get("type") == "card")
+    content = sum(
+        1 for block in blocks if isinstance(block, dict) and block.get("type") in CONTENT_BLOCK_TYPES
+    )
+    return cards >= MIN_USABLE_CARDS and content >= MIN_USABLE_CONTENT_BLOCKS
+
+
+def _review_from_blocks(raw_blocks: list[Any]) -> dict[str, Any]:
+    blocks: list[dict[str, Any]] = []
+    dropped = 0
+    counts: dict[str, int] = {}
+    caps = {"card": MAX_CARDS, "trend": MAX_TRENDS}
+    for raw in raw_blocks:
+        block = _normalize_block(raw)
+        if block is None or len(blocks) >= MAX_BLOCKS:
+            dropped += 1
+            continue
+        kind = block["type"]
+        if counts.get(kind, 0) >= caps.get(kind, MAX_BLOCKS):
+            dropped += 1
+            continue
+        counts[kind] = counts.get(kind, 0) + 1
+        blocks.append(block)
+
+    def items_of(kind: str) -> list[str]:
+        return [item for block in blocks if block["type"] == kind for item in block["items"]]
+
+    def strip_type(block: dict[str, Any]) -> dict[str, Any]:
+        return {key: value for key, value in block.items() if key != "type"}
+
+    # cards / metric_trends / watch_items / comparison_notes / source_limits /
+    # summary_md keep their old meaning, so the card strip, the trend chart,
+    # wiki Q&A grounding and cached-review checks read both formats alike.
+    return {
+        "format": BLOCKS_FORMAT,
+        "blocks": blocks,
+        "dropped_blocks": dropped,
+        "truncated": False,
+        "cards": [strip_type(block) for block in blocks if block["type"] == "card"],
+        "metric_trends": [strip_type(block) for block in blocks if block["type"] == "trend"],
+        "watch_items": items_of("checklist"),
+        "comparison_notes": items_of("changes"),
+        "source_limits": " ".join(block["text"] for block in blocks if block["type"] == "limits"),
+        "summary_md": _blocks_to_markdown(blocks),
+    }
+
+
 def _normalize_review(raw_text: str) -> dict[str, Any]:
-    try:
-        parsed = json.loads(_strip_json_fence(raw_text))
-    except Exception:
-        parsed = {"summary_md": (raw_text or "").strip()}
-    if not isinstance(parsed, dict):
-        parsed = {"summary_md": str(parsed)}
+    objects = _scan_json_objects(raw_text or "")
+    raw_blocks: list[Any] = []
+    legacy: dict[str, Any] | None = None
+    for obj in objects:
+        if not isinstance(obj, dict):
+            continue
+        if isinstance(obj.get("type"), str):
+            raw_blocks.append(obj)
+        elif isinstance(obj.get("blocks"), list):
+            raw_blocks.extend(obj["blocks"])
+        elif legacy is None and any(key in obj for key in ("summary_md", "cards", "metric_trends")):
+            legacy = obj
+    if raw_blocks or (objects and legacy is None):
+        # JSON came back but none of it is a usable block → an empty review,
+        # which _review_payload_is_broken rejects instead of showing raw JSON.
+        return _review_from_blocks(raw_blocks)
+    # The older single-object schema, or an answer with no JSON at all (shown
+    # as markdown, as before).
+    parsed = legacy if legacy is not None else {"summary_md": (raw_text or "").strip()}
     parsed.setdefault("summary_md", "")
     parsed.setdefault("cards", [])
     parsed.setdefault("watch_items", [])
@@ -484,9 +726,17 @@ def _finish_reason_from_response(data: dict[str, Any] | None) -> str | None:
 
 
 def _review_payload_is_broken(payload: dict[str, Any], *, finish_reason: str | None = None) -> bool:
-    """A freshly generated review is broken when the model output was cut off
+    """A freshly generated review is broken when it cannot be shown. Such
+    payloads must never be cached.
+
+    Block format: broken only when too few valid blocks came back. A cut-off
+    answer that already holds cards and some body is kept (marked
+    ``truncated``) rather than paid for again.
+    Older single-object format: broken when the output was cut off
     (``finish_reason == "length"``) or the JSON could not be parsed and the raw
-    blob landed in ``summary_md``. Such payloads must never be cached."""
+    blob landed in ``summary_md``."""
+    if isinstance(payload, dict) and payload.get("format") == BLOCKS_FORMAT:
+        return not _blocks_usable(payload.get("blocks"))
     if finish_reason == "length":
         return True
     summary = payload.get("summary_md") if isinstance(payload, dict) else None
@@ -541,12 +791,16 @@ async def _call_openrouter(
     except ai_client.OpenRouterError as exc:
         raise DartReportReviewError(f"OpenRouter call failed: {exc}") from exc
 
-    return _normalize_review(result["content"]), {
+    finish_reason = _finish_reason_from_response(result.get("data"))
+    review = _normalize_review(result["content"])
+    if review.get("format") == BLOCKS_FORMAT and finish_reason == "length":
+        review["truncated"] = True
+    return review, {
         "model": result["model"],
         "tokens_in": result["input_tokens"],
         "tokens_out": result["output_tokens"],
         "cost_usd": result["cost_usd"],
-        "finish_reason": _finish_reason_from_response(result.get("data")),
+        "finish_reason": finish_reason,
     }
 
 

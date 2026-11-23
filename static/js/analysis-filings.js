@@ -89,6 +89,86 @@ function _renderMetricTrends(trends) {
   return `<div class="mt-wrap"><div class="mt-title">핵심 지표 변화</div>${items}</div>`;
 }
 
+// 블록 형식(review.format === 'blocks/v1') 본문 렌더러. 모델은 정해진 블록
+// 카탈로그(section/text/bullets/table/checklist/changes)만 보내고, 표·목록은
+// 여기서 허브 스타일로 그린다. 문자열은 모두 escapeHtml 후 **굵게** 만 허용한다.
+// card/trend/limits 는 각각 카드 줄·지표 차트·상세 영역이 그리므로 건너뛴다.
+const FILING_REVIEW_CHECKLIST_TITLE = '다음 체크포인트';
+const FILING_REVIEW_CHANGES_TITLE = '이전 보고서 대비 변화';
+
+function _frbInline(text) {
+  return escapeHtml(String(text || '')).replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
+}
+
+function _frbIsNumericCell(text) {
+  const plain = String(text || '').replace(/\*\*/g, '').trim();
+  return /^[+\-−△▲▼]?\s*\(?[\d.,]+/.test(plain) || plain === '-' || plain === '—';
+}
+
+function _frbTable(block) {
+  const columns = Array.isArray(block.columns) ? block.columns : [];
+  const rows = Array.isArray(block.rows) ? block.rows.filter(Array.isArray) : [];
+  if (columns.length < 2 || !rows.length) return '';
+  // 첫 열은 항목명. 나머지 열은 셀 대부분이 수치면 우측 정렬, 아니면 좌측·줄바꿈 허용.
+  const textCols = new Set();
+  for (let c = 1; c < columns.length; c += 1) {
+    const cells = rows.map((row) => row[c]).filter((v) => String(v || '').trim());
+    const numeric = cells.filter(_frbIsNumericCell).length;
+    if (!cells.length || numeric * 2 < cells.length) textCols.add(c);
+  }
+  const cls = (c) => (c === 0 ? '' : (textCols.has(c) ? ' class="frb-text"' : ' class="frb-num"'));
+  const head = columns.map((col, c) => `<th scope="col"${cls(c)}>${_frbInline(col)}</th>`).join('');
+  const body = rows.map((row) => '<tr>' + columns.map((_, c) => (
+    c === 0
+      ? `<th scope="row">${_frbInline(row[c])}</th>`
+      : `<td${cls(c)}>${_frbInline(row[c])}</td>`
+  )).join('') + '</tr>').join('');
+  const note = block.note ? `<p class="frb-note">${_frbInline(block.note)}</p>` : '';
+  return `<div class="frb-table-wrap"><table class="frb-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${note}`;
+}
+
+function _frbList(items, cls) {
+  const safe = (Array.isArray(items) ? items : []).filter((item) => String(item || '').trim());
+  if (!safe.length) return '';
+  return `<ul class="${cls}">${safe.map((item) => `<li>${_frbInline(item)}</li>`).join('')}</ul>`;
+}
+
+function _renderFilingReviewBlocks(blocks) {
+  const parts = [];
+  let seenSection = false;
+  for (const block of Array.isArray(blocks) ? blocks : []) {
+    if (!block || typeof block !== 'object') continue;
+    switch (block.type) {
+      case 'section':
+        seenSection = true;
+        parts.push(`<h3 class="frb-section">${_frbInline(block.title)}</h3>`);
+        break;
+      case 'text': {
+        const paras = String(block.md || '').split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+        const cls = seenSection ? '' : ' class="frb-lead"';
+        parts.push(paras.map((p) => `<p${cls}>${_frbInline(p).replace(/\n/g, '<br>')}</p>`).join(''));
+        break;
+      }
+      case 'bullets':
+        parts.push(_frbList(block.items, 'frb-bullets'));
+        break;
+      case 'table':
+        parts.push(_frbTable(block));
+        break;
+      case 'checklist':
+      case 'changes': {
+        const title = block.title || (block.type === 'checklist' ? FILING_REVIEW_CHECKLIST_TITLE : FILING_REVIEW_CHANGES_TITLE);
+        const list = _frbList(block.items, `frb-${block.type}`);
+        if (list) parts.push(`<h3 class="frb-section">${_frbInline(title)}</h3>${list}`);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return parts.join('');
+}
+
 function _renderFilingReviewCards(cards) {
   const container = document.getElementById('filingReviewCards');
   if (!container) return;
@@ -153,11 +233,22 @@ function renderFilingReview(review, { cached = false } = {}) {
     source.style.display = href ? 'inline-flex' : 'none';
   }
   _renderFilingReviewCards(review.review?.cards || []);
-  const md = review.review_md || review.review?.summary_md || '';
-  const cleanMd = _stripBlockBars(md);
-  body.innerHTML = cleanMd
-    ? (typeof _renderSafeMarkdown === 'function' ? _renderSafeMarkdown(cleanMd) : escapeHtml(cleanMd))
-    : '<p>생성된 리뷰 본문이 없습니다.</p>';
+  const blocks = review.review?.format === 'blocks/v1' && Array.isArray(review.review.blocks)
+    ? review.review.blocks
+    : null;
+  const blocksHtml = blocks ? _renderFilingReviewBlocks(blocks) : '';
+  if (blocksHtml) {
+    body.innerHTML = blocksHtml + (review.review.truncated
+      ? '<p class="frb-truncated">AI 응답이 길이 제한에서 끊겨 뒷부분 일부가 빠졌을 수 있습니다.</p>'
+      : '');
+  } else {
+    // 블록 형식 이전에 만들어진 리뷰: 모델이 쓴 마크다운 본문을 그대로 렌더.
+    const md = review.review_md || review.review?.summary_md || '';
+    const cleanMd = _stripBlockBars(md);
+    body.innerHTML = cleanMd
+      ? (typeof _renderSafeMarkdown === 'function' ? _renderSafeMarkdown(cleanMd) : escapeHtml(cleanMd))
+      : '<p>생성된 리뷰 본문이 없습니다.</p>';
+  }
   const trendsEl = document.getElementById('filingReviewTrends');
   if (trendsEl) trendsEl.innerHTML = _renderMetricTrends(review.review?.metric_trends || review.metric_trends || []);
   _renderFilingReviewDetails(review);

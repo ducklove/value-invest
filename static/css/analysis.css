@@ -588,3 +588,38 @@
 .stock360-warning { margin: 0; font-size: 12px; line-height: 1.45; color: var(--warning); }
 .stock360-failed { margin: 8px 0 0; font-size: 12px; color: var(--danger); }
 .stock360-note { margin: 8px 0 0; font-size: 12px; line-height: 1.55; color: var(--text-secondary); }
+
+/* DART 리뷰 블록 본문 (#filingReviewBody, review.format = blocks/v1) — analysis-filings.js */
+.filing-review-body .frb-lead { margin: 0 0 12px; font-size: 14px; line-height: 1.7; color: var(--text); }
+.filing-review-body .frb-section {
+  margin: 18px 0 8px; padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 14px;
+}
+.filing-review-body .frb-section:first-child { margin-top: 4px; padding-top: 0; border-top: 0; }
+.frb-table-wrap { margin: 8px 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.filing-review-body .frb-table { margin: 0; }
+.filing-review-body .frb-table tbody th { background: transparent; font-weight: 600; }
+/* 좁은 화면에서 항목명이 글자 단위로 쪼개지지 않게: 첫 열은 한 줄, 설명 열은 최소 폭을
+   두고 넘치면 .frb-table-wrap 이 가로 스크롤한다. */
+.filing-review-body .frb-table th:first-child { white-space: nowrap; }
+.filing-review-body .frb-table .frb-text {
+  min-width: 8em;
+  text-align: left !important;
+  white-space: normal;
+  font-variant-numeric: normal;
+}
+.filing-review-body .frb-note { margin: 4px 0 10px; font-size: 12px; color: var(--text-secondary); }
+.filing-review-body .frb-checklist { padding-left: 0; list-style: none; }
+.filing-review-body .frb-checklist li { position: relative; margin-bottom: 6px; padding-left: 24px; }
+.filing-review-body .frb-checklist li::before {
+  content: ""; position: absolute; left: 2px; top: 0.5em;
+  width: 11px; height: 11px;
+  border: 1.5px solid var(--text-secondary); border-radius: 3px;
+}
+.filing-review-body .frb-changes li::marker { color: var(--text-secondary); }
+.filing-review-body .frb-truncated {
+  margin: 12px 0 0; padding: 8px 12px; border-radius: 8px;
+  font-size: 12px; color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}

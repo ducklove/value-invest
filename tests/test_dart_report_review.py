@@ -111,6 +111,132 @@ class DartReportReviewBrokenDetectionTests(unittest.TestCase):
         self.assertIsNone(dart_report_review._finish_reason_from_response(None))
 
 
+BLOCK_LINES = [
+    '{"type":"card","label":"부채비율","value":"7.9%","tone":"good","detail":"전기말 대비 개선"}',
+    '{"type":"card","label":"영업수익","value":"9,337억 원","tone":"WATCH","detail":"11.1% 감소"}',
+    '{"type":"trend","label":"부채비율","unit":"%","before":{"label":"2025 말","value":"9.01%"},"after":{"label":"2026 3Q","value":7.91}}',
+    '{"type":"text","md":"한눈 요약 **핵심**"}',
+    '{"type":"section","title":"재무안정성·현금흐름"}',
+    '{"type":"table","columns":["구분","2025 말","2026 3Q"],"rows":[["부채총계","2.5조","5.3조","넘치는 셀"],["자본총계",27.9]],"note":"단위 조 원"}',
+    '{"type":"section","title":"리스크"}',
+    '{"type":"bullets","items":["커머스 매출 감소","","연대보증 ▇▇▇"]}',
+    '{"type":"checklist","items":["현금흐름표 확인"]}',
+    '{"type":"changes","items":["부채비율 7.5% → 7.9%"]}',
+    '{"type":"limits","text":"손익계산서 본문 없음"}',
+]
+
+
+class DartReviewBlockFormatTests(unittest.TestCase):
+    """JSON Lines block output: per-block validation, derived legacy fields,
+    truncation tolerance."""
+
+    def test_json_lines_become_validated_blocks_with_legacy_fields(self):
+        review = dart_report_review._normalize_review("\n".join(BLOCK_LINES))
+
+        self.assertEqual(review["format"], dart_report_review.BLOCKS_FORMAT)
+        self.assertEqual(
+            [b["type"] for b in review["blocks"]],
+            ["card", "card", "trend", "text", "section", "table", "section", "bullets", "checklist", "changes", "limits"],
+        )
+        self.assertEqual(review["dropped_blocks"], 0)
+        self.assertFalse(review["truncated"])
+        # tone is normalised; unknown tones fall back to neutral
+        self.assertEqual([c["tone"] for c in review["cards"]], ["good", "watch"])
+        self.assertNotIn("type", review["cards"][0])
+        self.assertEqual(review["metric_trends"][0]["before"]["value"], 9.01)
+        self.assertEqual(review["watch_items"], ["현금흐름표 확인"])
+        self.assertEqual(review["comparison_notes"], ["부채비율 7.5% → 7.9%"])
+        self.assertEqual(review["source_limits"], "손익계산서 본문 없음")
+        table = review["blocks"][5]
+        # rows are cut or padded to the column count, numbers become strings
+        self.assertEqual(table["rows"], [["부채총계", "2.5조", "5.3조"], ["자본총계", "27.9", ""]])
+        bullets = review["blocks"][7]
+        self.assertEqual(bullets["items"], ["커머스 매출 감소", "연대보증"])
+        # summary_md is derived markdown for wiki Q&A and older readers
+        self.assertTrue(review["summary_md"].startswith("한눈 요약 **핵심**"))
+        self.assertIn("## 재무안정성·현금흐름", review["summary_md"])
+        self.assertIn("| 부채총계 | 2.5조 | 5.3조 |", review["summary_md"])
+        self.assertIn("## 다음 체크포인트\n- 현금흐름표 확인", review["summary_md"])
+        self.assertFalse(dart_report_review._review_payload_is_broken(review, finish_reason="stop"))
+
+    def test_invalid_and_unknown_blocks_are_dropped_one_by_one(self):
+        lines = BLOCK_LINES + [
+            '{"type":"chart","spec":{}}',
+            '{"type":"table","columns":["하나"],"rows":[["a"]]}',
+            '{"type":"card"}',
+            'not json at all',
+        ]
+        review = dart_report_review._normalize_review("\n".join(lines))
+        self.assertEqual(len(review["blocks"]), len(BLOCK_LINES))
+        self.assertEqual(review["dropped_blocks"], 3)
+
+    def test_card_and_trend_counts_are_capped(self):
+        card = '{"type":"card","label":"c","value":"v"}'
+        review = dart_report_review._normalize_review("\n".join([card] * 12 + BLOCK_LINES[3:5]))
+        self.assertEqual(len(review["cards"]), dart_report_review.MAX_CARDS)
+        self.assertEqual(review["dropped_blocks"], 12 - dart_report_review.MAX_CARDS)
+
+    def test_cut_off_last_line_keeps_complete_blocks(self):
+        text = "\n".join(BLOCK_LINES)
+        cut = text[: text.index('{"type":"checklist"') + 25]
+        review = dart_report_review._normalize_review(cut)
+        self.assertEqual(review["blocks"][-1]["type"], "bullets")
+        self.assertEqual(review["watch_items"], [])
+        # enough survived: kept, not retried
+        self.assertFalse(dart_report_review._review_payload_is_broken(review, finish_reason="length"))
+
+    def test_answer_cut_before_any_body_is_broken(self):
+        text = "\n".join(BLOCK_LINES[:3]) + '\n{"type":"text","md":"한눈'
+        review = dart_report_review._normalize_review(text)
+        self.assertTrue(dart_report_review._review_payload_is_broken(review, finish_reason="length"))
+
+    def test_wrapped_fenced_and_array_answers_are_accepted(self):
+        blocks = [json.loads(line) for line in BLOCK_LINES]
+        variants = [
+            "```json\n" + json.dumps({"blocks": blocks}, ensure_ascii=False, indent=2) + "\n```",
+            "[" + ",\n".join(BLOCK_LINES) + "]",
+            "다음은 리뷰입니다.\n" + " ".join(BLOCK_LINES),
+        ]
+        for raw in variants:
+            with self.subTest(raw=raw[:30]):
+                review = dart_report_review._normalize_review(raw)
+                self.assertEqual(len(review["blocks"]), len(BLOCK_LINES))
+
+    def test_truncated_wrapper_still_yields_nested_blocks(self):
+        blocks = [json.loads(line) for line in BLOCK_LINES]
+        raw = json.dumps({"blocks": blocks}, ensure_ascii=False)
+        review = dart_report_review._normalize_review(raw[: raw.index('"checklist"')])
+        self.assertEqual(review["format"], dart_report_review.BLOCKS_FORMAT)
+        self.assertGreaterEqual(len(review["blocks"]), 8)
+
+    def test_json_without_any_block_is_broken_not_shown_raw(self):
+        review = dart_report_review._normalize_review('{"foo": 1}\n{"type": "nope"}')
+        self.assertEqual(review["blocks"], [])
+        self.assertEqual(review["summary_md"], "")
+        self.assertTrue(dart_report_review._review_payload_is_broken(review))
+
+    def test_old_single_object_and_plain_markdown_answers_still_work(self):
+        legacy = dart_report_review._normalize_review('{"summary_md": "# 요약", "cards": []}')
+        self.assertNotIn("format", legacy)
+        self.assertEqual(legacy["summary_md"], "# 요약")
+        plain = dart_report_review._normalize_review("## 마크다운 답변\n- 항목")
+        self.assertEqual(plain["summary_md"], "## 마크다운 답변\n- 항목")
+
+    def test_prompt_asks_for_json_lines_in_catalog_order(self):
+        prompt = dart_report_review._build_prompt(
+            stock_code="005930",
+            corp_name="삼성전자",
+            primary={"report_name": "분기보고서", "report_date": "2026-11-14", "viewer_url": "u"},
+            primary_text="원문",
+            comparisons=[],
+            financial_context="재무",
+        )
+        self.assertIn("JSON Lines", prompt)
+        self.assertNotIn("summary_md", prompt)
+        positions = [prompt.index(f'{{"type": "{kind}"') for kind in ("card", "trend", "text", "section", "checklist", "changes", "limits")]
+        self.assertEqual(positions, sorted(positions))
+
+
 class DartReportReviewTruncationTests(TempDbMixin):
     BROKEN = (
         {"summary_md": '{"summary_md": "본문", "cards": [{"label":"매출"', "cards": []},
@@ -210,6 +336,38 @@ class DartReportReviewTruncationTests(TempDbMixin):
 
         self.assertIsNone(await dart_report_review._output_failure("005930", "r1"))
 
+    async def test_cut_off_block_review_is_cached_without_retry(self):
+        text = "\n".join(BLOCK_LINES)
+        partial = dart_report_review._normalize_review(text[: text.index('{"type":"checklist"') + 10])
+        partial["truncated"] = True
+        usage = {"model": "m", "tokens_in": 3, "tokens_out": 4, "cost_usd": 0.001, "finish_reason": "length"}
+        call = AsyncMock(side_effect=[(partial, usage)])
+        save = AsyncMock(side_effect=lambda review: review)
+
+        saved = await self._run_generate(call, save)
+
+        self.assertEqual(call.await_count, 1)
+        save.assert_awaited_once()
+        self.assertTrue(saved["review"]["truncated"])
+        self.assertEqual(saved["review_md"], partial["summary_md"])
+
+    async def test_call_marks_cut_off_block_answer_truncated(self):
+        post = AsyncMock(return_value={
+            "content": "\n".join(BLOCK_LINES),
+            "model": "m",
+            "input_tokens": 10,
+            "output_tokens": 20,
+            "cost_usd": 0.001,
+            "data": {"choices": [{"finish_reason": "length"}]},
+        })
+        with (
+            patch.object(dart_report_review.ai_config, "get_model_for_feature", AsyncMock(return_value="m")),
+            patch.object(dart_report_review.ai_client, "post_chat_completion", post),
+        ):
+            review, usage = await dart_report_review._call_openrouter("프롬프트", google_sub=None)
+        self.assertTrue(review["truncated"])
+        self.assertEqual(usage["finish_reason"], "length")
+
     async def test_request_caps_reasoning_and_leaves_room_for_it(self):
         post = AsyncMock(return_value={
             "content": '{"summary_md": "# 리뷰"}',
@@ -290,6 +448,29 @@ class DartReportReviewCacheTests(TempDbMixin):
         self.assertEqual(saved["review"]["summary_md"], "# 리뷰")
         self.assertEqual(loaded["comparison_reports"][0]["rcept_no"], "20251114000001")
         self.assertEqual(loaded["model"], "deepseek/deepseek-v4-flash")
+
+    async def test_block_review_grounds_wiki_qa_like_the_old_format(self):
+        from routes import wiki as wiki_route
+
+        review = dart_report_review._normalize_review("\n".join(BLOCK_LINES))
+        await dart_review_repo.save_dart_report_review({
+            "stock_code": "005930",
+            "rcept_no": "20261114000001",
+            "report_name": "분기보고서 (2026.09)",
+            "report_date": "2026-11-14",
+            "review": review,
+            "review_md": review["summary_md"],
+        })
+
+        loaded = await dart_review_repo.get_dart_report_review("005930")
+        self.assertEqual(loaded["review"]["blocks"], review["blocks"])
+        self.assertFalse(dart_report_review._cached_review_is_broken(loaded))
+
+        context = await wiki_route._load_dart_review_context("005930")
+        self.assertIn("- [good] 부채비율: 7.9%", context)
+        self.assertIn("| 부채총계 | 2.5조 | 5.3조 |", context)
+        self.assertIn("확인할 항목:\n- 현금흐름표 확인", context)
+        self.assertIn("원문 범위/한계: 손익계산서 본문 없음", context)
 
 
 class DartReportReviewPipelineTests(TempDbMixin):
