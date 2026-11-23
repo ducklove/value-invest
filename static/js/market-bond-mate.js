@@ -5,9 +5,8 @@
 //   커버리지(16개국, 한국 국고채 전 만기)와 히스토리를 그쪽이 관리하고, 여기서는
 //   그 카탈로그와 값을 받아 기존 렌더러에 그대로 먹인다.
 //
-//   다만 bond-mate 는 정적 사이트라 30분마다 갱신된다. 이 앱의
-//   /api/market-summary 는 60초 TTL 라이브 스크래핑이라 **같은 코드라면 로컬이
-//   더 신선하다**. 그래서 bond-mate 로 판을 깔고 로컬 값을 위에 덮는다:
+//   bond-mate 는 30분마다 금리를 갱신한다. 장중 시세는 이 앱의
+//   /api/market-summary 가 60초 TTL 로 갱신하므로 로컬 값을 우선한다:
 //
 //       카탈로그·커버리지 → bond-mate (넓다)
 //       값               → 로컬 라이브가 있으면 로컬, 없으면 bond-mate
@@ -140,13 +139,17 @@ function mergeBondMate(catalog, dataMap, snapshot) {
 
   const nextCatalog = Object.assign({}, catalog);
   const nextData = Object.assign({}, dataMap);
+  // 이전 스냅샷의 CN_BASE 는 같은 코드로 1년 LPR을 제공했다.
+  const rates = Object.entries(snapshot.rates || {}).filter(([code, rate]) =>
+    code !== 'CN_BASE' || (rate?.instrument === '익일 역레포' && Number.isFinite(rate.value))
+  );
 
   // 같은 (국가, 만기) 자리를 서로 다른 코드가 차지하는 경우가 있다 — 한국 1년은
   // 이 앱이 통안채(KR_MSB1Y)를, bond-mate 는 국고채(KR1Y)를 쓴다. 국고채 곡선에는
   // 국고채가 맞고, 무엇보다 둘을 함께 두면 커브가 어느 쪽을 그릴지 순서에 좌우된다.
   // 그래서 bond-mate 가 값을 주는 자리는 그쪽 코드로 통일하고 로컬 코드는 뺀다.
   const bondMateSlots = new Set();
-  Object.entries(snapshot.rates || {}).forEach(([seriesId, meta]) => {
+  rates.forEach(([seriesId, meta]) => {
     if (meta && meta.value != null && meta.country && meta.maturity != null) {
       bondMateSlots.add(`${meta.country}:${meta.maturity}:${_bmLocalCode(seriesId)}`);
     }
@@ -165,7 +168,7 @@ function mergeBondMate(catalog, dataMap, snapshot) {
   });
 
   // --- 국채·정책금리 ---
-  Object.entries(snapshot.rates || {}).forEach(([seriesId, meta]) => {
+  rates.forEach(([seriesId, meta]) => {
     if (!meta || meta.maturity == null || !meta.country) return;
     const code = _bmLocalCode(seriesId);
 
@@ -179,7 +182,7 @@ function mergeBondMate(catalog, dataMap, snapshot) {
       };
     }
 
-    // 값: 로컬 라이브가 이미 채웠으면 그대로 둔다(그쪽이 60초로 더 신선하다).
+    // 값: 허브 API가 채웠으면 그대로 둔다.
     const local = nextData[code];
     if (local && local.value != null && local.value !== '') return;
     const quote = _bmQuote(meta, 2);

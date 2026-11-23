@@ -57,6 +57,7 @@ def test_source_groups_match_publication_cadence():
     assert mi.source_group("JP1Y") == "daily"  # MOF CSV
     assert mi.source_group("JP_TONA") == "daily"
     assert mi.source_group("US_BASE") == "daily"
+    assert mi.source_group("CN_BASE") == "daily"  # bond-mate PBOC overnight reverse repo
     assert mi.source_group("GB_BASE") == "monthly"  # BIS
     assert mi.SOURCE_GROUP_TTL["quote"] == 60
     assert mi.SOURCE_GROUP_TTL["daily"] >= 1800

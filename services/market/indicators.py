@@ -16,6 +16,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
+from math import isfinite
 from typing import AsyncIterator
 from urllib.parse import urljoin
 
@@ -23,6 +24,7 @@ import httpx
 
 from cache_layer import MemoryTTLCache, cached_fetch
 from core.http import get_http_client
+from services.ecosystem import siblings
 from services.market import naver_indicators
 from services.market.sources import kis_proxy as kis_proxy_client
 from services.market.sources import yahoo
@@ -587,7 +589,6 @@ def _quote_from_current_prev(current: float, prev: float | None, decimals: int =
 _BIS_POLICY_RATE_MAP = {
     "GB_BASE": "GB",
     "AU_BASE": "AU",
-    "CN_BASE": "CN",
     "DE_BASE": "XM",
     "FR_BASE": "XM",
     "IT_BASE": "XM",
@@ -599,7 +600,7 @@ _BIS_POLICY_RATE_MAP = {
     "ID_BASE": "ID",
     "BR_BASE": "BR",
 }
-_POLICY_RATE_CODES = {"US_BASE", "KR_BASE", "JP_BASE", *_BIS_POLICY_RATE_MAP.keys()}
+_POLICY_RATE_CODES = {"US_BASE", "KR_BASE", "JP_BASE", "CN_BASE", *_BIS_POLICY_RATE_MAP.keys()}
 
 
 def _parse_fred_policy_csv(text: str) -> dict:
@@ -776,6 +777,24 @@ async def _fetch_bis_policy_rate(client: httpx.AsyncClient, ref_area: str) -> di
         return dict(_EMPTY)
 
 
+async def _fetch_cn_policy_rate(client: httpx.AsyncClient) -> dict:
+    """Read the PBOC overnight reverse repo rate published by bond-mate."""
+    try:
+        response = await client.get(siblings.data_url("bond-mate", "current"), headers=_HEADERS)
+        response.raise_for_status()
+        rate = response.json()["rates"]["CN_BASE"]
+        if rate["instrument"] != "익일 역레포":
+            return dict(_EMPTY)
+        value = rate["value"]
+        if type(value) not in (int, float) or not isfinite(value):
+            return dict(_EMPTY)
+        change = rate.get("change")
+        previous = value - change if type(change) in (int, float) and isfinite(change) else None
+        return _quote_from_current_prev(value, previous)
+    except (httpx.HTTPError, KeyError, TypeError, ValueError):
+        return dict(_EMPTY)
+
+
 async def _fetch_policy_rates(client: httpx.AsyncClient, codes: list[str]) -> dict[str, dict]:
     out = {code: dict(_EMPTY) for code in codes}
     tasks = []
@@ -789,6 +808,9 @@ async def _fetch_policy_rates(client: httpx.AsyncClient, codes: list[str]) -> di
     if "JP_BASE" in codes:
         tasks.append(_fetch_jp_policy_rate(client))
         task_codes.append("JP_BASE")
+    if "CN_BASE" in codes:
+        tasks.append(_fetch_cn_policy_rate(client))
+        task_codes.append("CN_BASE")
     bis_ref_to_codes: dict[str, list[str]] = {}
     for code in codes:
         ref_area = _BIS_POLICY_RATE_MAP.get(code)
@@ -1112,12 +1134,12 @@ async def _fetch_night_futures() -> dict:
 SOURCE_GROUP_TTL: dict[str, int] = {
     # 장중 시세 — Naver JSON, Yahoo, CNBC, Hyperliquid, KIS 야간선물, Naver marketindex
     "quote": 60,
-    # 일 단위 공표 — ECOS, NY Fed SOFR, MOF JGB, BOJ TONA, Fed/BOK/BOJ 공식 정책금리 페이지
+    # 일 단위 공표 — ECOS, NY Fed SOFR, MOF JGB, BOJ TONA, Fed/BOK/BOJ/PBOC 정책금리
     "daily": 1800,
     # 월 단위 — BIS CBPOL 정책금리
     "monthly": 21600,
 }
-_DAILY_SOURCE_CODES = frozenset({"US_SOFR", "JP_TONA", "US_BASE", "KR_BASE", "JP_BASE"})
+_DAILY_SOURCE_CODES = frozenset({"US_SOFR", "JP_TONA", "US_BASE", "KR_BASE", "JP_BASE", "CN_BASE"})
 
 
 def source_group(code: str) -> str:

@@ -1,3 +1,6 @@
+import httpx
+import pytest
+
 from services.market import indicators as mi
 
 
@@ -69,6 +72,29 @@ def test_parse_bis_policy_csv_uses_latest_matching_ref_area():
     assert out["value"] == "5.00"
     assert out["change"] == "0.25"
     assert out["direction"] == "up"
+
+
+@pytest.mark.parametrize(("quote", "status", "expected"), [
+    ({"instrument": "익일 역레포", "value": 1.25, "change": -0.15}, 200, {
+        "value": "1.25", "change": "0.15", "change_pct": "10.71%", "direction": "down",
+    }),
+    ({"value": 3.0}, 200, mi._EMPTY),
+    ({"instrument": "익일 역레포", "value": ""}, 200, mi._EMPTY),
+    ({}, 503, mi._EMPTY),
+])
+async def test_china_policy_rate_uses_bond_mate_without_bis_fallback(monkeypatch, quote, status, expected):
+    monkeypatch.setenv("BOND_MATE_BASE_URL", "https://bond.example")
+    requested = []
+
+    def handler(request):
+        requested.append(str(request.url))
+        return httpx.Response(status, json={"rates": {"CN_BASE": quote}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await mi._fetch_policy_rates(client, ["CN_BASE"])
+
+    assert requested == ["https://bond.example/data/current.json"]
+    assert result == {"CN_BASE": expected}
 
 
 def test_parse_fed_openmarket_page_uses_latest_target_range_upper_bound():

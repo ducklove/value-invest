@@ -92,6 +92,14 @@ test("로컬에 값이 없는 코드는 bond-mate 값으로 채운다", () => {
   assert.equal(dataMap.US10Y.change, "0.06");
 });
 
+test("중국 기준금리 폴백은 익일 역레포가 확인된 스냅샷만 사용한다", () => {
+  const win = load(BOND_MATE_CONFIG);
+  const legacy = { value: 3, country: "CN", maturity: -1, tenor: "기준금리" };
+  const repo = { ...legacy, value: 1.25, instrument: "익일 역레포" };
+  assert.equal(win.mergeBondMate({}, {}, { rates: { CN_BASE: legacy } }).dataMap.CN_BASE, undefined);
+  assert.equal(win.mergeBondMate({}, {}, { rates: { CN_BASE: repo } }).dataMap.CN_BASE.value, "1.25");
+});
+
 test("환율은 통화쌍별 자릿수를 지킨다", () => {
   const win = load(BOND_MATE_CONFIG);
   const { dataMap } = win.mergeBondMate({}, {}, SNAPSHOT);
