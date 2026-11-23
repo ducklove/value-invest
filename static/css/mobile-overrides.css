@@ -380,8 +380,7 @@ body.pf-mobile-simple .pf-stock-cell {
   min-width: 0;
   white-space: normal;
 }
-body.pf-mobile-simple .pf-stock-cell-with-drag {
-  display: grid;
+body.pf-mobile-simple .pf-stock-layout {
   grid-template-columns: 10px minmax(0, 1fr);
   column-gap: 3px;
 }

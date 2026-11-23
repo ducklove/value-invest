@@ -340,10 +340,8 @@ def test_portfolio_stock_click_uses_explicit_insight_link_handler():
     events = (JS / "portfolio-events.js").read_text(encoding="utf-8")
 
     assert 'const stockIdentity = `<span class="pf-stock-main"><span class="pf-stock-line"><a href="#" class="pf-stock-link js-pf-open-insight"' in render
-    assert '${dragHandle}${stockIdentity}' in render
-    assert "const stockCellClass = 'pf-stock-cell pf-stock-cell-with-drag js-pf-analyze';" in render
-    assert '<td class="${stockCellClass}">${dragHandle}${stockIdentity}</td>' in render
-    assert ".pf-stock-cell-with-drag" in styles
+    assert '<td class="pf-stock-cell js-pf-analyze"><div class="pf-stock-layout">${dragHandle}${stockIdentity}</div></td>' in render
+    assert ".pf-stock-layout" in styles
     assert "grid-template-columns: 16px minmax(0, 1fr);" in styles
     assert ".pf-stock-main" in styles
     assert "display: inline-flex;" in styles

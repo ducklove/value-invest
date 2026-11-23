@@ -2368,12 +2368,14 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
 .pf-stock-cell-editing {
   cursor: default;
 }
-.pf-stock-cell-with-drag {
+/* 종목명 셀도 행 높이와 테두리를 공유하도록 내부에서 정렬한다. */
+.pf-stock-layout {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);
   column-gap: 6px;
   align-items: start;
 }
+.pf-stock-layout > .pf-stock-main { grid-column: 2; }
 .pf-stock-main {
   display: inline-flex;
   flex-direction: column;
@@ -2733,12 +2735,8 @@ tr.pf-rebal-row-breached td { background: rgba(220, 38, 38, 0.06); }
 body.pf-compact-rows .pf-stock-tags {
   display: none !important;
 }
-body.pf-compact-rows .pf-stock-cell-with-drag {
-  /* 셀의 세로 정렬은 유지하고 이동 손잡이는 왼쪽 여백에 배치한다. */
-  display: table-cell;
-  position: relative;
-  padding-left: 30px;
-}
+body.pf-compact-rows .pf-stock-layout { align-items: center; }
+body.pf-compact-rows .pf-row-drag-handle { margin: 0; }
 body.pf-compact-rows .pf-stock-line {
   flex-wrap: nowrap;
 }
@@ -3706,15 +3704,6 @@ body.pf-compact-rows .pf-row-actions .js-pf-account-detail { display:none; }
 #pfActivityTotals h3 { font-size: 15px; }
 @media(max-width:600px) { .pf-activity-dialog input, .pf-activity-dialog select { font-size: 16px; } }
 
-/* 컴팩트 모드에서도 잔고 변경 없이 종목 순서를 옮길 수 있다. */
-body.pf-compact-rows .pf-row-drag-handle {
-  position: absolute;
-  left: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  margin: 0;
-}
-
 /* 잔고 갱신 시각과 거래내역 가져오기 제한을 각각 표시한다. */
 .pf-account-sync-status { color: var(--text-secondary); }
 .pf-account-notice { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--border); border-left: 3px solid #b7791f; border-radius: 6px; font-size: 13px; line-height: 1.6; }
@@ -3806,7 +3795,6 @@ body.pf-heat-mode:not(.pf-mobile-simple) .pf-table tbody tr[data-heat-dir] > td.
 .pf-divcal-badge.sold { border-style: solid; }
 
 /* 연결된 롱숏 행은 같은 들여쓰기와 연결선으로 한 묶음을 이룬다. */
-.pf-stock-cell-with-drag > .pf-stock-main { grid-column: 2; }
 .pf-pair-connector, .pf-row-position {
   display: block; width: 16px; min-height: 14px; line-height: 14px;
   align-self: center; color: var(--text-secondary); font-size: 16px;
@@ -3815,9 +3803,6 @@ body.pf-heat-mode:not(.pf-mobile-simple) .pf-table tbody tr[data-heat-dir] > td.
 .pf-table tbody tr[data-pair-anchor] > td:first-child { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--primary) 45%, transparent); }
 .pf-table tbody tr[data-pair-position="first"] > td { border-top: 1px solid color-mix(in srgb, var(--primary) 25%, var(--border)); }
 .pf-table tbody tr[data-pair-position="last"] > td { border-bottom: 1px solid color-mix(in srgb, var(--primary) 25%, var(--border)); }
-body.pf-compact-rows .pf-pair-connector, body.pf-compact-rows .pf-row-position {
-  position: absolute; left: 6px; top: 50%; transform: translateY(-50%);
-}
 
 /* 성과 숫자를 가리키거나 키보드로 포커스하면 같은 자리의 툴팁을 보여 준다. */
 .pf-value-hint { cursor: help; }

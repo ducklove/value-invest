@@ -152,9 +152,27 @@ test('등락액·당일손익은 지정한 열 위치에 기본 숨김이며 숏
   await page.screenshot({path: testInfo.outputPath('daily-columns-mobile.png'), fullPage: true});
 });
 
-test('롱·숏 종목명과 연결 표시의 위치가 기본·정렬·컴팩트·모바일에서도 맞는다', async ({page}, testInfo) => {
+test('롱·숏 테두리와 종목명이 기본·편집·정렬·컴팩트·모바일에서도 맞는다', async ({page}, testInfo) => {
   await prepare(page);
+  await page.evaluate(() => {
+    PfStore.items.find(item => item.stock_code === '006800').tags = ['주식'];
+    renderPortfolio();
+  });
+  await expect(row(page, '006800').locator('.pf-stock-tags')).toContainText('주식');
+
+  async function expectCellEdgesAligned() {
+    for (const code of ['006800', '005930']) {
+      const edges = await row(page, code).evaluate(tr => {
+        const name = tr.cells[0].getBoundingClientRect();
+        const change = tr.querySelector('.pf-col-changepct').getBoundingClientRect();
+        return {top: name.top - change.top, bottom: name.bottom - change.bottom};
+      });
+      expect(edges).toEqual({top: 0, bottom: 0});
+    }
+  }
+
   async function expectAligned() {
+    await expectCellEdgesAligned();
     await expect.poll(() => page.evaluate(() => {
       const left = code => document.querySelector(`#pfBody tr[data-code="${code}"] .pf-stock-link`).getBoundingClientRect().left;
       return Math.abs(left('006800') - left('005930'));
@@ -164,12 +182,29 @@ test('롱·숏 종목명과 연결 표시의 위치가 기본·정렬·컴팩트
     await expect(row(page, '005930').locator('.pf-pair-connector')).toBeVisible();
   }
   await expectAligned();
+  await row(page, '005930').locator('.js-pf-edit').click();
+  await expect(row(page, '005930').locator('.js-pf-edit-name')).toBeVisible();
+  await expectCellEdgesAligned();
+  await row(page, '005930').locator('.js-pf-cancel').click();
   await page.locator('#pfTable th[data-sort="name"]').click();
   await expectAligned();
   await page.locator('#pfCompactToggle').check();
   await expectAligned();
   await page.screenshot({path: testInfo.outputPath('pair-compact.png'), fullPage: true});
   await page.locator('#pfCompactToggle').uncheck();
+  await page.setViewportSize({width: 1000, height: 900});
+  await page.locator('.js-pf-col-toggle[data-col-key="memo"]').check();
+  const nameCell = row(page, '006800').locator('.pf-stock-cell');
+  const nameX = (await nameCell.boundingBox()).x;
+  const tableWrap = page.locator('.pf-table-wrap');
+  const scrollLeft = await tableWrap.evaluate(el => {
+    el.scrollLeft = el.scrollWidth;
+    return el.scrollLeft;
+  });
+  expect(scrollLeft).toBeGreaterThan(0);
+  expect((await nameCell.boundingBox()).x).toBeCloseTo(nameX);
+  await expectAligned();
+  await tableWrap.screenshot({path: testInfo.outputPath('pair-scrolled.png')});
   await page.setViewportSize({width: 390, height: 844});
   await expectAligned();
   await page.screenshot({path: testInfo.outputPath('pair-mobile-alignment.png'), fullPage: true});

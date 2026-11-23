@@ -708,7 +708,6 @@ function renderPortfolio(options = {}) {
       : '';
     const stockIdentity = `<span class="pf-stock-main"><span class="pf-stock-line"><a href="#" class="pf-stock-link js-pf-open-insight" title="${safeName}"><strong>${safeName}</strong></a><span class="pf-stock-code">${displayCode}</span>${curTag}${liveDotE}${signalBadgeHtml}</span>${tagHtml}</span>`;
     const stockEditIdentity = `<span class="pf-stock-main pf-stock-edit-main"><input class="pf-edit-input pf-stock-name-edit js-pf-edit-name" id="pfEditName" value="${safeName}" type="text" maxlength="80" autocomplete="off"${editAttrs}><span class="pf-stock-line"><span class="pf-stock-code">${displayCode}</span>${curTag}${liveDotE}${signalBadgeHtml}</span>${tagHtml}</span>`;
-    const stockCellClass = 'pf-stock-cell pf-stock-cell-with-drag js-pf-analyze';
     const heatAttrs = pfHeatRowAttrs(r);
     const changeCell = pfChangeCellHtml(r);
     // 메모 — 기본 숨김 컬럼. 폭이 부족하면 셀 안에서 줄바꿈되도록
@@ -730,7 +729,7 @@ function renderPortfolio(options = {}) {
     }
     if (isEditing) {
       return `<tr data-code="${safeCode}"${rowClass}${heatAttrs}${pair.attrs}>
-        <td class="pf-stock-cell pf-stock-cell-with-drag pf-stock-cell-editing">${pair.marker || '<span class="pf-row-position" aria-hidden="true"></span>'}${stockEditIdentity}</td>
+        <td class="pf-stock-cell pf-stock-cell-editing"><div class="pf-stock-layout">${pair.marker || '<span class="pf-row-position" aria-hidden="true"></span>'}${stockEditIdentity}</div></td>
         <td class="pf-col-group">${groupEditCell}</td>
         <td class="pf-col-num pf-col-changepct">${changeCell}</td>
         <td class="pf-col-num pf-col-change">${pfDailyAmountCellHtml(r, 'change')}</td>
@@ -756,7 +755,7 @@ function renderPortfolio(options = {}) {
       </tr>`;
     }
     return `<tr data-code="${safeCode}"${heatAttrs}${pair.attrs}>
-      <td class="${stockCellClass}">${dragHandle}${stockIdentity}</td>
+      <td class="pf-stock-cell js-pf-analyze"><div class="pf-stock-layout">${dragHandle}${stockIdentity}</div></td>
       <td class="pf-col-group">${groupHtml}</td>
       <td class="pf-col-num pf-col-changepct">${changeCell}</td>
       <td class="pf-col-num pf-col-change">${pfDailyAmountCellHtml(r, 'change')}</td>
