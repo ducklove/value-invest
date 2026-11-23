@@ -92,11 +92,22 @@ class CacheTests(TempDbMixin):
         self.assertEqual(fetch.await_count, 2)
 
     async def test_slow_ticker_does_not_discard_completed_ticker(self):
+        slow_fetch = asyncio.Event()
+        wait = asyncio.wait
+
         async def fetch(ticker):
             if ticker == "SLOW":
-                await asyncio.sleep(1)
+                await slow_fetch.wait()
             return {"events": [], "status": "fresh"}
-        with patch.object(sources, "fetch_history", side_effect=fetch), patch.object(sources, "BATCH_TIMEOUT", 0.05):
+
+        async def wait_until_fast_completes(tasks, *, timeout):
+            # Simulate the deadline after FAST has finished, with SLOW still pending.
+            return await wait(tasks, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
+
+        with (
+            patch.object(sources, "fetch_history", side_effect=fetch),
+            patch.object(asyncio, "wait", side_effect=wait_until_fast_completes),
+        ):
             result = await sources.get_histories(["FAST", "SLOW"])
         self.assertEqual(result["FAST"]["status"], "fresh")
         self.assertEqual(result["SLOW"]["status"], "unavailable")
