@@ -979,6 +979,7 @@ class PortfolioTests(TempDbMixin):
         self.assertAlmostEqual(by_group["반도체"]["weight_pct"], 70.0)
         self.assertEqual(by_group["반도체"]["market_value"], 700)
         self.assertEqual(by_group["반도체"]["stock_count"], 1)
+        self.assertEqual(by_group["반도체"]["fx_usdkrw"], 1400)
 
     async def test_group_weight_history_prefers_snapshot_group_name(self):
         await portfolio_repo.save_portfolio_item(
@@ -1104,6 +1105,39 @@ class PortfolioTests(TempDbMixin):
         self.assertAlmostEqual(by_group["Core"]["weight_pct"], 30.0)
         self.assertAlmostEqual(by_group["Satellite"]["weight_pct"], 70.0)
         self.assertEqual(by_group["Core"]["total_value"], 1000)
+        self.assertEqual(by_group["Core"]["snapshot_total_value"], 900)
+
+    async def test_stock_and_tag_history_share_the_daily_constituent_denominator(self):
+        await seed_user("u2", email="other@example.com")
+        await portfolio_repo.save_portfolio_item("u1", "005930", "삼성전자", 10, 1000)
+        await portfolio_repo.set_portfolio_tags("u1", "005930", ["AI"])
+        await snapshots_repo.save_snapshot("u1", "2026-01-02", 999, 800, 1000, 1, 1500)
+
+        for day, value, other in (
+            ("2026-01-01", None, 1000),
+            ("2026-01-02", -250, 1250),
+            ("2026-01-03", None, 1000),
+            ("2026-01-04", -250, 250),
+        ):
+            rows = [{"stock_code": "CASH_KRW", "market_value": other}]
+            if value is not None:
+                rows.append({"stock_code": "005930", "market_value": value})
+            await snapshots_repo.save_stock_snapshots("u1", day, rows)
+        await snapshots_repo.save_stock_snapshots("u2", "2026-01-03", [
+            {"stock_code": "005930", "market_value": 9999},
+        ])
+
+        with patch.object(portfolio_route, "get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})):
+            stock = await portfolio_route.get_stock_weight_history(object(), "005930")
+        tag = await snapshots_repo.get_tag_history("u1", "AI")
+        self.assertEqual(await snapshots_repo.get_stock_weight_history("u1", "000660"), [])
+        self.assertEqual([row["date"] for row in stock], ["2026-01-02", "2026-01-03", "2026-01-04"])
+        self.assertEqual([row["market_value"] for row in stock], [-250, 0, -250])
+        self.assertEqual([row["weight_pct"] for row in stock], [-25, 0, None])
+        self.assertEqual([row["snapshot_total_value"] for row in stock], [999, None, None])
+        self.assertEqual([row["fx_usdkrw"] for row in stock], [1500, None, None])
+        self.assertEqual([row["tag_value"] for row in tag], [-250, 0, -250])
+        self.assertEqual([row["weight_pct"] for row in tag], [-25, 0, None])
 
     async def test_group_and_stock_weights_are_materialized_on_snapshot_save(self):
         await portfolio_repo.save_portfolio_item(

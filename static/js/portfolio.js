@@ -30,6 +30,7 @@
     'portfolio-group-composition.js',
     'portfolio-cashflows.js',
     'portfolio-alerts.js',
+    'portfolio-popup-trends.js',
     'portfolio-tag-summary.js',
     'portfolio-events.js',
   ];

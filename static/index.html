@@ -460,7 +460,10 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
           <h3 id="pfAssetInsightTitle">투자 인사이트</h3>
           <button class="pf-modal-close" type="button" onclick="pfCloseAssetInsight()" aria-label="닫기">&times;</button>
         </div>
-        <div class="pf-modal-body pf-insight-body" id="pfAssetInsightBody"></div>
+        <div class="pf-modal-body pf-insight-body">
+          <div id="pfAssetInsightTrends"></div>
+          <div id="pfAssetInsightBody"></div>
+        </div>
       </div>
     </div>
     </div><!-- /pfHoldingsTab -->
@@ -1507,6 +1510,7 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
 <script type="application/x-feature-script" data-feature="distributions" data-src="./js/portfolio-distributions.js"></script>
 <script src="./js/portfolio-cashflows.js" defer></script>
 <script src="./js/portfolio-alerts.js" defer></script>
+<script src="./js/portfolio-popup-trends.js" defer></script>
 <script src="./js/portfolio-tag-summary.js" defer></script>
 <script src="./js/portfolio-events.js" defer></script>
 <script data-feature="insights" data-src="./js/insights.js"></script>

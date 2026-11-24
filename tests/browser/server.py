@@ -55,11 +55,16 @@ async def lifespan(app):
         await holdings.save_portfolio_item(user["google_sub"], "CASH_KRW", "원화", 1000000, 1)
         today = today_kst_date()
         await financial.save_financial_data("005930", [{"year": today.year-1, "revenue": 100, "operating_profit": 9}])
-        for age, price in ((5, 70000), (1, 75000)):
+        for age, price, cash, fx in ((5, 70000, 300000, 1400), (1, 75000, 750000, 1500)):
             day = (today-timedelta(days=age)).isoformat()
-            await snapshots.save_snapshot(user["google_sub"], day, price*10, 700000, price/70, 700)
-            await snapshots.save_stock_snapshots(user["google_sub"], day, [{"stock_code": "005930", "quantity": 10,
-                "market_value": price*10, "unit_price": price, "currency": "KRW", "fx_rate": 1}])
+            total = price * 10 + cash
+            await snapshots.save_snapshot(user["google_sub"], day, total, 700000, total / 700, 700, fx)
+            await snapshots.save_stock_snapshots(user["google_sub"], day, [
+                {"stock_code": "005930", "quantity": 10, "market_value": price * 10,
+                 "unit_price": price, "currency": "KRW", "fx_rate": 1},
+                {"stock_code": "CASH_KRW", "quantity": cash, "market_value": cash,
+                 "unit_price": 1, "currency": "KRW", "fx_rate": 1},
+            ])
         try:
             from services.brokers import activity, derivatives, futures_underlyings, kis, namuh, sync
             from services.brokers.registry import get_adapter
@@ -167,6 +172,10 @@ app.add_api_route("/api/portfolio/order", portfolio.save_portfolio_order, method
 app.add_api_route("/api/portfolio/{stock_code}/metadata", portfolio.save_holding_metadata, methods=["PUT"])
 app.add_api_route("/api/portfolio/{stock_code}/group", portfolio.set_holding_group, methods=["PUT"])
 app.add_api_route("/api/portfolio/{stock_code}/pair", portfolio.update_portfolio_pair, methods=["PUT"])
+app.add_api_route("/api/portfolio/{stock_code}/tags", portfolio.update_portfolio_tags, methods=["PUT"])
+app.add_api_route("/api/portfolio/stock-weight-history", portfolio.get_stock_weight_history, methods=["GET"])
+app.add_api_route("/api/portfolio/group-weight-history", portfolio.get_group_weight_history, methods=["GET"])
+app.add_api_route("/api/portfolio/tag-history", portfolio.get_tag_history, methods=["GET"])
 
 
 @app.put("/api/portfolio/{stock_code}/benchmark")

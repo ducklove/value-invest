@@ -525,6 +525,7 @@ function openManagedModal(modalOrId, options = {}) {
     previousFocus: document.activeElement,
     initialFocus: options.initialFocus || null,
     onEscape: options.onEscape || null,
+    onClose: options.onClose || null,
   };
   _managedModalStack.push(entry);
   modal.style.display = options.display || 'flex';
@@ -546,6 +547,7 @@ function closeManagedModal(modalOrId, options = {}) {
     _managedModalBodyOverflow = null;
   }
   if (options.remove) modal.remove();
+  entry.onClose?.();
   if (options.restoreFocus !== false && entry.previousFocus && typeof entry.previousFocus.focus === 'function' && document.contains(entry.previousFocus)) {
     try {
       entry.previousFocus.focus({ preventScroll: true });

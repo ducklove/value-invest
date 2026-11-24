@@ -8,10 +8,8 @@ import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TAG_SUMMARY_SRC = readFileSync(
-  join(__dirname, "..", "..", "static", "js", "portfolio-tag-summary.js"),
-  "utf8",
-);
+const SOURCES = ["portfolio-trends.js", "portfolio-popup-trends.js", "portfolio-tag-summary.js"]
+  .map(file => readFileSync(join(__dirname, "..", "..", "static", "js", file), "utf8"));
 
 function loadTagSummary() {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", {
@@ -71,7 +69,13 @@ function loadTagSummary() {
   window.pfFxSymbol = () => "";
   window.apiFetch = async () => ({ ok: true, json: async () => [] });
   window.apiFetchJson = async () => [];
+  window.ResizeObserver = class {
+    observe() {}
+    disconnect() {}
+  };
+  const closeCallbacks = new WeakMap();
   window.openManagedModal = (modal, options = {}) => {
+    closeCallbacks.set(modal, options.onClose);
     modal.style.display = options.display || "flex";
     const target = options.initialFocus ? modal.querySelector(options.initialFocus) : modal.querySelector("button");
     target?.focus();
@@ -80,10 +84,15 @@ function loadTagSummary() {
   window.closeManagedModal = (modal, options = {}) => {
     if (options.remove) modal.remove();
     else modal.style.display = "none";
+    closeCallbacks.get(modal)?.();
+    closeCallbacks.delete(modal);
   };
-  const script = window.document.createElement("script");
-  script.textContent = TAG_SUMMARY_SRC;
-  window.document.body.appendChild(script);
+  for (const source of SOURCES) {
+    const script = window.document.createElement("script");
+    script.textContent = source;
+    window.document.body.appendChild(script);
+  }
+  window._waitForChartContainer = async () => true;
   return window;
 }
 
@@ -126,7 +135,18 @@ test("group summary opens the same modal layout with group-scoped labels", () =>
   assert.equal(modal.querySelector(".pf-tag-summary-pie"), null);
 });
 
-test("tag trend charts start their y-axis from zero", async () => {
+test("live portfolio weight is unavailable when a holding has no quote", () => {
+  const w = loadTagSummary();
+  w.PfStore.items[2].quote = {};
+
+  w.pfOpenTagSummary("AI");
+
+  const cards = w.document.querySelectorAll(".pf-tag-summary-card");
+  assert.equal(cards[cards.length - 1].querySelector(".pf-tag-summary-value").textContent, "-");
+  w.close();
+});
+
+test("popup trends preserve missing points and include negative holdings below zero", async () => {
   const w = loadTagSummary();
   const createdOptions = [];
   w.PortfolioTrendChart = {
@@ -136,24 +156,44 @@ test("tag trend charts start their y-axis from zero", async () => {
         dispose() {},
         resize() {},
         on() {},
-        setOption() {},
-        getOption() { return option; },
+        setOption(next) { Object.assign(option.yAxis, next.yAxis); },
+        getOption() { return { ...option, dataZoom: [{ start: 0, end: 100 }] }; },
       };
     },
   };
-  w.document.body.innerHTML = `
-    <div id="pfTagValueTrend" class="pf-tag-summary-chart"></div>
-    <div id="pfTagWeightTrend" class="pf-tag-summary-chart"></div>
-    <span id="pfTagValueRange"></span>
-    <span id="pfTagWeightRange"></span>
-  `;
-
-  await w._pfRenderTagSummaryTrendCharts([
-    { date: "2026-01-01", tag_value: 1000, weight_pct: 12.5 },
-    { date: "2026-01-02", tag_value: 1200, weight_pct: 15.0 },
-  ]);
+  w.document.body.innerHTML = w._pfRenderPopupTrendShell("평가금액", "전체 계좌 정산");
+  w.PfStore.currency.unit = "USD";
+  w.apiFetchJson = async () => [
+    { date: "2026-01-01", market_value: 1000, weight_pct: 10, total_value: 10000, snapshot_total_value: 9000, fx_usdkrw: null },
+    { date: "2026-01-02", market_value: 150000, weight_pct: 12.5, total_value: 1200000, snapshot_total_value: 1200000, fx_usdkrw: 1500 },
+    { date: "2026-01-03", market_value: -140000, weight_pct: -10, total_value: 1400000, snapshot_total_value: 1400000, fx_usdkrw: 1400 },
+    { date: "2026-01-04", market_value: 0, weight_pct: null, total_value: 0, snapshot_total_value: 0, fx_usdkrw: 1400 },
+  ];
+  await w._pfLoadPopupTrends(w.document.body.firstElementChild, "/fixture", {
+    valueTitle: "평가금액", scopeLabel: "종목",
+  });
 
   assert.equal(createdOptions.length, 2);
-  assert.equal(createdOptions[0].yAxis.min, 0);
-  assert.equal(createdOptions[1].yAxis.min, 0);
+  assert.deepEqual(Array.from(createdOptions[0].series[0].data), [null, 100, -100, 0]);
+  assert.deepEqual(Array.from(createdOptions[1].series[0].data), [null, 12.5, -10, null]);
+  assert.match(w.document.body.textContent, /비중 산출 불가 2일/);
+  assert.ok(createdOptions[0].yAxis.min <= -100);
+  assert.ok(createdOptions[1].yAxis.min <= -10);
+  assert.ok(createdOptions[1].yAxis.max >= 12.5);
+  w.close();
+});
+
+test("group trend uses exact historical group names and includes post-exit snapshot days", () => {
+  const w = loadTagSummary();
+  const history = w._pfGroupPopupHistory([
+    { date: "2026-01-01", group_name: "core", market_value: 120, total_value: 120, weight_pct: 100 },
+    { date: "2026-01-02", group_name: "core", market_value: 900, total_value: 1000, weight_pct: 90 },
+    { date: "2026-01-02", group_name: "Core", market_value: 100, total_value: 1000, weight_pct: 10 },
+    { date: "2026-01-03", group_name: "core", market_value: 800, total_value: 800, weight_pct: 100 },
+  ], "Core");
+  assert.deepEqual(Array.from(history, row => [row.date, row.market_value, row.total_value]), [
+    ["2026-01-02", 100, 1000],
+    ["2026-01-03", 0, 800],
+  ]);
+  w.close();
 });

@@ -1270,6 +1270,12 @@ async def get_tag_history(request: Request, tag: str = Query(..., min_length=1))
     return await snapshots_repo.get_tag_history(user["google_sub"], tag.strip())
 
 
+@router.get("/api/portfolio/stock-weight-history")
+async def get_stock_weight_history(request: Request, code: str = Query(..., min_length=1)):
+    user = _require_user(await get_current_user(request))
+    return await snapshots_repo.get_stock_weight_history(user["google_sub"], _normalize_portfolio_code(code))
+
+
 @router.get("/api/portfolio/benchmark-history")
 async def get_benchmark_history(code: str = Query(...), start: str = Query(...)):
     """Return daily close prices for a benchmark index, served from the

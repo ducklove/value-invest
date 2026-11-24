@@ -1,19 +1,10 @@
 // Tag-level portfolio popup: list tagged holdings and compare daily weighted return.
-let _pfTagSummaryLoadSeq = 0;
-let _pfTagValueChartInstance = null;
-let _pfTagWeightChartInstance = null;
-let _pfTagValueChartResizeObserver = null;
-let _pfTagWeightChartResizeObserver = null;
-
 function _pfNormalizeTagKey(tag) {
   return String(tag || '').trim().replace(/^#/, '').toLowerCase();
 }
 
-function _pfNormalizeGroupKey(group) {
-  return String(group || '').trim().toLowerCase();
-}
-
 function _pfNumberOrNull(value) {
+  if (value == null || value === '') return null;
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
 }
@@ -216,263 +207,27 @@ function _pfRenderTagSummaryComposition(rows, tagStats, portfolioWeight, scopeLa
     </div>`;
 }
 
-function _pfRenderTagSummaryTrendShell() {
-  return `
-    <div class="pf-tag-summary-trends">
-      <div class="pf-tag-summary-trend-panel">
-        <div class="pf-tag-summary-trend-head">
-          <strong>평가금액 합 추세</strong>
-          <span id="pfTagValueRange"></span>
-        </div>
-        <div class="pf-tag-summary-chart" id="pfTagValueTrend"></div>
-      </div>
-      <div class="pf-tag-summary-trend-panel">
-        <div class="pf-tag-summary-trend-head">
-          <strong>포트폴리오 비중 추세</strong>
-          <span id="pfTagWeightRange"></span>
-        </div>
-        <div class="pf-tag-summary-chart" id="pfTagWeightTrend"></div>
-      </div>
-    </div>`;
-}
-
-function _pfDisposeTagSummaryCharts() {
-  if (_pfTagValueChartInstance) {
-    _pfTagValueChartInstance.dispose();
-    _pfTagValueChartInstance = null;
-  }
-  if (_pfTagWeightChartInstance) {
-    _pfTagWeightChartInstance.dispose();
-    _pfTagWeightChartInstance = null;
-  }
-  if (_pfTagValueChartResizeObserver) {
-    _pfTagValueChartResizeObserver.disconnect();
-    _pfTagValueChartResizeObserver = null;
-  }
-  if (_pfTagWeightChartResizeObserver) {
-    _pfTagWeightChartResizeObserver.disconnect();
-    _pfTagWeightChartResizeObserver = null;
-  }
-}
-
-function _pfSetTagSummaryTrendMessage(message) {
-  ['pfTagValueTrend', 'pfTagWeightTrend'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.innerHTML = `<div class="pf-chart-message">${escapeHtml(message)}</div>`;
-  });
-  ['pfTagValueRange', 'pfTagWeightRange'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = '';
-  });
-}
-
-function _pfTagTrendValue(row) {
-  const value = _pfNumberOrNull(row?.tag_value);
-  if (value === null) return null;
-  if (PfStore.currency.unit === 'USD') {
-    const fx = _pfNumberOrNull(row?.fx_usdkrw);
-    return fx && fx > 0 ? value / fx : pfFx(value);
-  }
-  return value;
-}
-
-function _pfUpdateTagTrendRangeLabel(elId, rows, startIdx, endIdx) {
-  const el = document.getElementById(elId);
-  if (!el) return;
-  if (!rows?.length || !rows[startIdx] || !rows[endIdx]) {
-    el.textContent = '';
-    return;
-  }
-  const start = rows[startIdx].date;
-  const end = rows[endIdx].date;
-  const days = Math.max(0, Math.round((new Date(end) - new Date(start)) / 86400000)) + 1;
-  el.textContent = `${start} ~ ${end} · ${days.toLocaleString()}일`;
-}
-
-async function _pfCreateTagTrendChart({
-  containerId,
-  rangeId,
-  rows,
-  values,
-  title,
-  color,
-  axisFormatter,
-  tooltipSuffix = '',
-  yZero = false,
-}) {
-  const container = document.getElementById(containerId);
-  if (!container) return null;
-  if (!rows.length || !values.some(v => Number.isFinite(v))) {
-    container.innerHTML = '<div class="pf-chart-message">일간 스냅샷 데이터가 없습니다.</div>';
-    _pfUpdateTagTrendRangeLabel(rangeId, [], 0, 0);
-    return null;
-  }
-  if (typeof PortfolioTrendChart === 'undefined') {
-    container.innerHTML = '<div class="pf-chart-message">차트 렌더러를 불러오지 못했습니다.</div>';
-    return null;
-  }
-  const waitForContainer = typeof _waitForChartContainer === 'function'
-    ? _waitForChartContainer
-    : async () => true;
-  const ready = await waitForContainer(container);
-  if (!ready && container.offsetParent === null) return null;
-
-  const mobileChartMode = typeof _isMobileChartMode === 'function' && _isMobileChartMode();
-  const labels = rows.map(row => row.date);
-  const chart = PortfolioTrendChart.create(container, {
-    grid: { left: containerId === 'pfTagValueTrend' ? 70 : 54, right: 12, top: 12, bottom: mobileChartMode ? 24 : 52 },
-    dataZoom: mobileChartMode ? [] : [{ start: 0, end: 100 }],
-    xAxis: { type: 'category', data: labels },
-    yAxis: {
-      type: 'value',
-      min: yZero ? 0 : 'dataMin',
-      axisLabel: { formatter: axisFormatter },
-    },
-    series: [{
-      name: title,
-      type: 'line',
-      data: values.map(v => Number.isFinite(v) ? v : '-'),
-      smooth: 0.3,
-      symbol: values.length > 45 ? 'none' : 'circle',
-      lineStyle: { color, width: 2 },
-      itemStyle: { color },
-      areaStyle: {},
-      tooltipSuffix,
-    }],
-  });
-
-  const fullWindow = typeof _chartZoomWindow === 'function'
-    ? _chartZoomWindow(rows.length, 0, 100)
-    : { startIdx: 0, endIdx: rows.length - 1 };
-  if (typeof _applyVisibleYAxis === 'function') {
-    _applyVisibleYAxis(chart, [values], fullWindow.startIdx, fullWindow.endIdx, yZero);
-  }
-  _pfUpdateTagTrendRangeLabel(rangeId, rows, fullWindow.startIdx, fullWindow.endIdx);
-
-  if (typeof ResizeObserver !== 'undefined') {
-    const ro = new ResizeObserver(() => {
-      if (chart && chart.resize) chart.resize();
-    });
-    ro.observe(container);
-    if (containerId === 'pfTagValueTrend') _pfTagValueChartResizeObserver = ro;
-    else _pfTagWeightChartResizeObserver = ro;
-  }
-  if (typeof _kickChartResize === 'function') _kickChartResize(chart);
-
-  if (chart && typeof chart.on === 'function') {
-    let zoomTimer = null;
-    chart.on('datazoom', () => {
-      clearTimeout(zoomTimer);
-      zoomTimer = setTimeout(() => {
-        const dz = chart.getOption?.()?.dataZoom?.[0];
-        const startPct = dz?.start ?? 0;
-        const endPct = dz?.end ?? 100;
-        const win = typeof _chartZoomWindow === 'function'
-          ? _chartZoomWindow(rows.length, startPct, endPct)
-          : { startIdx: 0, endIdx: rows.length - 1 };
-        if (typeof _applyVisibleYAxis === 'function') {
-          _applyVisibleYAxis(chart, [values], win.startIdx, win.endIdx, yZero);
-        }
-        _pfUpdateTagTrendRangeLabel(rangeId, rows, win.startIdx, win.endIdx);
-      }, 80);
-    });
-  }
-  return chart;
-}
-
-async function _pfRenderTagSummaryTrendCharts(rows) {
-  _pfDisposeTagSummaryCharts();
-  const cleanedRows = Array.isArray(rows)
-    ? rows.filter(row => row && row.date)
-    : [];
-  if (!cleanedRows.length) {
-    _pfSetTagSummaryTrendMessage('일간 스냅샷 데이터가 없습니다.');
-    return;
-  }
-
-  const values = cleanedRows.map(_pfTagTrendValue);
-  const weights = cleanedRows.map(row => _pfNumberOrNull(row.weight_pct));
-  const firstValue = values.find(v => Number.isFinite(v));
-  const lastValue = values.slice().reverse().find(v => Number.isFinite(v));
-  const valuePct = firstValue && lastValue ? ((lastValue / firstValue) - 1) * 100 : 0;
-  const latestWeight = weights.slice().reverse().find(v => Number.isFinite(v)) ?? 0;
-  const valueColor = typeof returnToColor === 'function' ? returnToColor(valuePct, 20) : '#2563eb';
-  const weightColor = typeof returnToColor === 'function' ? returnToColor(latestWeight, 30) : '#059669';
-  const valueDiv = pfFxDivisor();
-  const valueUnit = pfFxUnit();
-  const valueSymbol = pfFxSymbol();
-
-  _pfTagValueChartInstance = await _pfCreateTagTrendChart({
-    containerId: 'pfTagValueTrend',
-    rangeId: 'pfTagValueRange',
-    rows: cleanedRows,
-    values,
-    title: '평가금액 합',
-    color: valueColor,
-    axisFormatter: v => `${valueSymbol}${(v / valueDiv).toFixed(PfStore.currency.unit === 'USD' ? 2 : 1)}${valueUnit}`,
-    yZero: true,
-  });
-  _pfTagWeightChartInstance = await _pfCreateTagTrendChart({
-    containerId: 'pfTagWeightTrend',
-    rangeId: 'pfTagWeightRange',
-    rows: cleanedRows,
-    values: weights,
-    title: '포트폴리오 비중',
-    color: weightColor,
-    axisFormatter: v => `${Number(v).toFixed(1)}%`,
-    tooltipSuffix: '%',
-    yZero: true,
-  });
-}
-
-async function _pfLoadTagSummaryTrends(tag) {
-  const loadSeq = ++_pfTagSummaryLoadSeq;
-  _pfSetTagSummaryTrendMessage('태그 추세 데이터를 불러오는 중입니다...');
-  try {
-    const fetchJson = typeof _pfFetchJson === 'function'
-      ? _pfFetchJson
-      : async (path, label = 'Tag history') => apiFetchJson(path, { errorMessage: `${label} request failed` });
-    const rows = await fetchJson(`/api/portfolio/tag-history?tag=${encodeURIComponent(tag)}`, 'Tag history');
-    if (loadSeq !== _pfTagSummaryLoadSeq || !document.getElementById('pfTagSummaryModal')) return;
-    await _pfRenderTagSummaryTrendCharts(rows);
-  } catch (err) {
-    if (loadSeq !== _pfTagSummaryLoadSeq) return;
-    const message = err?.message || '태그 추세 데이터를 불러오지 못했습니다.';
-    _pfSetTagSummaryTrendMessage(message);
-    if (err?.status !== 401) console.warn(err);
-  }
-}
-
-async function _pfLoadGroupSummaryTrends(groupName) {
-  const loadSeq = ++_pfTagSummaryLoadSeq;
-  const groupKey = _pfNormalizeGroupKey(groupName);
-  _pfSetTagSummaryTrendMessage('그룹 추세 데이터를 불러오는 중입니다...');
-  try {
-    const fetchJson = typeof _pfFetchJson === 'function'
-      ? _pfFetchJson
-      : async (path, label = 'Group history') => apiFetchJson(path, { errorMessage: `${label} request failed` });
-    const rows = await fetchJson('/api/portfolio/group-weight-history', 'Group weight history');
-    if (loadSeq !== _pfTagSummaryLoadSeq || !document.getElementById('pfTagSummaryModal')) return;
-    const groupRows = (Array.isArray(rows) ? rows : [])
-      .filter(row => _pfNormalizeGroupKey(row?.group_name) === groupKey)
-      .map(row => ({
+function _pfGroupPopupHistory(rows, groupName) {
+  const first = rows.find(row => row.group_name === groupName);
+  if (!first) return [];
+  const byDate = new Map();
+  for (const row of rows) {
+    if (row.date < first.date) continue;
+    if (row.group_name === groupName) {
+      byDate.set(row.date, row);
+    } else if (!byDate.has(row.date)) {
+      byDate.set(row.date, {
         date: row.date,
-        tag_value: row.market_value,
-        weight_pct: row.weight_pct,
-        fx_usdkrw: row.fx_usdkrw,
-      }));
-    await _pfRenderTagSummaryTrendCharts(groupRows);
-  } catch (err) {
-    if (loadSeq !== _pfTagSummaryLoadSeq) return;
-    const message = err?.message || '그룹 추세 데이터를 불러오지 못했습니다.';
-    _pfSetTagSummaryTrendMessage(message);
-    if (err?.status !== 401) console.warn(err);
+        market_value: 0,
+        total_value: row.total_value,
+        snapshot_total_value: row.snapshot_total_value,
+      });
+    }
   }
+  return [...byDate.values()];
 }
 
 function pfCloseTagSummary() {
-  _pfTagSummaryLoadSeq += 1;
-  _pfDisposeTagSummaryCharts();
   const modal = document.getElementById('pfTagSummaryModal');
   if (modal) closeManagedModal(modal, { remove: true });
 }
@@ -482,7 +237,9 @@ function _pfOpenPortfolioSliceSummary({
   title,
   scopeLabel,
   rows,
-  loadTrends,
+  trendPath,
+  trendOptions,
+  trendBasis,
 }) {
   if (!displayName) return;
   const allRows = _pfTagSummaryRows();
@@ -493,9 +250,10 @@ function _pfOpenPortfolioSliceSummary({
   const spreadPct = sliceStats.dailyReturnPct !== null && allStats.dailyReturnPct !== null
     ? sliceStats.dailyReturnPct - allStats.dailyReturnPct
     : null;
-  const portfolioWeight = allStats.marketValue > 0
+  const portfolioWeight = allStats.pricedCount === allStats.count && allStats.marketValue > 0
     ? sliceStats.marketValue / allStats.marketValue * 100
     : null;
+  const portfolioLabel = PfStore.accountId ? '계좌' : '전체';
 
   pfCloseTagSummary();
   const overlay = document.createElement('div');
@@ -513,23 +271,30 @@ function _pfOpenPortfolioSliceSummary({
       <div class="pf-modal-body pf-tag-summary-body">
         <div class="pf-tag-summary-grid">
           ${_pfTagSummaryCard(`${scopeLabel} 일간`, fmtPct(sliceStats.dailyReturnPct), fmtSignedKrw(sliceStats.dailyPnl), returnClass(sliceStats.dailyReturnPct))}
-          ${_pfTagSummaryCard('전체 일간', fmtPct(allStats.dailyReturnPct), fmtSignedKrw(allStats.dailyPnl), returnClass(allStats.dailyReturnPct))}
-          ${_pfTagSummaryCard('초과', fmtPct(spreadPct), 'vs 전체', returnClass(spreadPct))}
-          ${_pfTagSummaryCard('전체 비중', portfolioWeight !== null ? fmtPct(portfolioWeight, false) : '-', pfFmtPortfolioValue(sliceStats.marketValue), '')}
+          ${_pfTagSummaryCard(`${portfolioLabel} 일간`, fmtPct(allStats.dailyReturnPct), fmtSignedKrw(allStats.dailyPnl), returnClass(allStats.dailyReturnPct))}
+          ${_pfTagSummaryCard('초과', fmtPct(spreadPct), `vs ${portfolioLabel}`, returnClass(spreadPct))}
+          ${_pfTagSummaryCard(`${portfolioLabel} 비중`, portfolioWeight !== null ? fmtPct(portfolioWeight, false) : '-', pfFmtPortfolioValue(sliceStats.marketValue), '')}
         </div>
         ${_pfRenderTagSummaryComposition(selectedRows, sliceStats, portfolioWeight, scopeLabel)}
-        ${_pfRenderTagSummaryTrendShell()}
+        ${_pfRenderPopupTrendShell('평가금액 합', trendBasis)}
       </div>
     </div>`;
   overlay.addEventListener('click', e => {
     if (e.target === overlay) pfCloseTagSummary();
   });
   document.body.appendChild(overlay);
+  const trends = overlay.querySelector('[data-pf-popup-trends]');
   openManagedModal(overlay, {
     initialFocus: '.pf-modal-close',
     onEscape: pfCloseTagSummary,
+    onClose: () => {
+      _pfDisposePopupTrends(trends);
+      overlay.remove();
+    },
   });
-  void loadTrends(displayName);
+  void _pfLoadPopupTrends(trends, trendPath, {
+    valueTitle: '평가금액 합', scopeLabel, ...trendOptions,
+  });
 }
 
 function pfOpenTagSummary(tag) {
@@ -545,22 +310,20 @@ function pfOpenTagSummary(tag) {
     title: `#${displayTag}`,
     scopeLabel: '태그',
     rows: rows => rows.filter(row => row.tags.some(t => _pfNormalizeTagKey(t) === tagKey)),
-    loadTrends: _pfLoadTagSummaryTrends,
+    trendPath: `/api/portfolio/tag-history?tag=${encodeURIComponent(displayTag)}`,
+    trendOptions: { valueKey: 'tag_value' },
+    trendBasis: '전체 계좌 정산 · 현재 태그가 붙은 종목 기준',
   });
 }
 
 function pfOpenGroupSummary(groupName) {
-  const groupKey = _pfNormalizeGroupKey(groupName);
-  if (!groupKey) return;
-  const allRows = _pfTagSummaryRows();
-  const displayGroup = allRows
-    .map(row => pfGetGroup(row))
-    .find(name => _pfNormalizeGroupKey(name) === groupKey) || groupName;
   _pfOpenPortfolioSliceSummary({
-    displayName: displayGroup,
-    title: displayGroup,
+    displayName: groupName,
+    title: groupName,
     scopeLabel: '그룹',
-    rows: rows => rows.filter(row => _pfNormalizeGroupKey(pfGetGroup(row)) === groupKey),
-    loadTrends: _pfLoadGroupSummaryTrends,
+    rows: rows => rows.filter(row => pfGetGroup(row) === groupName),
+    trendPath: '/api/portfolio/group-weight-history',
+    trendOptions: { selectRows: rows => _pfGroupPopupHistory(rows, groupName) },
+    trendBasis: '전체 계좌 정산 · 날짜별 저장된 그룹 기준',
   });
 }

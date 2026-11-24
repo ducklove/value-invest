@@ -56,8 +56,9 @@
       this.rangeEl.className = 'pf-lite-zoom';
       this.startInput = document.createElement('input');
       this.endInput = document.createElement('input');
-      [this.startInput, this.endInput].forEach(input => {
+      [this.startInput, this.endInput].forEach((input, index) => {
         input.type = 'range';
+        input.setAttribute('aria-label', index === 0 ? '차트 기간 시작' : '차트 기간 끝');
         input.min = '0';
         input.max = '100';
         input.step = '0.1';
@@ -280,7 +281,9 @@
           const value = series.values[idx];
           if (!Number.isFinite(value)) return '';
           const formatted = value.toLocaleString(undefined, { maximumFractionDigits: 2 });
-          return `<div><span style="background:${series.color}"></span>${series.name || ''}: ${formatted}${series.tooltipSuffix || ''}</div>`;
+          const detail = series.tooltipDetail?.(idx);
+          return `<div><span style="background:${series.color}"></span>${series.name || ''}: ${formatted}${series.tooltipSuffix || ''}</div>`
+            + (detail ? `<div>${escapeHtml(detail)}</div>` : '');
         })
         .filter(Boolean)
         .join('');
@@ -291,8 +294,8 @@
       const rect = this.container.getBoundingClientRect();
       this.tooltip.innerHTML = `<strong>${labels[idx]}</strong>${rows}`;
       this.tooltip.style.display = 'block';
-      const x = Math.min(rect.width - 180, Math.max(8, event.clientX - rect.left + 14));
-      const y = Math.min(rect.height - 80, Math.max(8, event.clientY - rect.top - 36));
+      const x = Math.max(0, Math.min(rect.width - this.tooltip.offsetWidth, event.clientX - rect.left + 14));
+      const y = Math.max(0, Math.min(rect.height - this.tooltip.offsetHeight, event.clientY - rect.top - 36));
       this.tooltip.style.left = `${x}px`;
       this.tooltip.style.top = `${y}px`;
     }
@@ -345,13 +348,14 @@
         ctx.fillText(label, plot.left - 8, y);
       }
 
-      const tickCount = Math.min(6, Math.max(2, endIdx - startIdx + 1));
+      const dateFormatter = this.option.xAxis?.axisLabel?.formatter || formatDateLabel;
+      const tickCount = Math.min(6, Math.max(2, Math.floor((plot.right - plot.left) / 50) + 1), endIdx - startIdx + 1);
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
       for (let i = 0; i < tickCount; i++) {
         const idx = Math.round(startIdx + (i / Math.max(1, tickCount - 1)) * (endIdx - startIdx));
         const x = this._xFor(idx, plot, startIdx, endIdx);
-        ctx.fillText(formatDateLabel(labels[idx]), x, plot.bottom + 8);
+        ctx.fillText(dateFormatter(labels[idx]), x, plot.bottom + 8);
       }
 
       const stackNames = Array.from(new Set(seriesList.map(series => series.stack).filter(Boolean)));
@@ -441,6 +445,15 @@
         });
         ctx.stroke();
         ctx.setLineDash([]);
+        if (series.symbol === 'circle') {
+          ctx.fillStyle = series.color;
+          points.forEach((point, index) => {
+            if (!point || points[index - 1] || points[index + 1]) return;
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, 3, 0, Math.PI * 2);
+            ctx.fill();
+          });
+        }
       });
 
       if (this.hoverIndex != null && this.hoverIndex >= startIdx && this.hoverIndex <= endIdx) {

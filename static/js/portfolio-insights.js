@@ -3,20 +3,23 @@
 let pfAssetInsightCode = null;
 let pfAssetInsightData = null;
 let pfAssetInsightActions = [];
+let _pfAssetInsightLoadSeq = 0;
 
 function pfCloseAssetInsight() {
   const modal = document.getElementById('pfAssetInsightModal');
   if (modal) closeManagedModal(modal);
-  pfAssetInsightCode = null;
-  pfAssetInsightData = null;
-  pfAssetInsightActions = [];
 }
 
 async function pfOpenAssetInsight(stockCode) {
   const modal = document.getElementById('pfAssetInsightModal');
   const title = document.getElementById('pfAssetInsightTitle');
   const body = document.getElementById('pfAssetInsightBody');
-  if (!modal || !body || !stockCode) return;
+  const trendHost = document.getElementById('pfAssetInsightTrends');
+  if (!modal || !body || !trendHost || !stockCode) return;
+  const loadSeq = ++_pfAssetInsightLoadSeq;
+  _pfDisposePopupTrends(trendHost.firstElementChild);
+  trendHost.innerHTML = _pfRenderPopupTrendShell('평가금액', '전체 계좌 정산 · 종목별 일간 평가 기준');
+  const trends = trendHost.firstElementChild;
   pfAssetInsightCode = stockCode;
   pfAssetInsightData = null;
   pfAssetInsightActions = [];
@@ -25,14 +28,25 @@ async function pfOpenAssetInsight(stockCode) {
   openManagedModal(modal, {
     initialFocus: '.pf-modal-close',
     onEscape: pfCloseAssetInsight,
+    onClose: () => {
+      _pfAssetInsightLoadSeq += 1;
+      _pfDisposePopupTrends(trends);
+      pfAssetInsightCode = null;
+      pfAssetInsightData = null;
+      pfAssetInsightActions = [];
+    },
+  });
+  trendHost.parentElement.scrollTop = 0;
+  void _pfLoadPopupTrends(trends, `/api/portfolio/stock-weight-history?code=${encodeURIComponent(stockCode)}`, {
+    valueTitle: '평가금액', scopeLabel: '종목',
   });
 
   const slowNoticeId = setTimeout(() => {
-    if (pfAssetInsightCode !== stockCode) return;
+    if (loadSeq !== _pfAssetInsightLoadSeq) return;
     body.innerHTML = '<div class="pf-insight-loading">첫 조회라 가격/벤치마크 데이터를 조금 더 모으는 중입니다. 완료되면 자동으로 표시됩니다...</div>';
   }, 12000);
   const verySlowNoticeId = setTimeout(() => {
-    if (pfAssetInsightCode !== stockCode) return;
+    if (loadSeq !== _pfAssetInsightLoadSeq) return;
     body.innerHTML = '<div class="pf-insight-loading">외부 데이터 응답이 늦습니다. 요청은 끊지 않고 계속 기다리는 중입니다...</div>';
   }, 30000);
   try {
@@ -40,13 +54,13 @@ async function pfOpenAssetInsight(stockCode) {
       cache: 'no-store',
       errorMessage: '인사이트 로드 실패',
     });
-    if (pfAssetInsightCode !== stockCode) return;
+    if (loadSeq !== _pfAssetInsightLoadSeq) return;
     pfAssetInsightData = data;
     const profile = data.profile || {};
     if (title) title.textContent = `${profile.name || stockCode} 투자 인사이트`;
     body.innerHTML = _renderAssetInsight(data);
   } catch (e) {
-    if (pfAssetInsightCode !== stockCode) return;
+    if (loadSeq !== _pfAssetInsightLoadSeq) return;
     const message = e.message || '인사이트를 불러오지 못했습니다.';
     body.innerHTML = `<div class="pf-insight-error">${escapeHtml(message)}</div>`;
   } finally {

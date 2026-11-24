@@ -387,10 +387,13 @@ async def get_group_weight_history(google_sub: str) -> list[dict]:
 
     cursor = await db.execute(
         """
-        SELECT date, group_name, market_value, stock_count, total_value, weight_pct
-        FROM portfolio_group_snapshots
-        WHERE google_sub = ?
-        ORDER BY date ASC, market_value DESC
+        SELECT gs.date, gs.group_name, gs.market_value, gs.stock_count,
+               gs.total_value, gs.weight_pct, ps.fx_usdkrw, ps.total_value AS snapshot_total_value
+        FROM portfolio_group_snapshots gs
+        LEFT JOIN portfolio_snapshots ps
+          ON ps.google_sub = gs.google_sub AND ps.date = gs.date
+        WHERE gs.google_sub = ?
+        ORDER BY gs.date ASC, gs.market_value DESC
         """,
         (google_sub,),
     )
@@ -436,59 +439,60 @@ async def get_tag_history(google_sub: str, tag: str) -> list[dict]:
     tag_key = str(tag or "").strip().lstrip("#")
     if not tag_key:
         return []
+    rows = await _get_stock_slice_history(
+        google_sub,
+        "SELECT DISTINCT stock_code FROM portfolio_tags WHERE google_sub = ? AND lower(trim(tag)) = lower(trim(?))",
+        (google_sub, tag_key),
+    )
+    for row in rows:
+        row["tag_value"] = row.pop("market_value")
+    return rows
+
+
+async def get_stock_weight_history(google_sub: str, stock_code: str) -> list[dict]:
+    """Return a holding's saved daily value and weight across the portfolio."""
+    return await _get_stock_slice_history(google_sub, "SELECT ? AS stock_code", (stock_code,))
+
+
+async def _get_stock_slice_history(google_sub: str, codes_sql: str, codes_params: tuple[str, ...]) -> list[dict]:
+    """Use the same constituent denominator as the materialized group weights."""
     db = await get_db()
     cursor = await db.execute(
-        """
-        WITH tag_codes AS (
-            SELECT DISTINCT stock_code
-            FROM portfolio_tags
-            WHERE google_sub = ?
-              AND lower(trim(tag)) = lower(trim(?))
-        ),
-        tagged_rows AS (
-            SELECT
-                ps.date,
-                ps.stock_code,
-                ps.market_value
+        f"""
+        WITH selected_codes AS ({codes_sql}),
+        slice_totals AS (
+            SELECT ps.date, SUM(ps.market_value) AS market_value, COUNT(*) AS stock_count
             FROM portfolio_stock_snapshots ps
-            JOIN tag_codes tc
-              ON tc.stock_code = ps.stock_code
+            JOIN selected_codes sc ON sc.stock_code = ps.stock_code
             WHERE ps.google_sub = ?
-        ),
-        tag_totals AS (
-            SELECT
-                date,
-                SUM(market_value) AS tag_value,
-                COUNT(DISTINCT stock_code) AS stock_count
-            FROM tagged_rows
-            GROUP BY date
+            GROUP BY ps.date
         ),
         day_totals AS (
             SELECT date, SUM(market_value) AS total_value
             FROM portfolio_stock_snapshots
-            WHERE google_sub = ?
+            WHERE google_sub = ? AND date >= (SELECT MIN(date) FROM slice_totals)
             GROUP BY date
         )
         SELECT
-            tt.date,
-            tt.tag_value,
-            tt.stock_count,
+            dt.date,
+            COALESCE(st.market_value, 0) AS market_value,
+            COALESCE(st.stock_count, 0) AS stock_count,
             dt.total_value,
             ps.fx_usdkrw,
+            ps.total_value AS snapshot_total_value,
             CASE
                 WHEN dt.total_value != 0
-                THEN tt.tag_value * 100.0 / dt.total_value
+                THEN COALESCE(st.market_value, 0) * 100.0 / dt.total_value
                 ELSE NULL
             END AS weight_pct
-        FROM tag_totals tt
-        JOIN day_totals dt
-          ON dt.date = tt.date
+        FROM day_totals dt
+        LEFT JOIN slice_totals st ON st.date = dt.date
         LEFT JOIN portfolio_snapshots ps
           ON ps.google_sub = ?
-         AND ps.date = tt.date
-        ORDER BY tt.date ASC
+         AND ps.date = dt.date
+        ORDER BY dt.date ASC
         """,
-        (google_sub, tag_key, google_sub, google_sub, google_sub),
+        (*codes_params, google_sub, google_sub, google_sub),
     )
     return [dict(row) for row in await cursor.fetchall()]
 
