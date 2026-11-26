@@ -418,6 +418,8 @@ async def kis_fetch_foreign_quote(ticker: str) -> dict:
                 change_krw = await fx.fx_to_krw(nation, change)
                 return {
                     "price": round(price_krw),
+                    "original_price": price,
+                    "original_currency": currencies.NATION_TO_CURRENCY.get(nation, "KRW"),
                     "change": round(change_krw),
                     "change_pct": s.get("change_pct"),
                 }
@@ -490,6 +492,8 @@ async def fetch_naver_foreign_quote(reuters_code: str) -> dict:
             change_krw = await fx.fx_to_krw(nation, change)
             return {
                 "price": round(price_krw),
+                "original_price": price,
+                "original_currency": currencies.NATION_TO_CURRENCY.get(nation, "KRW"),
                 "change": round(change_krw),
                 "change_pct": change_pct,
                 "nation": d.get("nationName", ""),
@@ -529,6 +533,8 @@ async def yfinance_fetch_quote(ticker: str) -> dict:
         change_krw = await fx.fx_to_krw(nation, change)
         return {
             "price": round(price_krw),
+            "original_price": price,
+            "original_currency": currency,
             "change": round(change_krw),
             "change_pct": change_pct,
         }
@@ -722,6 +728,8 @@ async def yfinance_fetch_quote_fast(ticker: str, *, require_regular_session: boo
         change_krw = change * fx_rate
         return {
             "price": round(price_krw),
+            "original_price": price,
+            "original_currency": currency,
             "change": round(change_krw),
             "change_pct": change_pct,
         }

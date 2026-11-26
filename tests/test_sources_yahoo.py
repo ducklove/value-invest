@@ -339,7 +339,8 @@ async def test_london_pence_quote_is_valued_in_pounds():
             history_payload = await portfolio_history.fetch_yahoo_chart("BP.L", range_="5d")
     kis.assert_not_awaited()
     rate.assert_awaited_with("GBP")
-    assert quote == {"price": 10040, "change": 13, "change_pct": 0.13}  # 펜스 그대로면 1,004,040원
+    assert quote == {"price": 10040, "change": 13, "change_pct": 0.13,
+                     "original_price": pytest.approx(5.578), "original_currency": "GBP"}
     assert series["currency"] == history_payload["currency"] == "GBP"
     assert [row["close"] for row in series["rows"]] == [5.494, 5.571, 5.578]
     assert [row["close"] for row in history_payload["rows"]] == [5.494, 5.571, 5.578]

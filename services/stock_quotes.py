@@ -58,6 +58,8 @@ class Stock:
     stale: bool = False
     as_of: str | None = None
     quote_date: str | None = None
+    original_price: float | None = None
+    original_currency: str | None = None
 
     @property
     def price(self) -> float:
@@ -164,6 +166,8 @@ def stock_from_quote(code: str, quote: dict[str, Any] | None) -> Stock | None:
         stale=quote.get("_stale") is True,
         as_of=quote.get("as_of"),
         quote_date=quote.get("date"),
+        original_price=_safe_float(quote.get("original_price")),
+        original_currency=quote.get("original_currency"),
     )
 
 
@@ -192,6 +196,9 @@ def stock_to_quote(stock: Stock | None) -> dict[str, Any]:
         result["_stale"] = True
     if stock.as_of:
         result["as_of"] = stock.as_of
+    if stock.original_price is not None and stock.original_currency:
+        result["original_price"] = stock.original_price
+        result["original_currency"] = stock.original_currency
     return result
 
 

@@ -178,8 +178,13 @@ function mergeQuoteSupplementalFields(current, incoming) {
 function mergeQuoteSnapshot(current, incoming) {
   if (!shouldAcceptQuoteSnapshot(current, incoming)) return mergeQuoteSupplementalFields(current, incoming);
   const next = { ...(current || {}), ...(incoming || {}) };
+  // Native price and currency belong to the accepted price snapshot.
+  if (!quoteValuePresent(incoming.original_price) || !quoteValuePresent(incoming.original_currency)) {
+    delete next.original_price;
+    delete next.original_currency;
+  }
   if (current?.source === 'namuh_ws' && incoming?.source !== 'namuh_ws') {
-    for (const key of ['original_price', 'original_currency', 'fx_rate', 'market_date', 'as_of', 'received_at', 'ts']) {
+    for (const key of ['fx_rate', 'market_date', 'as_of', 'received_at', 'ts']) {
       if (!quoteValuePresent(incoming?.[key])) delete next[key];
     }
   }
@@ -201,7 +206,7 @@ function mergeQuoteSnapshot(current, incoming) {
 }
 
 function quoteSnapshotDisplayChanged(before, after) {
-  const fields = ['date', 'price', 'previous_close', 'change', 'change_pct', 'trade_value', '_stale', 'reference_session', 'reference_date'];
+  const fields = ['date', 'price', 'original_price', 'original_currency', 'previous_close', 'change', 'change_pct', 'trade_value', '_stale', 'reference_session', 'reference_date'];
   return fields.some(field => (before || {})[field] !== (after || {})[field]);
 }
 

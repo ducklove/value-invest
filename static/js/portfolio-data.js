@@ -520,7 +520,7 @@ function updatePortfolioRowQuote(code, shouldFlash = true) {
   // 컬러 모드는 등락률 셀 내용과 <tr> 의 히트 등급을 함께 갱신해야 tick 이
   // 흘러도 행 색·게이지가 현재 시세와 어긋나지 않는다(재렌더 없이).
   const heatRow = { ...item, price, changePct, change };
-  setText('.pf-col-curprice', price !== null ? pfFmtPortfolioValue(price) : '-');
+  setHtml('.pf-col-curprice', pfFmtCurrentPriceCell(item, price));
   setHtml('.pf-col-changepct', pfChangeCellHtml(heatRow));
   setHtml('.pf-col-change', pfDailyAmountCellHtml(item, 'change'));
   setHtml('.pf-col-daypnl', pfDailyAmountCellHtml(item, 'dailyPnl'));

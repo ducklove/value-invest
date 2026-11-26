@@ -30,7 +30,9 @@ test(`구글 현재가만 먼저 와도 기준가 보완 뒤 일간 변동률이
   const row=page.locator('#pfTable tr[data-code="GOOGL"]');
   await expect(row).toBeVisible();
   await page.waitForFunction(() => QuoteManager.sharedMode && QuoteManager.wsCodes.has('GOOGL'));
-  await expect(row.locator('.pf-col-curprice')).toHaveText('428,709');
+  const currentPrice=row.locator('.pf-col-curprice');
+  await expect(currentPrice).toContainText('428,709');
+  await expect(currentPrice.locator('.pf-native-price')).toHaveText('USD 324.19');
   await expect(row.locator('.pf-col-changepct')).toHaveText('-');
   const hydrated={...live,previous_close:324.22*1322.4,change:(324.19-324.22)*1322.4,
     change_pct:(324.19/324.22-1)*100,original_previous_close:324.22,reference_date:'2026-10-22',reference_source:'yahoo_daily'};
@@ -41,7 +43,8 @@ test(`구글 현재가만 먼저 와도 기준가 보완 뒤 일간 변동률이
   socket.send(JSON.stringify({type:'quote',...hydrated,as_of:new Date().toISOString(),original_price:325,
     fx_rate:1400,price:325*1400,previous_close:324.22*1400,change:(325-324.22)*1400,change_pct:(325/324.22-1)*100}));
   await expect(row.locator('.pf-col-changepct')).toContainText('+0.24%');
-  await expect(row.locator('.pf-col-curprice')).toHaveText('455,000');
+  await expect(currentPrice).toContainText('455,000');
+  await expect(currentPrice.locator('.pf-native-price')).toHaveText('USD 325');
   await row.screenshot({path:testInfo.outputPath('googl-daily-change.png')});
 });
 }

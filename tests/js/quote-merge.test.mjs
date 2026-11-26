@@ -306,6 +306,14 @@ test("mergeQuoteSnapshot — identical tick is a no-op (no display regression)",
   assert.equal(w.quoteSnapshotDisplayChanged(q, merged), false);
 });
 
+test("mergeQuoteSnapshot — native price changes are visible and tied to the accepted quote", () => {
+  const initial = { price: 100, original_price: 10, original_currency: 'USD' };
+  const updated = w.mergeQuoteSnapshot(initial, { ...initial, original_price: 10.01 });
+  assert.equal(w.quoteSnapshotDisplayChanged(initial, updated), true);
+  const withoutNative = w.mergeQuoteSnapshot(updated, { price: 101 });
+  assert.deepEqual(plain(withoutNative), { price: 101 });
+});
+
 test("QUIRK: accepted incoming with an explicitly-undefined field clobbers the current value", () => {
   // mergeQuoteSnapshot uses a plain spread for the accepted path, so a fresher
   // tick that *carries* previous_close: undefined (the sidebar handler in

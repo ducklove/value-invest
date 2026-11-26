@@ -28,17 +28,27 @@ function pfAvgPriceCurrencyOptions(selected) {
   ).join('');
 }
 
-function pfFmtNativeAvgPrice(value, currency) {
+function pfNativePriceHtml(value, currency) {
   const n = Number(value || 0);
-  const digits = currency === 'KRW' ? 0 : (Math.abs(n) >= 100 ? 2 : 4);
-  return Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: digits }) : '-';
+  const price = Number.isFinite(n) ? fmtNum(n, { maxDecimals: Math.abs(n) >= 100 ? 2 : 4 }) : '-';
+  return `<span class="pf-native-price">${escapeHtml(currency)} ${escapeHtml(price)}</span>`;
 }
 
 function pfFmtAvgPriceCell(row, formatter = pfFmtPortfolioValue) {
   if (pfIsFuturesHolding(row)) return '-';
   const main = formatter(row.avgPriceKrw);
   if (row.avgPriceCurrency === 'KRW') return main;
-  return `${main}<span class="pf-native-price">${escapeHtml(row.avgPriceCurrency)} ${escapeHtml(pfFmtNativeAvgPrice(row.avgPrice, row.avgPriceCurrency))}</span>`;
+  return main + pfNativePriceHtml(row.avgPrice, row.avgPriceCurrency);
+}
+
+function pfFmtCurrentPriceCell(row, price) {
+  if (price === null) return '-';
+  const cash = row.stock_code.startsWith('CASH_');
+  const currency = (cash ? row.stock_code.slice(5) : row.quote?.original_currency || row.currency) || 'KRW';
+  if (currency === 'KRW') return pfFmtPortfolioValue(price);
+  const main = fmtNum(price, { maxDecimals: cash ? 8 : 0 });
+  const nativePrice = cash ? 1 : row.quote?.original_price;
+  return nativePrice == null ? main : main + pfNativePriceHtml(nativePrice, currency);
 }
 
 function _pfInitSortableHeaders() {
@@ -733,7 +743,7 @@ function renderPortfolio(options = {}) {
         <td class="pf-col-group">${groupEditCell}</td>
         <td class="pf-col-num pf-col-changepct">${changeCell}</td>
         <td class="pf-col-num pf-col-change">${pfDailyAmountCellHtml(r, 'change')}</td>
-        <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
+        <td class="pf-col-num pf-col-curprice">${pfFmtCurrentPriceCell(r, r.price)}</td>
         <td class="pf-col-num pf-col-benchmark js-pf-bench-picker" title="벤치마크 변경">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
         <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtTradingValueKrw(r.tradingValue) : '-'}</td>
         <td class="pf-col-num pf-col-buyprice">${isFutures ? `-<input class="pf-edit-input js-pf-edit-price" id="pfEditPrice" value="${r.avgPrice}" type="hidden">` : `<span class="pf-price-edit-wrap"><input class="pf-edit-input js-pf-edit-price" id="pfEditPrice" value="${r.avgPrice}" type="number" step="any"${balanceAttrs}>${avgPriceCurrencyControl}</span>`}</td>
@@ -759,7 +769,7 @@ function renderPortfolio(options = {}) {
       <td class="pf-col-group">${groupHtml}</td>
       <td class="pf-col-num pf-col-changepct">${changeCell}</td>
       <td class="pf-col-num pf-col-change">${pfDailyAmountCellHtml(r, 'change')}</td>
-      <td class="pf-col-num pf-col-curprice">${r.price !== null ? _fp(r.price) : '-'}</td>
+      <td class="pf-col-num pf-col-curprice">${pfFmtCurrentPriceCell(r, r.price)}</td>
       <td class="pf-col-num pf-col-benchmark" title="수정모드에서 변경">${fmtBenchmarkPct(r.benchmark_code)}<span class="pf-benchmark-name">${escapeHtml(benchmarkName(r.benchmark_code || ''))}</span></td>
       <td class="pf-col-num pf-col-invested">${r.tradingValue !== null ? fmtTradingValueKrw(r.tradingValue) : '-'}</td>
       <td class="pf-col-num pf-col-buyprice">${pfFmtAvgPriceCell(r, _fp)}</td>

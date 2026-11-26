@@ -50,7 +50,7 @@ CURRENCY_TO_FX_CODE: dict[str, str] = {
 NATION_TO_CURRENCY: dict[str, str] = {
     "USA": "USD", "VNM": "VND", "JPN": "JPY", "CHN": "CNY",
     "HKG": "HKD", "GBR": "GBP", "TWN": "TWD", "AUS": "AUD",
-    "CAN": "CAD", "CHE": "CHF", "DEU": "EUR", "FRA": "EUR",
+    "CAN": "CAD", "CHE": "CHF", "EUR": "EUR", "DEU": "EUR", "FRA": "EUR",
     "NLD": "EUR", "ITA": "EUR", "ESP": "EUR",
 }
 

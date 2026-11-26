@@ -28,6 +28,7 @@ async def test_vietnam_quote_uses_naver_and_vnd_conversion_without_yahoo_symbol_
         quote = await foreign.fetch_foreign_quote("FUEVFVND.HM")
     naver.assert_awaited_once_with("FUEVFVND.HM")
     assert quote["price"] == 1690 and quote["change"] == 5
+    assert (quote["original_price"], quote["original_currency"]) == (33810, "VND")
     assert all(call.args[0] == "VNM" for call in fx.await_args_list)
     yahoo.assert_not_awaited()
     kis.assert_not_awaited()
@@ -322,6 +323,7 @@ async def test_hong_kong_rmb_quote_uses_cny_conversion_for_kis_and_naver():
         result = await foreign.kis_fetch_foreign_quote("83188.HK")
     assert result["price"] == 10000
     assert result["change"] == 200
+    assert (result["original_price"], result["original_currency"]) == (50, "CNY")
 
     with patch.object(foreign, "kis_fetch_foreign_quote", AsyncMock(return_value={})), \
          patch.object(foreign, "yfinance_fetch_quote_fast", AsyncMock(return_value={})), \
@@ -341,7 +343,8 @@ async def test_yfinance_fast_info_pence_quote_is_valued_in_pounds():
          patch.object(foreign.fx, "fx_to_krw", AsyncMock(side_effect=lambda nation, amount: amount * 1800)) as fx:
         quote = await foreign.yfinance_fetch_quote("BP.L")
     assert fx.await_args_list[0].args == ("GBR", pytest.approx(5.578))
-    assert quote == {"price": 10040, "change": -13, "change_pct": -0.13}  # 펜스 그대로면 1,004,040원
+    assert quote == {"price": 10040, "change": -13, "change_pct": -0.13,
+                     "original_price": pytest.approx(5.578), "original_currency": "GBP"}
 
 
 @pytest.mark.asyncio
@@ -384,6 +387,8 @@ async def test_yfinance_fast_quote_uses_adjacent_daily_close_as_previous_close()
     assert result["price"] == 55
     assert result["change"] == 1
     assert result["change_pct"] == 1.08
+    cached = stock_quotes.stock_to_quote(stock_quotes.stock_from_quote("SIVR", result))
+    assert (cached["original_price"], cached["original_currency"]) == (55.01, "USD")
 
 
 @pytest.mark.asyncio
