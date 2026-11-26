@@ -366,6 +366,8 @@ body.pf-mobile-simple .pf-table tbody td.pf-stock-cell {
 }
 body.pf-mobile-simple .pf-col-changepct { width: 56px; }
 body.pf-mobile-simple .pf-col-curprice { width: 64px; }
+body.pf-mobile-simple .pf-table:has(.pf-col-curprice .pf-native-price) th.pf-col-curprice { width: 80px; }
+body.pf-mobile-simple .pf-col-curprice .pf-native-price { white-space: normal; }
 body.pf-mobile-simple .pf-col-return { width: 68px; }
 body.pf-mobile-simple .pf-col-mktval { width: 80px; }
 body.pf-mobile-simple .pf-col-buyprice { width: 64px; }
