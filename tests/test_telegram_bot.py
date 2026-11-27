@@ -93,6 +93,22 @@ class SecurityTests(TelegramBotTestBase):
         with patch.object(telegram, "_api", new=AsyncMock(return_value=[])):
             self.assertEqual((await telegram.get_recent_chat_id(TOKEN))[0], "777")
 
+    async def test_two_strangers_block_auto_linking(self):
+        # 봇 이름을 아는 다른 사람이 먼저 말을 걸어 둔 경우 — 누가 주인인지 모르므로 자동 연결 안 함.
+        telegram._recent_unregistered.clear()
+        await self.handle(_msg("안녕", chat_id="777"))
+        await self.handle(_msg("나도", chat_id="888"))
+        with patch.object(telegram, "_api", new=AsyncMock(return_value=[])):
+            self.assertIsNone(await telegram.get_recent_chat_id(TOKEN))
+        telegram._recent_unregistered.clear()
+
+    async def test_get_updates_with_several_chats_does_not_auto_link(self):
+        updates = [_msg("a", chat_id="777"), _msg("b", chat_id="888")]
+        with patch.object(telegram, "_api", new=AsyncMock(return_value=updates)):
+            self.assertIsNone(await telegram.get_recent_chat_id(TOKEN))
+        with patch.object(telegram, "_api", new=AsyncMock(return_value=[updates[0], _msg("c", chat_id="777")])):
+            self.assertEqual((await telegram.get_recent_chat_id(TOKEN))[0], "777")
+
     async def test_group_and_channel_messages_are_ignored(self):
         self.assertEqual(await self.handle(_msg("삼성전자", chat_type="group")), "ignored:not_private")
         self.assertEqual(await self.handle(_msg("삼성전자", chat_type="supergroup")), "ignored:not_private")
@@ -256,6 +272,35 @@ class PollingTests(TelegramBotTestBase):
         self.assertEqual(gu.await_args.kwargs["offset"], 42)
         memo = (await portfolio_repo.get_portfolio("u1"))[0]["memo"]
         self.assertEqual(memo, "11-28 첫 메모")
+
+    async def test_first_start_skips_every_backlog_page(self):
+        target = (await telegram_bot.load_targets())[KEY]
+        page1 = [dict(_msg("old"), update_id=i) for i in range(1, 101)]
+        page2 = [dict(_msg("old"), update_id=i) for i in range(101, 121)]
+        with patch.object(telegram, "get_updates", new=AsyncMock(side_effect=[page1, page2, []])):
+            offset = await telegram_bot.poll_once(KEY, target, None)
+        self.assertEqual(offset, 121)
+        self.assertEqual(self.sent, [])
+
+    async def test_unlinked_chat_stops_being_served_within_the_same_poll(self):
+        await self.add_holding()
+        target = (await telegram_bot.load_targets())[KEY]  # 연결된 상태로 시작한 폴링
+        await notifications_repo.upsert_notification_channel(
+            "u1", "telegram", config={"bot_token": TOKEN, "chat_id": CHAT}, enabled=False, verified=True,
+        )
+        with patch.object(telegram, "get_updates", new=AsyncMock(return_value=[dict(_msg("삼성전자"), update_id=5)])):
+            await telegram_bot.poll_once(KEY, target, 5)
+        self.assertEqual(self.sent, [])
+
+    async def test_handling_failure_tells_the_owner(self):
+        target = (await telegram_bot.load_targets())[KEY]
+        plain = AsyncMock(return_value=True)
+        with patch.object(telegram_bot, "handle_update", new=AsyncMock(side_effect=ValueError("boom"))), \
+             patch.object(telegram, "send_message", new=plain), \
+             patch.object(telegram, "get_updates", new=AsyncMock(return_value=[dict(_msg("메모"), update_id=7)])):
+            await telegram_bot.poll_once(KEY, target, 7)
+        self.assertEqual(plain.await_count, 1)
+        self.assertIn("저장하지 못했어요", plain.await_args.args[2])
 
     async def test_webhook_conflict_stops_worker(self):
         targets = await telegram_bot.load_targets()

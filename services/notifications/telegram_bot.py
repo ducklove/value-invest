@@ -395,6 +395,23 @@ async def load_targets() -> dict[str, dict]:
     return targets
 
 
+_BACKLOG_SKIP_MAX_PAGES = 50
+
+
+async def _notify_failure(token: str, key: str, update: dict) -> None:
+    """처리 실패(offset 은 이미 전진)를 등록된 주인에게만 한 번 알린다 — 메모가 조용히 사라지지 않게."""
+    msg = update.get("message") if isinstance(update.get("message"), dict) else {}
+    chat = msg.get("chat") if isinstance(msg.get("chat"), dict) else {}
+    chat_id = str(chat.get("id") or "")
+    try:
+        chats = (await load_targets()).get(key, {}).get("chats", {})
+    except _HANDLE_ERRORS:
+        return
+    if chat.get("type") != "private" or len(chats.get(chat_id) or ()) != 1:
+        return
+    await telegram.send_message(token, chat_id, "처리 중 오류가 나서 저장하지 못했어요. 잠시 뒤 다시 보내 주세요.")
+
+
 async def poll_once(key: str, target: dict, offset: int | None, *, timeout: int = POLL_TIMEOUT_S) -> int | None:
     """getUpdates 한 번 + 처리. 새 offset 을 돌려준다. API 오류는 호출자에게 올린다.
 
@@ -402,11 +419,18 @@ async def poll_once(key: str, target: dict, offset: int | None, *, timeout: int 
     """
     updates = await telegram.get_updates(target["token"], offset=offset, timeout=0 if offset is None else timeout)
     if offset is None:
-        ids = [u["update_id"] for u in updates if isinstance(u.get("update_id"), int)]
-        new_offset = (max(ids) + 1) if ids else 0
+        # getUpdates 는 한 번에 최대 100건 — 쌓인 과거 메시지가 비워질 때까지 건너뛴다.
+        skipped, new_offset = 0, 0
+        for _ in range(_BACKLOG_SKIP_MAX_PAGES):
+            ids = [u["update_id"] for u in updates if isinstance(u.get("update_id"), int) and u["update_id"] >= new_offset]
+            if not ids:
+                break
+            skipped += len(ids)
+            new_offset = max(ids) + 1
+            updates = await telegram.get_updates(target["token"], offset=new_offset, timeout=0)
         await repo.set_offset(key, new_offset)
-        if ids:
-            logger.info("telegram bot bot=%s skipped %d backlog updates on first start", key, len(ids))
+        if skipped:
+            logger.info("telegram bot bot=%s skipped %d backlog updates on first start", key, skipped)
         return new_offset
     for update in updates:
         update_id = update.get("update_id")
@@ -415,9 +439,12 @@ async def poll_once(key: str, target: dict, offset: int | None, *, timeout: int 
         offset = update_id + 1
         await repo.set_offset(key, offset)  # 처리 전에 저장 — 재시작 후 중복 처리 없음
         try:
-            outcome = await handle_update(target["token"], target["chats"], update)
+            # 연결 해제·비활성화가 바로 반영되도록 처리 직전에 등록 채팅을 다시 읽는다.
+            chats = (await load_targets()).get(key, {}).get("chats", {})
+            outcome = await handle_update(target["token"], chats, update)
         except _HANDLE_ERRORS as exc:
             logger.warning("telegram bot bot=%s update handling failed: %s", key, type(exc).__name__)
+            await _notify_failure(target["token"], key, update)
             continue
         logger.info("telegram bot bot=%s update outcome=%s", key, outcome)
     return offset

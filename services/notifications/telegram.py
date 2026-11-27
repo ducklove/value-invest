@@ -74,13 +74,18 @@ async def get_recent_chat_id(token: str) -> tuple[str, str] | None:
         return recent_unregistered_chat(token)
     if not updates:
         return recent_unregistered_chat(token)
+    # 서로 다른 채팅이 여럿 말을 걸었으면 자동으로 고르지 않는다(위 폴백과 같은 이유).
+    found: dict[str, str] = {}
     for upd in reversed(updates or []):
         msg = upd.get("message") or upd.get("edited_message") or {}
         chat = msg.get("chat") or {}
         if chat.get("id") is not None:
-            name = chat.get("username") or chat.get("first_name") or ""
-            return str(chat["id"]), name
-    return None
+            found.setdefault(str(chat["id"]), chat.get("username") or chat.get("first_name") or "")
+    if len(found) != 1:
+        if len(found) > 1:
+            logger.info("telegram getUpdates: %d distinct chats, not auto-linking", len(found))
+        return None
+    return next(iter(found.items()))
 
 
 async def send_message(
@@ -168,7 +173,10 @@ async def send_message_get_id(
 # 수신 루프가 본 "등록되지 않은 개인 채팅" — 루프가 offset 을 전진시키면 채널 연결의
 # get_recent_chat_id 가 빈 결과를 받으므로 여기서 보완한다. 프로세스 메모리, 10분.
 _UNREGISTERED_TTL_S = 600.0
-_recent_unregistered: dict[str, tuple[float, str, str]] = {}
+# token digest → {chat_id: (seen_at, name)}. 연결 폴백은 창 안의 낯선 채팅이 정확히 하나일
+# 때만 쓴다 — 봇 이름을 아는 다른 사람이 먼저 말을 걸어 두면 양방향 비서 권한(보유 조회·
+# 메모 쓰기)까지 가로챌 수 있으므로, 둘 이상이면 자동 연결하지 않고 chat_id 입력을 받는다.
+_recent_unregistered: dict[str, dict[str, tuple[float, str]]] = {}
 
 
 def _token_digest(token: str) -> str:
@@ -176,11 +184,19 @@ def _token_digest(token: str) -> str:
 
 
 def remember_unregistered_chat(token: str, chat_id: str, name: str) -> None:
-    _recent_unregistered[_token_digest(token)] = (time.monotonic(), str(chat_id), str(name or ""))
+    seen = _recent_unregistered.setdefault(_token_digest(token), {})
+    seen[str(chat_id)] = (time.monotonic(), str(name or ""))
 
 
 def recent_unregistered_chat(token: str) -> tuple[str, str] | None:
-    hit = _recent_unregistered.get(_token_digest(token))
-    if not hit or time.monotonic() - hit[0] > _UNREGISTERED_TTL_S:
-        return None
-    return hit[1], hit[2]
+    seen = _recent_unregistered.get(_token_digest(token)) or {}
+    now = time.monotonic()
+    live = {cid: v for cid, v in seen.items() if now - v[0] <= _UNREGISTERED_TTL_S}
+    if live:
+        _recent_unregistered[_token_digest(token)] = live
+    else:
+        _recent_unregistered.pop(_token_digest(token), None)
+    if len(live) != 1:
+        return None  # 없거나 여러 명 — 누가 주인인지 알 수 없다
+    cid, (_, name) = next(iter(live.items()))
+    return cid, name
