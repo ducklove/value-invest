@@ -30,7 +30,7 @@
 - 외부 HTTP는 `core/http.get_http_client("이름")` 공유 클라이언트 (+`_TIMEOUT_PROFILES`에 타임아웃 등록).
 - 캐시: 인메모리 TTL은 `core.cache.MemoryTTLCache`(+ fetch는 `cached_fetch` — single-flight·stale 허용), DB 영속은 `repositories/cache_values`.
 - KST는 `domain.timeutil`, 로그인 가드는 `core.deps.require_user`/`core.deps.require_user_id`. 형제 URL·링크는 하드코딩하지 말고 레지스트리(`core.ecosystem`, `services/ecosystem/links`)에서.
-- 예외는 `core/errors.py` 계층 사용. 광역 `except Exception` 신설 금지 (기존 281곳은 점진 교체 중).
+- 예외는 `core/errors.py` 계층 사용. 광역 `except Exception` 신설 금지 (2026-11 기준 잔여 173곳, 점진 교체 중. 의도된 경계는 `# noqa: BLE001` + 사유 주석).
 
 ## 프론트엔드 계약 (빌드 시스템 없음 — 중요)
 
