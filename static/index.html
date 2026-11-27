@@ -492,6 +492,7 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
           <a class="pf-deep-anchor-link" href="#pfRiskWrap">리스크</a>
           <a class="pf-deep-anchor-link" href="#pfPeriodPerformanceWrap">연간실적</a>
           <a class="pf-deep-anchor-link" href="#pfValueWrap">평가금액</a>
+          <a class="pf-deep-anchor-link" href="#pfGhostWrap">유령 비교</a>
         </div>
         <div class="pf-deep-nav-group" data-section="pfDeepExposure">
           <a class="pf-deep-nav-section" href="#pfDeepExposure">구성·위험</a>
@@ -570,6 +571,17 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
         <div class="pf-chart-range" id="pfValueRange"></div>
         <div class="pf-nav-returns" id="pfValueStats"></div>
       </div>
+
+      <section class="pf-nav-chart-wrap pf-analysis-card" id="pfGhostWrap" aria-labelledby="pfGhostTitle">
+        <div class="pf-nav-header">
+          <div>
+            <h3 id="pfGhostTitle">유령 포트폴리오 · 매도 후 추적</h3>
+            <span class="pf-chart-note">가만히 있었다면(기준일 보유 고정) 대비 매매 효과와 매도 후 5·20거래일·현재가 추적</span>
+          </div>
+          <div class="valuation-period-btns" id="pfGhostWindowBtns"></div>
+        </div>
+        <div id="pfGhostContent" aria-live="polite">심층 분석을 열면 매매 효과와 매도 후 추적을 계산합니다.</div>
+      </section>
       </section>
 
       <section class="pf-deep-section" id="pfDeepExposure" aria-labelledby="pfDeepExposureTitle">
@@ -1378,6 +1390,7 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
 <script data-feature="portfolio-performance" data-src="./js/portfolio-rebalance.js"></script>
 <script data-feature="portfolio-performance" data-src="./js/portfolio-dividends-calendar.js"></script>
 <script data-feature="portfolio-performance" data-src="./js/portfolio-journal.js"></script>
+<script data-feature="portfolio-performance" data-src="./js/portfolio-ghost.js"></script>
 <script data-feature="portfolio-household" data-src="./js/portfolio-household.js"></script>
 <script src="./js/portfolio-trends-benchmark.js" defer></script>
 <script src="./js/portfolio-trends.js" defer></script>

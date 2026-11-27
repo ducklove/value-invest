@@ -161,6 +161,8 @@ function pfSwitchTab(tab) {
     if (typeof pfLoadDividendCalendarPanel === 'function') pfLoadDividendCalendarPanel();
     // 투자 일지 카드 동일 패턴(portfolio-journal.js).
     if (typeof pfLoadJournalPanel === 'function') pfLoadJournalPanel();
+    // 유령 포트폴리오 · 매도 후 추적 카드 동일 패턴(portfolio-ghost.js).
+    if (typeof pfLoadGhostPanel === 'function') pfLoadGhostPanel();
   } else if (tab === 'household' && typeof pfLoadHouseholdAssets === 'function') {
     pfLoadHouseholdAssets();
   }

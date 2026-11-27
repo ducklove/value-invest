@@ -1065,7 +1065,7 @@ def test_performance_tab_has_sticky_anchor_nav_covering_every_card():
     # 카드를 네 묶음으로 나누고, 순수 <a href="#id"> 앵커라 JS 없이 동작한다 —
     # 묶음과 카드 id 가 전부 존재하고, 카드는 자기 묶음 안에 내비와 같은 순서로 있어야 한다.
     sections = {
-        "pfDeepPerformance": ["pfNavWrap", "pfRiskWrap", "pfPeriodPerformanceWrap", "pfValueWrap"],
+        "pfDeepPerformance": ["pfNavWrap", "pfRiskWrap", "pfPeriodPerformanceWrap", "pfValueWrap", "pfGhostWrap"],
         "pfDeepExposure": ["pfExposureWrap", "pfGroupWeightWrap", "pfRebalanceWrap"],
         "pfDeepIncome": ["pfAttributionWrap", "pfTaxWrap", "pfDivCalWrap", "pfCashflowWrap"],
         "pfDeepRecords": ["pfPeriodReportWrap", "pfThesisWrap", "pfJournalWrap", "pfAiWrap"],
@@ -1134,3 +1134,25 @@ def test_portfolio_xray_card_structure():
     xray_rule = portfolio_css.find("\n.pf-xray-stats {")
     assert xray_rule != -1
     assert portfolio_css.rfind("@media", 0, xray_rule) < portfolio_css.rfind("\n}\n", 0, xray_rule)
+
+
+def test_performance_tab_includes_ghost_portfolio_card():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    styles = _all_css()
+    ghost_js = (JS / "portfolio-ghost.js").read_text(encoding="utf-8")
+    performance = (JS / "portfolio-performance.js").read_text(encoding="utf-8")
+
+    assert 'id="pfGhostWrap"' in html
+    assert 'id="pfGhostContent"' in html
+    assert '<a class="pf-deep-anchor-link" href="#pfGhostWrap">유령 비교</a>' in html
+    assert html.find('id="pfValueWrap"') < html.find('id="pfGhostWrap"') < html.find('id="pfDeepExposure"')
+    assert '<script data-feature="portfolio-performance" data-src="./js/portfolio-ghost.js"></script>' in html
+    assert html.find("./js/portfolio-journal.js") < html.find("./js/portfolio-ghost.js")
+    assert "if (typeof pfLoadGhostPanel === 'function') pfLoadGhostPanel();" in performance
+    assert "async function pfLoadGhostPanel(" in ghost_js
+    assert "/api/portfolio/ghost" in ghost_js
+    assert "stockLinkHtml(" in ghost_js
+    assert ".pf-ghost-headline" in styles
+    assert ".pf-ghost-postsale-table" in styles
+    section = html[html.find('id="pfGhostWrap"'):html.find('id="pfDeepExposure"')]
+    assert "<input" not in section and "<form" not in section
