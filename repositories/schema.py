@@ -1026,6 +1026,21 @@ CREATE TABLE IF NOT EXISTS household_retirement_profiles (
     updated_at TEXT NOT NULL,
     FOREIGN KEY (google_sub) REFERENCES users(google_sub) ON DELETE CASCADE
 );
+
+-- 텔레그램 양방향 비서: 봇이 보낸 종목 메시지 → 종목코드. 사용자가 그 메시지에
+-- 답장하면 해당 종목 메모에 덧붙인다. bot_key 는 봇 토큰의 sha256 앞부분(토큰
+-- 원문은 저장하지 않음) — message_id 는 봇·채팅별 번호라 키에 함께 둔다. 30일 지난
+-- 행은 services/notifications/telegram_bot.py 수신 루프가 정리한다.
+CREATE TABLE IF NOT EXISTS telegram_message_refs (
+    bot_key TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    message_id INTEGER NOT NULL,
+    google_sub TEXT NOT NULL,
+    stock_code TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (bot_key, chat_id, message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_telegram_message_refs_created ON telegram_message_refs(created_at);
 """
 
 

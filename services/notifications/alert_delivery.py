@@ -10,7 +10,7 @@ from datetime import datetime
 from domain.timeutil import KST, now_kst
 from repositories import notifications as notifications_repo
 from repositories import user_settings
-from services.notifications import channels
+from services.notifications import channels, telegram_refs
 
 SETTING_KEY = "portfolio_alert_quiet_hours"
 DEFAULT_SETTINGS = {"enabled": True, "start": "21:00", "end": "08:00", "mode": "skip"}
@@ -50,7 +50,9 @@ def is_quiet(settings: dict, now: datetime | None = None) -> bool:
     return time >= start or time < end
 
 
-async def dispatch(google_sub: str, rule_id: int, text: str, *, dedupe_key: str | None = None) -> int:
+async def dispatch(
+    google_sub: str, rule_id: int, text: str, *, dedupe_key: str | None = None, stock_code: str | None = None
+) -> int:
     settings = await get_settings(google_sub)
     now = now_kst()
     if is_quiet(settings, now):
@@ -62,10 +64,12 @@ async def dispatch(google_sub: str, rule_id: int, text: str, *, dedupe_key: str 
         # Both skip and defer consume the trigger, preventing repeat alerts for
         # the same crossing when quiet hours end. Deferred text survives restart.
         return 0
-    if dedupe_key:
-        await channels.dispatch(google_sub, text, dedupe_key=dedupe_key)
-    else:
-        await channels.dispatch(google_sub, text)
+    # 종목 알림이면 텔레그램 답장을 그 종목 메모로 받을 수 있게 message_id 를 기록한다.
+    with telegram_refs.stock_context(stock_code):
+        if dedupe_key:
+            await channels.dispatch(google_sub, text, dedupe_key=dedupe_key)
+        else:
+            await channels.dispatch(google_sub, text)
     return 1
 
 

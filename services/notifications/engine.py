@@ -590,7 +590,9 @@ async def _eval_blanket(google_sub: str, rule: dict, items_by_code: dict, quote_
                 if alert_type in DAILY_ABS_TYPES
                 else None
             )
-            sent += await alert_delivery.dispatch(google_sub, rule["id"], message, dedupe_key=dedupe_key)
+            sent += await alert_delivery.dispatch(
+                google_sub, rule["id"], message, dedupe_key=dedupe_key, stock_code=code
+            )
             state[code] = {"armed": False, "fired": today_str}
             changed = True
         elif not condition and not armed:
@@ -756,7 +758,9 @@ async def _eval_stock_feed(google_sub: str, rule: dict, name: str, feed_cache: d
         texts = [text]
     sent = 0
     for one in texts:
-        sent += await alert_delivery.dispatch(google_sub, rule["id"], _emphasize(one) if rule.get("important") else one)
+        sent += await alert_delivery.dispatch(
+            google_sub, rule["id"], _emphasize(one) if rule.get("important") else one, stock_code=code
+        )
     await notifications_repo.set_portfolio_alert_state_json(rule["id"], json.dumps({"baseline": ident}))
     return sent
 
@@ -805,7 +809,7 @@ async def _eval_blanket_feed(
         for text in texts:
             if rule.get("important"):
                 text = _emphasize(text)
-            sent += await alert_delivery.dispatch(google_sub, rule["id"], text)
+            sent += await alert_delivery.dispatch(google_sub, rule["id"], text, stock_code=code)
         state[code] = ident
         changed = True
 
@@ -1077,7 +1081,10 @@ async def _evaluate_plan(
                 if alert_type in STOCK_DAILY_ABS_TYPES
                 else None
             )
-            sent += await alert_delivery.dispatch(google_sub, rule["id"], text, dedupe_key=dedupe_key)
+            stock_code = rule.get("stock_code") if alert_type in PRICE_TYPES or alert_type in STOCK_DAILY_ABS_TYPES else None
+            sent += await alert_delivery.dispatch(
+                google_sub, rule["id"], text, dedupe_key=dedupe_key, stock_code=stock_code
+            )
             await notifications_repo.set_portfolio_alert_state(rule["id"], armed=False, last_value=metric, triggered=True)
         elif not condition and not armed:
             await notifications_repo.set_portfolio_alert_state(rule["id"], armed=True, last_value=metric, triggered=False)
