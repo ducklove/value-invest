@@ -6,7 +6,6 @@
 // filters, edit, manualOrder, snapshots, currency, prefs.
 // Only file-local UI plumbing (timers, style element refs, pointer guards)
 // stays as top-level declarations in the owning split file.
-const PF_QUOTE_REFRESH_MS = 60_000;
 // "도구" 허브(labsView)와 그 하위 딥링크 화면들 — switchView 의 상단 탭 활성 표시를 묶는 데 쓰인다.
 const PF_TOOLS_HUB_VIEWS = new Set(['labs', 'nps', 'insights', 'screener', 'masters', 'bonds', 'quant', 'opportunities']);
 // view ↔ URL 경로 매핑. switchView 의 history.pushState(정방향)와 app-main.js 의 최초 진입

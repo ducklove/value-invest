@@ -324,10 +324,6 @@ function _mbIsHidden(code) {
   return false;
 }
 
-function _mbIndicatorHasValue(data) {
-  return data && data.value !== null && data.value !== undefined && String(data.value).trim() !== '';
-}
-
 function _mbMergeDataMap(dataMap) {
   mbLastDataMap = mergeMarketIndicatorMap(mbLastDataMap, dataMap);
   return mbLastDataMap;

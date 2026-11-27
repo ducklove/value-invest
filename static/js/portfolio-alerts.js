@@ -475,17 +475,6 @@ async function pfAlertsUnlink(key) {
 
 // --- Rule form --------------------------------------------------------------
 
-function pfAlertsStockSelect() {
-  const holdings = (window.PfStore && PfStore.items) || [];
-  const options = holdings
-    .map((it) => {
-      const price = it.quote && it.quote.price != null ? ` · 현재가 ${pfFmtNum(it.quote.price)}` : '';
-      return `<option value="${escapeHtml(it.stock_code)}">${escapeHtml(it.stock_name || it.stock_code)}${price}</option>`;
-    })
-    .join('');
-  return `<select class="pf-modal-input pf-alert-stock" id="pfAlertStock">${options || '<option value="">보유 종목 없음</option>'}</select>`;
-}
-
 function pfAlertsDirSelect() {
   return `<select class="pf-modal-input pf-alert-dir" id="pfAlertDir">
     <option value="above">이상</option><option value="below">이하</option>
