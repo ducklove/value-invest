@@ -70,7 +70,7 @@ function pfResetAccounts() {
   PfAccounts.previewed = false;
   PfStore.accountId = '';
   PfStore.items = [];
-  try { localStorage.removeItem('valueInvestPortfolioSnapshot:v2'); } catch (_) { /* 저장소 사용 불가 */ }
+  safeStorageRemove('valueInvestPortfolioSnapshot:v2');
   pfConnectNamuhQuotes();
   for (const id of ['pfNhDialog', 'pfAccountsDialog']) {
     const dialog = _pfAccountEl(id);

@@ -48,31 +48,26 @@ function _pushServerSample(s) {
 // 차트 색은 전부 admin.html 의 CSS 토큰에서 읽는다(하드코딩 금지) — 다크
 // 전환 시 toggleAdminTheme → _renderAdminCharts 재렌더로 색이 함께 갱신된다.
 // fallback 은 라이트 테마 토큰과 동일한 값(토큰 미정의 문서 방어용).
-// 토큰 읽기는 utils.js cssToken 단일 소스에 위임한다(D-07).
-function _adminChartToken(name, fallback) {
-  return cssToken(name, fallback);
-}
-
 function _adminChartTextColor() {
-  return _adminChartToken('--text-secondary', '#64748b');
+  return cssToken('--text-secondary', '#64748b');
 }
 
 function _adminChartGridColor() {
-  return _adminChartToken('--border', '#dbe3ee');
+  return cssToken('--border', '#dbe3ee');
 }
 
 function _adminChartSeriesColors() {
   // --primary 가 허브 블루로 통일되며 --accent-blue 와 같아졌으므로, cpu/http
   // (블루)와 구분이 필요한 memory/info 시리즈는 --color-success 토큰을 쓴다.
   return {
-    cpu: _adminChartToken('--accent-blue', '#2563eb'),
-    memory: _adminChartToken('--color-success', '#059669'),
-    disk: _adminChartToken('--color-warning', '#d97706'),
-    info: _adminChartToken('--color-success', '#059669'),
-    warning: _adminChartToken('--color-warning', '#d97706'),
-    error: _adminChartToken('--color-danger', '#dc2626'),
-    http: _adminChartToken('--accent-blue', '#2563eb'),
-    httpError: _adminChartToken('--color-danger', '#dc2626'),
+    cpu: cssToken('--accent-blue', '#2563eb'),
+    memory: cssToken('--color-success', '#059669'),
+    disk: cssToken('--color-warning', '#d97706'),
+    info: cssToken('--color-success', '#059669'),
+    warning: cssToken('--color-warning', '#d97706'),
+    error: cssToken('--color-danger', '#dc2626'),
+    http: cssToken('--accent-blue', '#2563eb'),
+    httpError: cssToken('--color-danger', '#dc2626'),
   };
 }
 

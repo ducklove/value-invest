@@ -199,10 +199,6 @@ function _sparkTodayCashflowThroughTs(ts) {
   return total;
 }
 
-function _formatLocalYmd(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
 function _parseLocalYmd(ymd) {
   const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return null;
@@ -216,9 +212,7 @@ function _diffLocalDays(start, end) {
 // 스파크라인 상승/하락 색 — 하드코딩 대신 CSS 토큰(--up/--down)에서 읽어
 // 다크모드에서도 테마 팔레트와 톤이 맞게 한다(토큰이 없으면 종전 색 폴백).
 function _sparkTrendColor(isUp) {
-  const value = getComputedStyle(document.documentElement)
-    .getPropertyValue(isUp ? '--up' : '--down').trim();
-  return value || (isUp ? '#dc2626' : '#2563eb');
+  return cssToken(isUp ? '--up' : '--down', isUp ? '#dc2626' : '#2563eb');
 }
 
 function _renderSummarySparklines(currentTotalValue, { currentReturnNav = null, latestSnap = null } = {}) {
@@ -270,8 +264,8 @@ function _renderSummarySparklines(currentTotalValue, { currentReturnNav = null, 
     const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
     const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const thisMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    const monthStartYmd = _formatLocalYmd(thisMonthStart);
-    const monthEndYmd = _formatLocalYmd(thisMonthEnd);
+    const monthStartYmd = formatLocalYmd(thisMonthStart);
+    const monthEndYmd = formatLocalYmd(thisMonthEnd);
     const axisDays = Math.max(1, _diffLocalDays(prevMonthEnd, thisMonthEnd));
     const monthPoints = [{ x: 0, y: 0 }];
     const monthData = PfStore.navHistory.filter(d => d.date >= monthStartYmd && d.date <= monthEndYmd);

@@ -40,23 +40,12 @@ function _pfSavedPeriod(type, key) {
 }
 
 function _pfReportNum(v, digits = 2) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return '-';
-  return n.toLocaleString(undefined, { maximumFractionDigits: digits });
-}
-
-function _pfReportKrw(v) {
-  return typeof fmtKrw === 'function' ? fmtKrw(v) : _pfReportNum(v, 0);
-}
-
-function _pfReportPct(v, signed = true) {
-  return typeof fmtPct === 'function' ? fmtPct(v, signed) : _pfReportNum(v, 2) + '%';
+  const n = toFiniteNumber(v);
+  return n === null ? '-' : fmtNum(n, { maxDecimals: digits });
 }
 
 function _pfReportQty(v) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return '-';
-  return n.toLocaleString(undefined, { maximumFractionDigits: 6 });
+  return _pfReportNum(v, 6);
 }
 
 function _pfCompositionActivityLabel(activity) {
@@ -135,25 +124,25 @@ function _pfEndSnapshotSection(snapshot) {
   const chips = [
     `기준일 ${escapeHtml(snapshot.date || '-')}`,
     `보유 ${Number(snapshot.position_count || positions.length).toLocaleString()}종목`,
-    `평가액 ${_pfReportKrw(snapshot.total_market_value)}`,
+    `평가액 ${fmtKrw(snapshot.total_market_value)}`,
   ];
   if (snapshot.total_gain_value !== null && snapshot.total_gain_value !== undefined) {
-    chips.push(`평가손익 ${_pfReportKrw(snapshot.total_gain_value)} (${_pfReportPct(snapshot.total_gain_pct)})`);
+    chips.push(`평가손익 ${fmtKrw(snapshot.total_gain_value)} (${fmtPct(snapshot.total_gain_pct)})`);
   }
   const groupChips = (snapshot.groups || []).map(g =>
-    `<span class="pf-period-snapshot-group">${escapeHtml(g.group_name || '기타')} <b>${escapeHtml(_pfReportPct(g.weight_pct, false))}</b></span>`
+    `<span class="pf-period-snapshot-group">${escapeHtml(g.group_name || '기타')} <b>${escapeHtml(fmtPct(g.weight_pct, false))}</b></span>`
   ).join('');
   const cols = [
     { label: '종목', render: r => `${escapeHtml(r.stock_name || r.stock_code)}<div class="pf-risk-sub">${escapeHtml(r.stock_code || '')}</div>` },
     { label: '그룹', render: r => escapeHtml(r.group_name || '기타') },
     { label: '수량', render: r => escapeHtml(_pfReportQty(r.quantity)) },
-    { label: '평가액', render: r => escapeHtml(_pfReportKrw(r.market_value)) },
-    { label: '비중', render: r => escapeHtml(_pfReportPct(r.weight_pct, false)) },
+    { label: '평가액', render: r => escapeHtml(fmtKrw(r.market_value)) },
+    { label: '비중', render: r => escapeHtml(fmtPct(r.weight_pct, false)) },
     {
       label: '평가손익',
       render: r => (r.gain_value === null || r.gain_value === undefined)
         ? '-'
-        : `<span class="${returnClass(r.gain_value)}">${escapeHtml(_pfReportKrw(r.gain_value))}</span><div class="pf-risk-sub">${escapeHtml(_pfReportPct(r.gain_pct))}</div>`,
+        : `<span class="${returnClass(r.gain_value)}">${escapeHtml(fmtKrw(r.gain_value))}</span><div class="pf-risk-sub">${escapeHtml(fmtPct(r.gain_pct))}</div>`,
     },
   ];
   return `<section class="pf-period-report-wide">
@@ -204,14 +193,14 @@ function _pfRenderPeriodReport(saved) {
     ? `<div class="pf-period-warnings">${quality.warnings.map(w => `<span>${escapeHtml(w)}</span>`).join('')}</div>`
     : '';
   const cards = [
-    _pfReportCard('NAV 수익률', _pfReportPct(summary.nav_return_pct), `${summary.baseline_date || '-'} → ${summary.ending_date || '-'}`, navCls),
-    _pfReportCard('평가금액 변화', _pfReportKrw(summary.value_change), `${_pfReportKrw(summary.starting_value)} → ${_pfReportKrw(summary.ending_value)}`, valueCls),
-    _pfReportCard('순입출금', _pfReportKrw(cash.net_cashflow), `입금 ${_pfReportKrw(cash.total_deposit)} · 출금 ${_pfReportKrw(cash.total_withdrawal)}`),
-    _pfReportCard('분배금 지급', _pfReportKrw(cash.total_distribution || 0), '좌수 유지 · 총수익률에 포함'),
-    _pfReportCard('순 구성 변화', _pfReportKrw(compSummary.net_trade_value_estimate), `매수/증가 ${compSummary.buy_like_count || 0} · 매도/축소 ${compSummary.sell_like_count || 0}`),
+    _pfReportCard('NAV 수익률', fmtPct(summary.nav_return_pct), `${summary.baseline_date || '-'} → ${summary.ending_date || '-'}`, navCls),
+    _pfReportCard('평가금액 변화', fmtKrw(summary.value_change), `${fmtKrw(summary.starting_value)} → ${fmtKrw(summary.ending_value)}`, valueCls),
+    _pfReportCard('순입출금', fmtKrw(cash.net_cashflow), `입금 ${fmtKrw(cash.total_deposit)} · 출금 ${fmtKrw(cash.total_withdrawal)}`),
+    _pfReportCard('분배금 지급', fmtKrw(cash.total_distribution || 0), '좌수 유지 · 총수익률에 포함'),
+    _pfReportCard('순 구성 변화', fmtKrw(compSummary.net_trade_value_estimate), `매수/증가 ${compSummary.buy_like_count || 0} · 매도/축소 ${compSummary.sell_like_count || 0}`),
     _pfReportCard('종목 변동', `${(counts.added || 0) + (counts.removed || 0) + (counts.increased || 0) + (counts.decreased || 0)}개`, `추가 ${counts.added || 0} · 제거 ${counts.removed || 0} · 증가 ${counts.increased || 0} · 감소 ${counts.decreased || 0}`),
-    _pfReportCard('MDD', _pfReportPct(risk.max_drawdown_pct, false), risk.max_drawdown_trough_date || ''),
-    _pfReportCard('집중도 Top5', _pfReportPct(allocation.concentration?.end?.top5_weight_pct, false), `HHI ${_pfReportNum(allocation.concentration?.end?.hhi, 4)}`),
+    _pfReportCard('MDD', fmtPct(risk.max_drawdown_pct, false), risk.max_drawdown_trough_date || ''),
+    _pfReportCard('집중도 Top5', fmtPct(allocation.concentration?.end?.top5_weight_pct, false), `HHI ${_pfReportNum(allocation.concentration?.end?.hhi, 4)}`),
   ];
   const buyRows = (composition.top_buys || []).slice(0, 8);
   const sellRows = (composition.top_sells || []).slice(0, 8);
@@ -222,20 +211,20 @@ function _pfRenderPeriodReport(saved) {
     { label: '종목', render: r => `${escapeHtml(r.stock_name || r.stock_code)}<div class="pf-risk-sub">${escapeHtml(r.stock_code || '')}</div>` },
     { label: '구분', render: r => `${escapeHtml(_pfCompositionActivityLabel(r.activity))}<div class="pf-risk-sub">${escapeHtml(_pfCompositionConfidenceLabel(r.confidence))}</div>` },
     { label: '수량 변화', render: r => escapeHtml(_pfReportQty(r.quantity_change)) },
-    { label: '거래 추정', render: r => `<span class="${returnClass(r.trade_value_estimate)}">${escapeHtml(_pfReportKrw(r.trade_value_estimate))}</span>` },
-    { label: '비중', render: r => `${escapeHtml(_pfReportPct(r.start_weight_pct, false))} → ${escapeHtml(_pfReportPct(r.end_weight_pct, false))}<div class="pf-risk-sub">${escapeHtml(_pfReportPct(r.weight_change_ppt, true))}p</div>` },
+    { label: '거래 추정', render: r => `<span class="${returnClass(r.trade_value_estimate)}">${escapeHtml(fmtKrw(r.trade_value_estimate))}</span>` },
+    { label: '비중', render: r => `${escapeHtml(fmtPct(r.start_weight_pct, false))} → ${escapeHtml(fmtPct(r.end_weight_pct, false))}<div class="pf-risk-sub">${escapeHtml(fmtPct(r.weight_change_ppt, true))}p</div>` },
   ];
   const holdingCols = [
     { label: '종목', render: r => `${escapeHtml(r.stock_name || r.stock_code)}<div class="pf-risk-sub">${escapeHtml(r.stock_code || '')}</div>` },
     { label: '상태', render: r => escapeHtml(r.status || '') },
-    { label: '변화', render: r => `<span class="${returnClass(r.change_value)}">${escapeHtml(_pfReportKrw(r.change_value))}</span>` },
-    { label: '종료 비중', render: r => escapeHtml(_pfReportPct(r.end_weight_pct, false)) },
+    { label: '변화', render: r => `<span class="${returnClass(r.change_value)}">${escapeHtml(fmtKrw(r.change_value))}</span>` },
+    { label: '종료 비중', render: r => escapeHtml(fmtPct(r.end_weight_pct, false)) },
   ];
   const groupCols = [
     { label: '그룹', render: r => escapeHtml(r.group_name || '') },
-    { label: '비중', render: r => `${escapeHtml(_pfReportPct(r.start_weight_pct, false))} → ${escapeHtml(_pfReportPct(r.end_weight_pct, false))}` },
-    { label: '변화', render: r => `<span class="${returnClass(r.weight_change_ppt)}">${escapeHtml(_pfReportPct(r.weight_change_ppt, true))}p</span>` },
-    { label: '평가액 변화', render: r => escapeHtml(_pfReportKrw(r.change_value)) },
+    { label: '비중', render: r => `${escapeHtml(fmtPct(r.start_weight_pct, false))} → ${escapeHtml(fmtPct(r.end_weight_pct, false))}` },
+    { label: '변화', render: r => `<span class="${returnClass(r.weight_change_ppt)}">${escapeHtml(fmtPct(r.weight_change_ppt, true))}p</span>` },
+    { label: '평가액 변화', render: r => escapeHtml(fmtKrw(r.change_value)) },
   ];
   const mdBtn = saved.report_md
     ? `<button class="pf-mini-btn" type="button" onclick="pfDownloadPeriodReportMarkdown()">Markdown</button>`
@@ -298,8 +287,8 @@ function _pfPerfBaselineNote(entry) {
 }
 
 function _pfPerfValueMeta(entry) {
-  const start = _pfReportKrw(entry.starting_value);
-  const end = _pfReportKrw(entry.ending_value);
+  const start = fmtKrw(entry.starting_value);
+  const end = fmtKrw(entry.ending_value);
   return `${start} → ${end}`;
 }
 
@@ -309,7 +298,7 @@ function _pfPerfRowInner(entry, caret) {
   const sub = `${escapeHtml(entry.baseline_date || '')} → ${escapeHtml(entry.ending_date || '')}${escapeHtml(_pfPerfBaselineNote(entry))}`;
   return `${caret}
     <span class="pf-perf-key">${escapeHtml(entry.key)}${tag}</span>
-    <span class="pf-perf-value ${cls}">${escapeHtml(_pfReportPct(entry.return_pct))}</span>
+    <span class="pf-perf-value ${cls}">${escapeHtml(fmtPct(entry.return_pct))}</span>
     <span class="pf-perf-meta">${escapeHtml(_pfPerfValueMeta(entry))}<span class="pf-risk-sub">${sub}</span></span>`;
 }
 

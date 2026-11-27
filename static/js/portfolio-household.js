@@ -35,8 +35,7 @@ const PF_HH_COLOR_FALLBACKS = {
 function pfHhColor(category) {
   const key = String(category || 'other');
   const token = `--hh-${key.replace(/_/g, '-')}`;
-  const value = getComputedStyle(document.documentElement).getPropertyValue(token).trim();
-  return value || PF_HH_COLOR_FALLBACKS[key] || PF_HH_COLOR_FALLBACKS.other;
+  return cssToken(token, PF_HH_COLOR_FALLBACKS[key] || PF_HH_COLOR_FALLBACKS.other);
 }
 
 function _pfHouseholdMoney(value) {

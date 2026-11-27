@@ -122,7 +122,7 @@ async function loadPortfolio({ force = false } = {}) {
     } catch (e) { console.warn(e); }
     // Restore benchmark names from localStorage cache for instant display
     try {
-      const cached = JSON.parse(localStorage.getItem('pfBenchmarkNames') || '{}');
+      const cached = JSON.parse(safeStorageGet('pfBenchmarkNames', '{}'));
       for (const [k, v] of Object.entries(cached)) {
         PfStore.benchmarkQuotes[k] = { ...(PfStore.benchmarkQuotes[k] || {}), name: v };
       }
@@ -152,7 +152,7 @@ async function loadPortfolio({ force = false } = {}) {
       // Save names to localStorage
       const names = {};
       for (const [k, v] of Object.entries(PfStore.benchmarkQuotes)) { if (v.name) names[k] = v.name; }
-      try { localStorage.setItem('pfBenchmarkNames', JSON.stringify(names)); } catch (e) { console.warn(e); }
+      safeStorageSet('pfBenchmarkNames', JSON.stringify(names));
       renderPortfolio();
     }).catch(e => reportApiError(e, '벤치마크 시세', { silent: true }));
     // Preserve existing quotes from previous load
@@ -197,7 +197,7 @@ function _restorePortfolioSnapshotForFastPaint() {
   if (PfStore.accountId) return;
   if (PfStore.items.length) return;
   try {
-    const snapshot = JSON.parse(localStorage.getItem(_PF_PORTFOLIO_SNAPSHOT_KEY) || 'null');
+    const snapshot = JSON.parse(safeStorageGet(_PF_PORTFOLIO_SNAPSHOT_KEY, 'null'));
     if (!snapshot || !Array.isArray(snapshot.items) || !snapshot.items.length) return;
     if (typeof currentUser !== 'undefined' && (!currentUser || snapshot.userId !== currentUser.google_sub)) return;
     const savedAt = Number(snapshot.savedAt || 0);
@@ -213,13 +213,11 @@ function _restorePortfolioSnapshotForFastPaint() {
 
 function _savePortfolioSnapshot(items) {
   if (PfStore.accountId) return;
-  try {
-    localStorage.setItem(_PF_PORTFOLIO_SNAPSHOT_KEY, JSON.stringify({
-      savedAt: Date.now(),
-      userId: typeof currentUser !== 'undefined' ? currentUser?.google_sub : null,
-      items: Array.isArray(items) ? items.slice(0, 300) : [],
-    }));
-  } catch (e) { console.warn(e); }
+  safeStorageSet(_PF_PORTFOLIO_SNAPSHOT_KEY, JSON.stringify({
+    savedAt: Date.now(),
+    userId: typeof currentUser !== 'undefined' ? currentUser?.google_sub : null,
+    items: Array.isArray(items) ? items.slice(0, 300) : [],
+  }));
 }
 
 function pfApplyManualOrder(items, orderedCodes) {

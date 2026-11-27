@@ -6,9 +6,9 @@ import {JSDOM} from 'jsdom';
 function setup() {
   const dom = new JSDOM('<!doctype html><body></body>', {url:'https://example.test/portfolio',runScripts:'outside-only'});
   const w = dom.window;
-  w.escapeHtml = value => String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
   w.HTMLDialogElement.prototype.showModal = function() {this.open=true;};
   w.HTMLDialogElement.prototype.close = function() {this.open=false;this.dispatchEvent(new w.Event('close'));};
+  w.eval(readFileSync(new URL('../../static/js/utils.js',import.meta.url),'utf8'));
   w.eval(readFileSync(new URL('../../static/js/portfolio-account-activity.js',import.meta.url),'utf8'));
   return {dom,w,el:id=>w.document.getElementById(id)};
 }

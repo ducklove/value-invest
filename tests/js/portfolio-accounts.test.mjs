@@ -16,6 +16,7 @@ function setup() {
     dialog.showModal = () => {dialog.open = true;};
     dialog.close = () => {dialog.open = false; dialog.dispatchEvent(new w.Event('close'));};
   }
+  w.eval(readFileSync(new URL('../../static/js/utils.js',import.meta.url),'utf8'));
   w.eval(readFileSync(new URL('../../static/js/portfolio-accounts.js',import.meta.url),'utf8') + '\nwindow.PfAccounts = PfAccounts;');
   w.PfAccounts.catalog = JSON.parse(readFileSync(new URL('../fixtures/broker-catalog.json', import.meta.url), 'utf8'));
   w.document.dispatchEvent(new w.Event('DOMContentLoaded'));

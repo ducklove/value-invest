@@ -21,28 +21,15 @@ const PfAlerts = {
 if (typeof window !== 'undefined') window.PfAlerts = PfAlerts;
 
 function pfAlertsApi(path, options = {}) {
-  const init = { ...options };
-  if (options.body !== undefined) {
-    init.headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-  }
-  return apiFetch(`/api/notifications${path}`, init);
-}
-
-function pfAlertsApiJson(path, options = {}) {
-  const init = { ...options };
-  if (options.body !== undefined) {
-    init.headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-  }
-  return apiFetchJson(`/api/notifications${path}`, init);
+  return apiNotificationsFetch(path, options);
 }
 
 // 숫자 표기 — utils.js 공용 fmtNum 위임(중복 구현 제거). 알림 임계값은
 // ''/비수치 문자열이 올 수 있어 '-' 가드만 여기 남긴다
 // (fmtNum('')==='0', fmtNum('abc')==='NaN' 이라 그대로 쓰면 표기가 깨진다).
 function pfFmtNum(value) {
-  if (value === null || value === undefined || value === '') return '-';
-  const n = Number(value);
-  return isFinite(n) ? fmtNum(n) : '-';
+  const n = toFiniteNumber(value);
+  return n === null ? '-' : fmtNum(n);
 }
 
 // --- Modal open/close -------------------------------------------------------
@@ -66,7 +53,7 @@ async function pfAlertsLoadQuietHours() {
   if (!el) return;
   el.textContent = '설정 확인 중…';
   try {
-    const settings = await pfAlertsApiJson('/quiet-hours', { errorMessage: '시간 설정을 불러오지 못했습니다.' });
+    const settings = await apiNotificationsFetchJson('/quiet-hours', { errorMessage: '시간 설정을 불러오지 못했습니다.' });
     pfAlertsRenderQuietHours(settings);
   } catch (e) {
     el.innerHTML = '<p role="alert">시간 설정을 불러오지 못했습니다.</p><button class="pf-alert-btn" type="button" onclick="pfAlertsLoadQuietHours()">다시 시도</button>';
@@ -120,7 +107,7 @@ async function pfAlertsSaveQuietHours() {
   button.disabled = true;
   status.textContent = '저장 중…';
   try {
-    await pfAlertsApiJson('/quiet-hours', {
+    await apiNotificationsFetchJson('/quiet-hours', {
       method: 'PUT', body: JSON.stringify(payload), errorMessage: '시간 설정을 저장하지 못했습니다.',
     });
     status.textContent = '저장했습니다.';
@@ -188,7 +175,7 @@ async function pfAlertsLoadChannels() {
   const el = document.getElementById('pfAlertChannels');
   if (!el) return;
   try {
-    PfAlerts.channels = await pfAlertsApiJson('/channels', { errorMessage: 'load failed' });
+    PfAlerts.channels = await apiNotificationsFetchJson('/channels', { errorMessage: 'load failed' });
   } catch (e) {
     el.textContent = '채널 정보를 불러오지 못했습니다.';
     return;
@@ -310,7 +297,7 @@ async function pfAlertsToggleBriefing(kind = 'morning', enabled) {
   try {
     const instructionsEl = document.getElementById(pfBriefingInputId(kind));
     const custom_instructions = instructionsEl ? instructionsEl.value : undefined;
-    await pfAlertsApiJson('/briefing', {
+    await apiNotificationsFetchJson('/briefing', {
       method: 'PUT',
       body: JSON.stringify({ kind, enabled, custom_instructions }),
       errorMessage: '브리핑 설정에 실패했습니다.',
@@ -331,7 +318,7 @@ async function pfAlertsSaveBriefingInstructions(kind = 'morning', options = {}) 
   const custom_instructions = ((document.getElementById(pfBriefingInputId(kind)) || {}).value || '');
   if (hint) hint.textContent = '저장 중…';
   try {
-    const data = await pfAlertsApiJson('/briefing', {
+    const data = await apiNotificationsFetchJson('/briefing', {
       method: 'PUT',
       body: JSON.stringify({ kind, custom_instructions }),
       errorMessage: '브리핑 지시 저장에 실패했습니다.',
@@ -350,7 +337,7 @@ async function pfAlertsTestBriefing(kind = 'morning') {
   try {
     await pfAlertsSaveBriefingInstructions(kind, { rethrow: true });
     if (hint) hint.textContent = '브리핑 생성 및 발송 중…';
-    const data = await pfAlertsApiJson('/briefing/test', {
+    const data = await apiNotificationsFetchJson('/briefing/test', {
       method: 'POST',
       body: JSON.stringify({ kind }),
       errorMessage: '브리핑 테스트 발송에 실패했습니다.',
@@ -378,7 +365,7 @@ async function pfAlertsTelegramRegister() {
   if (!token) { if (hint) hint.textContent = '봇 토큰을 입력하세요.'; return; }
   if (hint) hint.textContent = '확인 중…';
   try {
-    const data = await pfAlertsApiJson('/telegram/register', {
+    const data = await apiNotificationsFetchJson('/telegram/register', {
       method: 'POST',
       body: JSON.stringify({ bot_token: token, chat_id: chat }),
       errorMessage: '연결 실패',
@@ -395,7 +382,7 @@ async function pfAlertsKakaoConnect() {
   const key = ((document.getElementById('pfKkKey') || {}).value || '').trim();
   if (!key) { if (hint) hint.textContent = '카카오 REST API 키를 입력하세요.'; return; }
   try {
-    const data = await pfAlertsApiJson('/kakao/connect', {
+    const data = await apiNotificationsFetchJson('/kakao/connect', {
       method: 'POST',
       body: JSON.stringify({ rest_key: key }),
       errorMessage: '연결 실패',
@@ -420,7 +407,7 @@ function pfAlertsStartPoll(kind, ttlMinutes) {
       return;
     }
     try {
-      const data = await pfAlertsApiJson('/channels');
+      const data = await apiNotificationsFetchJson('/channels');
       const ch = data[kind] || {};
       if (ch.connected) {
         PfAlerts.channels = data;
@@ -440,7 +427,7 @@ function pfAlertsStopPoll() {
 
 async function pfAlertsTest(key) {
   try {
-    await pfAlertsApiJson(`/channels/${key}/test`, {
+    await apiNotificationsFetchJson(`/channels/${key}/test`, {
       method: 'POST',
       body: '{}',
       errorMessage: '테스트 전송에 실패했습니다.',
@@ -474,17 +461,6 @@ async function pfAlertsUnlink(key) {
 }
 
 // --- Rule form --------------------------------------------------------------
-
-function pfAlertsStockSelect() {
-  const holdings = (window.PfStore && PfStore.items) || [];
-  const options = holdings
-    .map((it) => {
-      const price = it.quote && it.quote.price != null ? ` · 현재가 ${pfFmtNum(it.quote.price)}` : '';
-      return `<option value="${escapeHtml(it.stock_code)}">${escapeHtml(it.stock_name || it.stock_code)}${price}</option>`;
-    })
-    .join('');
-  return `<select class="pf-modal-input pf-alert-stock" id="pfAlertStock">${options || '<option value="">보유 종목 없음</option>'}</select>`;
-}
 
 function pfAlertsDirSelect() {
   return `<select class="pf-modal-input pf-alert-dir" id="pfAlertDir">
@@ -571,7 +547,7 @@ async function pfAlertsSubmit() {
   }
 
   try {
-    await pfAlertsApiJson('/alerts', {
+    await apiNotificationsFetchJson('/alerts', {
       method: 'POST',
       body: JSON.stringify(payload),
       errorMessage: '알림 규칙 추가에 실패했습니다.',
@@ -594,7 +570,7 @@ async function pfAlertsLoadList() {
   const listEl = document.getElementById('pfAlertList');
   if (!listEl) return;
   try {
-    PfAlerts.alerts = await pfAlertsApiJson('/alerts', { errorMessage: '규칙을 불러오지 못했습니다.' });
+    PfAlerts.alerts = await apiNotificationsFetchJson('/alerts', { errorMessage: '규칙을 불러오지 못했습니다.' });
   } catch (e) {
     listEl.innerHTML = '<div class="pf-alert-empty">규칙을 불러오지 못했습니다.</div>';
     return;

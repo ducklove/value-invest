@@ -69,49 +69,43 @@ async function pfOpenAssetInsight(stockCode) {
   }
 }
 
-function _insightNum(value) {
-  if (value === null || value === undefined || value === '') return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
 function _fmtInsightPct(value, signed = true) {
-  const n = _insightNum(value);
+  const n = toFiniteNumber(value);
   return n === null ? '-' : fmtPct(n, signed);
 }
 
 function _fmtInsightSignedAmount(value, currency = '') {
-  const n = _insightNum(value);
+  const n = toFiniteNumber(value);
   if (n === null) return '-';
   const prefix = n > 0 ? '+' : '';
   return `${prefix}${_fmtInsightAmount(n, currency)}`;
 }
 
 function _fmtInsightAmount(value, currency = '') {
-  const n = _insightNum(value);
+  const n = toFiniteNumber(value);
   if (n === null) return '-';
   const cur = String(currency || '').toUpperCase();
   if (!cur || cur === 'KRW') return fmtKrw(Math.round(n));
   const digits = Math.abs(n) >= 100 ? 2 : 4;
-  return `${cur} ${n.toLocaleString(undefined, { maximumFractionDigits: digits })}`;
+  return `${cur} ${fmtNum(n, { maxDecimals: digits })}`;
 }
 
 function _fmtInsightPrice(value, currency = '') {
-  const n = _insightNum(value);
+  const n = toFiniteNumber(value);
   if (n === null) return '-';
   const cur = String(currency || '').toUpperCase();
-  if (!cur || cur === 'KRW') return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  return `${cur} ${n.toLocaleString(undefined, { maximumFractionDigits: 4 })}`;
+  if (!cur || cur === 'KRW') return fmtNum(n, { maxDecimals: 2 });
+  return `${cur} ${fmtNum(n, { maxDecimals: 4 })}`;
 }
 
 function _fmtInsightMultiple(value) {
-  const n = _insightNum(value);
+  const n = toFiniteNumber(value);
   if (n === null) return '-';
-  return `${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}x`;
+  return `${fmtNum(n, { maxDecimals: 2 })}x`;
 }
 
 function _insightClass(value) {
-  const n = _insightNum(value);
+  const n = toFiniteNumber(value);
   if (n === null) return '';
   return n > 0 ? 'positive' : n < 0 ? 'negative' : '';
 }
@@ -477,8 +471,8 @@ function _applyHoldingPayload(data, persist) {
   _HOLDING_CODES = new Set(codes);
   _HOLDING_META = meta;
   if (persist) {
-    localStorage.setItem('holdingCodes', JSON.stringify({ codes, ts: Date.now() }));
-    localStorage.setItem('holdingMeta', JSON.stringify({ meta, ts: Date.now() }));
+    safeStorageSet('holdingCodes', JSON.stringify({ codes, ts: Date.now() }));
+    safeStorageSet('holdingMeta', JSON.stringify({ meta, ts: Date.now() }));
   }
   return true;
 }
@@ -501,8 +495,8 @@ function _applyHoldingIntegrationConfig() {
 (function _refreshHoldingCodes() {
   const hasConfig = _applyHoldingIntegrationConfig();
   try {
-    const codeCache = JSON.parse(localStorage.getItem('holdingCodes') || '{}');
-    const metaCache = JSON.parse(localStorage.getItem('holdingMeta') || '{}');
+    const codeCache = JSON.parse(safeStorageGet('holdingCodes', '{}'));
+    const metaCache = JSON.parse(safeStorageGet('holdingMeta', '{}'));
     if (!hasConfig) {
       if (codeCache.codes) _HOLDING_CODES = new Set(codeCache.codes);
       if (metaCache.meta) _HOLDING_META = metaCache.meta;
@@ -529,59 +523,4 @@ function pfGoAnalyze(stockCode, e) {
   }
   document.querySelectorAll('.pf-pref-menu').forEach(el => el.remove());
   pfOpenAssetInsight(stockCode);
-}
-
-function _showPrefMenu(prefCode, commonCode, e) {
-  // Remove any existing menu
-  document.querySelectorAll('.pf-pref-menu').forEach(el => el.remove());
-  const menu = document.createElement('div');
-  menu.className = 'pf-pref-menu';
-  menu.innerHTML = `
-    <div class="pf-pref-item" data-action="common">본주 분석 (${commonCode})</div>
-    <div class="pf-pref-item" data-action="spread">우선주 괴리율 대시보드</div>
-  `;
-  document.body.appendChild(menu);
-  _positionPortfolioPopupMenu(menu, e);
-
-  menu.querySelector('[data-action="common"]').addEventListener('click', () => {
-    menu.remove();
-    switchView('analysis');
-    analyzeStock(commonCode);
-  });
-  menu.querySelector('[data-action="spread"]').addEventListener('click', () => {
-    menu.remove();
-    openIntegration('preferredSpread', '', { code: prefCode });
-  });
-  // Close on outside click
-  setTimeout(() => {
-    document.addEventListener('click', function close(ev) {
-      if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', close); }
-    });
-  }, 0);
-}
-
-function _showHoldingMenu(stockCode, e) {
-  document.querySelectorAll('.pf-pref-menu').forEach(el => el.remove());
-  const menu = document.createElement('div');
-  menu.className = 'pf-pref-menu';
-  menu.innerHTML = `
-    <div class="pf-pref-item" data-action="analysis">본주 분석</div>
-    <div class="pf-pref-item" data-action="holding">자회사 비율 추이</div>
-  `;
-  document.body.appendChild(menu);
-  _positionPortfolioPopupMenu(menu, e);
-  menu.querySelector('[data-action="analysis"]').addEventListener('click', () => {
-    menu.remove();
-    switchView('analysis');
-    analyzeStock(stockCode);
-  });
-  menu.querySelector('[data-action="holding"]').addEventListener('click', () => {
-    menu.remove();
-    openIntegration('holdingValue', '', { code: stockCode });
-  });
-  setTimeout(() => {
-    document.addEventListener('click', function close(ev) {
-      if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', close); }
-    });
-  }, 0);
 }

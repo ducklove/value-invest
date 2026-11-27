@@ -10,17 +10,18 @@ function setup(t) {
   });
   const w = dom.window;
   t.after(() => w.close());
-  w.escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  w.fmtPct = n => n == null ? '-' : `${n > 0 ? '+' : ''}${n.toFixed(2)}%`;
-  w.fmtKrw = n => Math.round(n).toLocaleString('ko-KR');
-  w.fmtSignedKrw = n => `${n > 0 ? '+' : ''}${w.fmtKrw(n)}`;
-  w.quotePriceOrNull = q => q?.price ?? null;
-  w._pfRenderColToggles = () => {};
-  w._renderSummarySparklines = () => {};
-  for (const name of ['portfolio-store', 'portfolio-data', 'portfolio-render', 'portfolio-contributors', 'portfolio-events']) {
+  const loadScript = name => {
     const script = w.document.createElement('script');
     script.textContent = source(name);
     w.document.body.appendChild(script);
+  };
+  loadScript('utils');
+  w.fmtKrw = n => Math.round(n).toLocaleString('ko-KR');
+  w.fmtSignedKrw = n => `${n > 0 ? '+' : ''}${w.fmtKrw(n)}`;
+  w._pfRenderColToggles = () => {};
+  w._renderSummarySparklines = () => {};
+  for (const name of ['portfolio-store', 'portfolio-data', 'portfolio-render', 'portfolio-contributors', 'portfolio-events']) {
+    loadScript(name);
   }
   w.document.dispatchEvent(new w.Event('DOMContentLoaded'));
   // jsdom has no layout; the browser tests check actual popover bounds.

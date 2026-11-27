@@ -133,8 +133,8 @@ async function renderGroupCompositionChart(groupName, rows) {
     return;
   }
 
-  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
-  const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
+  const textColor = cssToken('--text-secondary', '#888');
+  const gridColor = cssToken('--border', '#333');
   const mobileChartMode = _isMobileChartMode();
   const dateObjects = prepared.dates.map(date => ({ date }));
   const series = prepared.seriesItems.map((item, idx) => {

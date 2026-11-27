@@ -222,10 +222,6 @@ function renderCurrentValuationSummary(indicators, weeklyIndicators, quoteSnapsh
 
 // 외부 분석 도구 카드 — 이 종목이 우선주 쌍/지주사면 밸류에이션 그리드에 같은
 // .valuation-card 로 합류시킨다(별도 위젯이 아니라 PER/PBR/베타와 한 그리드).
-function _sxlSafeUrl(url) {
-  return /^https?:\/\//.test(String(url || '')) ? portfolioIntegrationHref(String(url)) : '#';
-}
-
 function _sxlNum(v) {
   const n = Number(v);
   return isFinite(n) ? n.toLocaleString('ko-KR') : '-';

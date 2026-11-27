@@ -5,6 +5,7 @@ import { JSDOM } from 'jsdom';
 
 const source = readFileSync(new URL('../../static/index.html', import.meta.url), 'utf8');
 const html = source.match(/<dialog id="pfDistributionDialog"[\s\S]*?<\/dialog>/)[0];
+const utilsScript = readFileSync(new URL('../../static/js/utils.js', import.meta.url), 'utf8');
 const distributionScript = readFileSync(new URL('../../static/js/portfolio-distributions.js', import.meta.url), 'utf8');
 const distributionResult = { currency: 'KRW', amount: 846, cash_before: 10846, cash_after: 10000,
   available_before: 846, available_after: 0, units_change: 0, revision: 'a'.repeat(64) };
@@ -12,9 +13,9 @@ const distributionResult = { currency: 'KRW', amount: 846, cash_before: 10846, c
 function setup(handler) {
   const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only' });
   const w = dom.window;
+  w.eval(utilsScript);
+  w.eval("currentUser = { google_sub: 'u1' };");
   w.PfStore = { items: [{ stock_code: 'CASH_KRW', quantity: 10846 }], currency: { fxRate: 1400 } };
-  w.currentUser = { google_sub: 'u1' };
-  w.escapeHtml = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
   w.refreshPortfolioAfterCashflowMutation = async () => {};
   w.loadPortfolio = async () => {};
   w.pfRefreshTodayState = async () => {};

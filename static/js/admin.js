@@ -335,15 +335,6 @@ function _showAiConfigMessage(message, isError) {
   }
 }
 
-async function _refreshAiConfigSection() {
-  const data = await apiFetchJson('/api/admin/ai-config', {
-    errorMessage: 'AI 설정 갱신 실패',
-  });
-  _aiAdminConfig = data;
-  const section = document.getElementById('aiConfigSection');
-  if (section) section.outerHTML = _renderAiConfigSection(_aiAdminConfig);
-}
-
 async function saveAiKey() {
   const key = (document.getElementById('aiOpenRouterKey')?.value || '').trim();
   if (!key) {

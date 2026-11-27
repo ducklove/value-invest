@@ -17,6 +17,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..", "..");
 const read = (...parts) => readFileSync(join(root, ...parts), "utf8");
 
+const UTILS_SRC = read("static", "js", "utils.js");
 const STORE_SRC = read("static", "js", "portfolio-store.js");
 const SHELL_SRC = read("static", "js", "portfolio-shell.js");
 
@@ -65,6 +66,7 @@ function buildWindow() {
   const { window: w } = dom;
   // portfolio-shell.js 는 로드 시점 IIFE 에서 matchMedia 를 부른다(jsdom 미구현).
   w.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} });
+  appendScript(w, UTILS_SRC);
   appendScript(w, STORE_SRC);
   appendScript(w, SHELL_SRC);
   return w;

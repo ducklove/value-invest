@@ -50,10 +50,8 @@ function _pfTradeStorageKey() {
 
 function _pfTradePersist(pending) {
   _pfTrade.pending = pending;
-  try {
-    if (pending) sessionStorage.setItem(_pfTradeStorageKey(), JSON.stringify(pending));
-    else sessionStorage.removeItem(_pfTradeStorageKey());
-  } catch { /* 저장소가 차단된 브라우저에서도 현재 화면의 요청 번호는 보존한다. */ }
+  if (pending) safeStorageSet(_pfTradeStorageKey(), JSON.stringify(pending), 'session');
+  else safeStorageRemove(_pfTradeStorageKey(), 'session');
 }
 
 function _pfTradeOptions(items) {
@@ -297,7 +295,7 @@ function pfOpenTrade(code, newItem = null, defaults = {}) {
   _pfTradeEl('Currency').disabled = false;
   _pfTradeEl('Preview').textContent = '';
   _pfTradeEl('Save').textContent = '매매 기록 저장';
-  try { _pfTrade.pending = JSON.parse(sessionStorage.getItem(_pfTradeStorageKey()) || 'null'); } catch { /* 현재 화면의 요청 보존 */ }
+  try { _pfTrade.pending = JSON.parse(safeStorageGet(_pfTradeStorageKey(), 'null', 'session')); } catch { /* 현재 화면의 요청 보존 */ }
   if (_pfTrade.pending) {
     const p = _pfTrade.pending;
     if (p.side === 'exchange') {

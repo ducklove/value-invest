@@ -6,12 +6,6 @@ let _pfContributorCloseTimer = null;
 let _pfContributorPopover = null;
 let _pfContributorRestoringFocus = false;
 
-function _pfContributorNumber(value) {
-  if (value == null || value === '') return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
 function _pfContributorIsCash(code) {
   return /^(CASH_|CMA_|FUTURES_)/.test(code);
 }
@@ -24,8 +18,8 @@ function pfBuildSummaryContributors(rows, snap, latestSnap, period, allRows = ro
     return { message: '정산 기준이 변경되어 기간 비교를 준비 중입니다.' };
   }
   const usd = PfStore.currency.unit === 'USD';
-  const currentFx = usd ? _pfContributorNumber(PfStore.currency.fxRate) : 1;
-  const baselineFx = usd ? _pfContributorNumber(snap.fx_usdkrw) : 1;
+  const currentFx = usd ? toFiniteNumber(PfStore.currency.fxRate) : 1;
+  const baselineFx = usd ? toFiniteNumber(snap.fx_usdkrw) : 1;
   if (!(currentFx > 0 && baselineFx > 0)) return { message: '비교에 필요한 환율이 없습니다.' };
   const current = new Map(allRows.map(row => [row.stock_code, row]));
   const visible = new Set(rows.map(row => row.stock_code));
@@ -50,11 +44,11 @@ function pfBuildSummaryContributors(rows, snap, latestSnap, period, allRows = ro
       if (search && !search.split(/[\s,]+/).every(token => `${name} ${code} ${position?.group_name || ''}`.toLowerCase().includes(token))) continue;
     }
     const hasBase = Object.prototype.hasOwnProperty.call(values, code);
-    const baseValue = hasBase ? _pfContributorNumber(values[code]) : 0;
-    const baseQuantity = hasBase ? _pfContributorNumber(position?.quantity) : 0;
-    const quantity = row ? _pfContributorNumber(row.qty) : 0;
-    const currentValue = row ? _pfContributorNumber(row.marketValue) : 0;
-    const quantityChange = trade ? _pfContributorNumber(trade.quantity_change) : 0;
+    const baseValue = hasBase ? toFiniteNumber(values[code]) : 0;
+    const baseQuantity = hasBase ? toFiniteNumber(position?.quantity) : 0;
+    const quantity = row ? toFiniteNumber(row.qty) : 0;
+    const currentValue = row ? toFiniteNumber(row.marketValue) : 0;
+    const quantityChange = trade ? toFiniteNumber(trade.quantity_change) : 0;
     if (quantity === 0 && baseQuantity === 0 && !trade) continue;
     if (baseValue === null || baseQuantity === null || quantity === null || currentValue === null
         || quantityChange === null || trade?.comparable === false
@@ -64,8 +58,8 @@ function pfBuildSummaryContributors(rows, snap, latestSnap, period, allRows = ro
     }
     const tradeFx = !trade || trade.currency === 'KRW' ? 1
       : trade.currency === 'USD' ? (PfStore.currency.fxRate || trade.fx_rate) : trade.fx_rate;
-    if (!(tradeFx > 0) || (trade && (_pfContributorNumber(trade.cash_change) === null
-        || _pfContributorNumber(trade.buy_amount) === null))) {
+    if (!(tradeFx > 0) || (trade && (toFiniteNumber(trade.cash_change) === null
+        || toFiniteNumber(trade.buy_amount) === null))) {
       excluded++;
       continue;
     }

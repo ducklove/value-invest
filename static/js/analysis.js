@@ -1,27 +1,4 @@
 // Analyze
-const STEP_LABELS = {
-  start: '분석 시작',
-  financial_start: '재무제표 수집',
-  financial_done: '재무제표 수집 완료',
-  financial_error: '재무제표 조회 실패',
-  market_start: '시장 데이터 계산',
-  market_done: '시장 데이터 수집 완료',
-  market_error: '시장 데이터 조회 실패',
-  saving: '캐시 저장',
-  analyzing: '지표 계산',
-};
-
-function getSeriesCoverage(series) {
-  const years = (series || [])
-    .filter(item => item && item.value !== null && item.value !== undefined)
-    .map(item => item.year)
-    .filter(year => Number.isFinite(year));
-  if (years.length === 0) return '';
-  const startYear = Math.min(...years);
-  const endYear = Math.max(...years);
-  return startYear === endYear ? String(startYear) : `${startYear}-${endYear}`;
-}
-
 function getWeeklyDateCoverage(series) {
   const dates = (series || [])
     .filter(item => item && item.value !== null && item.value !== undefined && item.date)
@@ -424,7 +401,7 @@ async function renderResult(data) {
   Object.values(charts).forEach(c => c.dispose());
   charts = {};
 
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const isDark = isDarkTheme();
   const gridColor = isDark ? 'rgba(148,163,184,0.15)' : 'rgba(0,0,0,0.06)';
   const tickColor = isDark ? '#94a3b8' : '#666';
 
@@ -620,25 +597,6 @@ async function saveRecentOrder(stockCodes) {
     body: JSON.stringify({ stock_codes: stockCodes, tab: activeTab }),
     errorMessage: '순서를 저장하지 못했습니다.',
   });
-}
-
-async function moveRecentItem(index, delta) {
-  if (!currentUser) return;
-  const nextIndex = index + delta;
-  if (nextIndex < 0 || nextIndex >= recentListItems.length) return;
-
-  const nextItems = recentListItems.slice();
-  const [moved] = nextItems.splice(index, 1);
-  nextItems.splice(nextIndex, 0, moved);
-  recentListItems = nextItems;
-
-  try {
-    await saveRecentOrder(nextItems.map(item => item.stock_code));
-    await loadRecentList();
-  } catch (error) {
-    showToast(error.message || '순서를 저장하지 못했습니다.');
-    await loadRecentList();
-  }
 }
 
 async function dropRecentItem(fromIndex, toIndex) {

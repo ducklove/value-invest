@@ -6,9 +6,8 @@ import { JSDOM } from 'jsdom';
 function setup() {
   const dom = new JSDOM(readFileSync(new URL('../../static/index.html', import.meta.url), 'utf8'), { runScripts: 'outside-only', url: 'http://localhost' });
   const win = dom.window;
-  win.escapeHtml = value => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+  for (const file of ['utils.js', 'portfolio-attribution.js', 'portfolio-theses.js']) win.eval(readFileSync(new URL(`../../static/js/${file}`, import.meta.url), 'utf8'));
   win.reportApiError = () => {};
-  for (const file of ['portfolio-attribution.js', 'portfolio-theses.js']) win.eval(readFileSync(new URL(`../../static/js/${file}`, import.meta.url), 'utf8'));
   return dom;
 }
 

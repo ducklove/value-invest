@@ -83,22 +83,16 @@ function _schcEnsureTip() {
 }
 
 function _schcFmtPrice(v, currency) {
-  if (v === null || v === undefined || !Number.isFinite(Number(v))) return '-';
-  const n = Number(v);
-  if (currency === 'KRW') return Math.round(n).toLocaleString();
-  return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
-}
-
-// 토큰 읽기는 utils.js cssToken 단일 소스에 위임한다(D-07).
-function _schcCssColor(name, fallback) {
-  return cssToken(name, fallback);
+  const n = toFiniteNumber(v);
+  if (n === null) return '-';
+  if (currency === 'KRW') return fmtNum(Math.round(n));
+  return fmtNum(n, { maxDecimals: 2 });
 }
 
 // 전일종가 파싱 — null/undefined 는 null 유지 (Number(null)===0 함정 방지).
 function _schcPrevClose(data) {
-  if (data.prevClose === null || data.prevClose === undefined) return null;
-  const n = Number(data.prevClose);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  const n = toFiniteNumber(data.prevClose);
+  return n !== null && n > 0 ? n : null;
 }
 
 // "HH:MM" → 분. 형식이 아니면 null.
@@ -165,7 +159,7 @@ function _schcDrawChart(canvas, data) {
     const y = yFor(prevClose);
     ctx.save();
     ctx.beginPath();
-    ctx.strokeStyle = _schcCssColor('--text-secondary', '#666');
+    ctx.strokeStyle = cssToken('--text-secondary', '#666');
     ctx.globalAlpha = 0.5;
     ctx.lineWidth = 1;
     ctx.setLineDash([3, 3]);
@@ -177,8 +171,8 @@ function _schcDrawChart(canvas, data) {
 
   const last = points[points.length - 1].p;
   const lineColor = prevClose === null
-    ? _schcCssColor('--chart-line', '#2563eb')
-    : last >= prevClose ? _schcCssColor('--up', '#b91c1c') : _schcCssColor('--down', '#1d4ed8');
+    ? cssToken('--chart-line', '#2563eb')
+    : last >= prevClose ? cssToken('--up', '#b91c1c') : cssToken('--down', '#1d4ed8');
   ctx.beginPath();
   ctx.strokeStyle = lineColor;
   ctx.lineWidth = 1.5;

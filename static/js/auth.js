@@ -68,10 +68,6 @@ function updateSidebarTabs() {
   tabs.style.display = currentUser ? 'flex' : 'none';
 }
 
-function buildGoogleLoginUri() {
-  return buildApiUrl('/api/auth/google/callback');
-}
-
 function buildLoginPageUrl() {
   const path = `/login?return_to=${encodeURIComponent(window.location.pathname + window.location.search + window.location.hash)}`;
   if (IS_GITHUB_PAGES_SITE && API_BASE_URL) {

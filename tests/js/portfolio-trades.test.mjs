@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 
 const html = readFileSync(new URL('../../static/index.html', import.meta.url), 'utf8').match(/<dialog id="pfTradeDialog"[\s\S]*?<\/dialog>/)[0];
+const utilsScript = readFileSync(new URL('../../static/js/utils.js', import.meta.url), 'utf8');
 const script = readFileSync(new URL('../../static/js/portfolio-trades.js', import.meta.url), 'utf8');
 const result = { stock_code: '005930', stock_name: '삼성전자', side: 'buy', currency: 'KRW', quantity: 2, price: 100,
   fees: 10, gross_amount: 200, quantity_before: 10, quantity_after: 12, cash_before: 1000, cash_after: 790,
@@ -98,12 +99,12 @@ test('환전 응답 유실은 입력과 요청 번호를 보존하고 같은 원
 function setup(handler) {
   const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only' });
   const w = dom.window;
+  w.eval(utilsScript);
+  w.eval("currentUser = { google_sub: 'u1' };");
   w.PfStore = { items: [
     { stock_code: '005930', stock_name: '삼성전자', quantity: 10, avg_price: 100, currency: 'KRW' },
     { stock_code: 'CASH_KRW', stock_name: '원화', quantity: 1000, currency: 'KRW' },
   ], edit: { code: null } };
-  w.currentUser = { google_sub: 'u1' };
-  w.escapeHtml = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
   w.loadPortfolio = async () => {};
   w.pfRefreshTodayState = async () => {};
   w.pfIsForeignSearchQuery = () => false;

@@ -27,7 +27,7 @@ const PF_HEAT_SPIKE_LEVEL = 3;
 // 현재 보이는 목록의 최대 |등락률|. 게이지 길이의 분모.
 let _pfHeatScale = 0;
 
-try { PfStore.prefs.heatMode = localStorage.getItem(PF_HEAT_MODE_KEY) !== '0'; } catch (e) {}
+PfStore.prefs.heatMode = safeStorageGet(PF_HEAT_MODE_KEY) !== '0';
 
 function pfHeatEnabled() {
   return !!(typeof PfStore !== 'undefined' && PfStore.prefs && PfStore.prefs.heatMode);
@@ -385,7 +385,7 @@ function _pfApplyHeatMode(enabled) {
 
 function pfToggleHeatMode() {
   _pfApplyHeatMode(!PfStore.prefs.heatMode);
-  try { localStorage.setItem(PF_HEAT_MODE_KEY, PfStore.prefs.heatMode ? '1' : '0'); } catch (e) {}
+  safeStorageSet(PF_HEAT_MODE_KEY, PfStore.prefs.heatMode ? '1' : '0');
   if (typeof renderPortfolio === 'function') renderPortfolio();
 }
 

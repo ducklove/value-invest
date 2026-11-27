@@ -6,7 +6,6 @@
 // filters, edit, manualOrder, snapshots, currency, prefs.
 // Only file-local UI plumbing (timers, style element refs, pointer guards)
 // stays as top-level declarations in the owning split file.
-const PF_QUOTE_REFRESH_MS = 60_000;
 // "도구" 허브(labsView)와 그 하위 딥링크 화면들 — switchView 의 상단 탭 활성 표시를 묶는 데 쓰인다.
 const PF_TOOLS_HUB_VIEWS = new Set(['labs', 'nps', 'insights', 'screener', 'masters', 'bonds', 'quant', 'opportunities']);
 // view ↔ URL 경로 매핑. switchView 의 history.pushState(정방향)와 app-main.js 의 최초 진입
@@ -44,7 +43,7 @@ const PF_SIMPLE_MODE_KEY = 'pf_mobile_simple_mode';
 // 컴팩트 보기: 종목명을 한 줄로, 태그를 숨기고 행 간격을 좁힌다. 순서 이동은 유지한다.
 // 모바일 전용인 pf-mobile-simple 과 달리 데스크톱에서도 동작하는 보기 옵션.
 const PF_COMPACT_ROWS_KEY = 'pf_compact_rows';
-try { PfStore.prefs.compactRows = localStorage.getItem(PF_COMPACT_ROWS_KEY) === '1'; } catch (e) {}
+PfStore.prefs.compactRows = safeStorageGet(PF_COMPACT_ROWS_KEY) === '1';
 
 function pfBenchmarkQuoteHasChange(q) {
   return q && q.change_pct !== null && q.change_pct !== undefined && q.change_pct !== '';
@@ -101,16 +100,14 @@ function pfSyncMobileFixedView() {
 }
 
 function _pfLoadSimpleModePreference() {
-  try {
-    const raw = localStorage.getItem(PF_SIMPLE_MODE_KEY);
-    if (raw === '1') return true;
-    if (raw === '0') return false;
-  } catch (e) {}
+  const raw = safeStorageGet(PF_SIMPLE_MODE_KEY);
+  if (raw === '1') return true;
+  if (raw === '0') return false;
   return null;
 }
 
 function _pfSaveSimpleModePreference(enabled) {
-  try { localStorage.setItem(PF_SIMPLE_MODE_KEY, enabled ? '1' : '0'); } catch (e) {}
+  safeStorageSet(PF_SIMPLE_MODE_KEY, enabled ? '1' : '0');
 }
 
 function _pfApplySimpleMode(enabled, { persist = false } = {}) {
@@ -237,10 +234,10 @@ const PF_COL_DEFS = [
 let _pfColStyleEl = null;
 
 function _pfLoadColVisibility() {
-  try { return JSON.parse(localStorage.getItem('pf_col_vis') || 'null'); } catch { return null; }
+  try { return JSON.parse(safeStorageGet('pf_col_vis', 'null')); } catch { return null; }
 }
 function _pfSaveColVisibility(vis) {
-  localStorage.setItem('pf_col_vis', JSON.stringify(vis));
+  safeStorageSet('pf_col_vis', JSON.stringify(vis));
 }
 function _pfGetColVisibility() {
   // Stored per-user overrides take priority; columns not yet known to
@@ -292,7 +289,7 @@ function _pfApplyCompactRows(enabled) {
 }
 function pfToggleCompactRows(checked) {
   _pfApplyCompactRows(checked);
-  try { localStorage.setItem(PF_COMPACT_ROWS_KEY, PfStore.prefs.compactRows ? '1' : '0'); } catch (e) {}
+  safeStorageSet(PF_COMPACT_ROWS_KEY, PfStore.prefs.compactRows ? '1' : '0');
 }
 (function initPfCompactRows() {
   const apply = () => _pfApplyCompactRows(PfStore.prefs.compactRows);
@@ -470,7 +467,7 @@ function holdPageScrollTop() {
 function _npsFrameSrc() {
   const cfg = window.APP_CONFIG && window.APP_CONFIG.integrations && window.APP_CONFIG.integrations.npsTracker;
   const base = (cfg && cfg.baseUrl) || 'https://ducklove.github.io/nps-tracker';
-  const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  const theme = currentTheme();
   // _=nonce: 부모 새로고침·탭 전환 시 iframe HTML 도 새로 받아 GitHub Pages 캐시로 인한 stale 방지.
   return base.replace(/\/+$/, '') + '/?embed=true&theme=' + theme + '&_=' + Date.now();
 }

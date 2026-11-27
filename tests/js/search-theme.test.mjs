@@ -9,6 +9,7 @@ import { JSDOM } from 'jsdom';
 
 const read = path => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
 const INDEX = read('static/index.html');
+const UTILS = read('static/js/utils.js');
 const SEARCH = read('static/js/search.js');
 const BOOT_BLOCK = INDEX.match(/<!-- vc:theme-boot --><script>\n([\s\S]*?)\n<\/script><!-- \/vc:theme-boot -->/);
 
@@ -21,10 +22,13 @@ function load({ url = 'https://app.example.com/analysis', storage = {}, dark = f
   w.matchMedia = () => mq;
   for (const [key, value] of Object.entries(storage)) w.localStorage.setItem(key, value);
   if (boot) w.eval(BOOT_BLOCK[1]);
+  const u = w.document.createElement('script');
+  u.textContent = UTILS;
+  w.document.body.appendChild(u);
   const events = [];
   Object.assign(w, {
     trackEvent: (name, params) => events.push([name, { ...params }]),
-    escapeHtml: s => String(s), isCompactMobileViewport: () => false, currentUser: null, recentListItems: [],
+    isCompactMobileViewport: () => false,
     syncNpsFrameTheme: () => events.push(['nps']),
     syncBondsFrameTheme: () => events.push(['bonds']),
     syncMarketDashboardFrameTheme: () => events.push(['dashboard']),

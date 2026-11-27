@@ -70,7 +70,7 @@ async function pfOpenAccountActivity(account) {
     : 'NH에서 확인한 실제 수입과 입출금입니다. 사유·분류를 수정해도 현금을 다시 더하지 않습니다.';
   _pfActivityEl('pfActivityPollingHelp').hidden = !canImport;
   _pfActivityEl('pfActivityPollingHelp').textContent = _pfActivityAutoHelp;
-  const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
+  const today = kstTodayYmd();
   _pfActivityEl('pfActivityStart').value = today.slice(0, 4) + '-01-01';
   _pfActivityEl('pfActivityEnd').value = today;
   _pfActivityEl('pfActivityImport').hidden = !canImport || account.connection?.environment === 'mock';

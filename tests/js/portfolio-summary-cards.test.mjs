@@ -16,6 +16,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..", "..");
 const read = (...parts) => readFileSync(join(root, ...parts), "utf8");
 
+const UTILS_SRC = read("static", "js", "utils.js");
 const STORE_SRC = read("static", "js", "portfolio-store.js");
 const DATA_SRC = read("static", "js", "portfolio-data.js");
 const RENDER_SRC = read("static", "js", "portfolio-render.js");
@@ -37,7 +38,7 @@ function loadSummaryDom({ sparklines = false } = {}) {
     url: "https://app.example.com/",
   });
   const { window: w } = dom;
-  // utils.js 는 부팅 side effect 가 많아 카드 경로가 쓰는 포맷터만 이식.
+  appendScript(w, UTILS_SRC);
   w.quotePriceOrNull = (q) => (q && q.price !== null && q.price !== undefined ? Number(q.price) : null);
   w.fmtKrw = (n) => (n === null || n === undefined ? "-" : Number(Math.round(n)).toLocaleString());
   w.fmtSignedKrw = (n) => (n === null ? "-" : (n > 0 ? "+" : "") + w.fmtKrw(n));

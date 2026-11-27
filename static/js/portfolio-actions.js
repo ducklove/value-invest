@@ -605,40 +605,18 @@ function _targetFormulaUses(item, variableName) {
   return String(item?.target_price_formula || '').includes(variableName);
 }
 
-let _targetFormulaVariables = function(item, allItems) {
+function _targetFormulaVariables(item, allItems) {
   const metrics = item.target_metrics || {};
-  const numberOrNull = (v) => {
-    if (v === null || v === undefined || v === '') return null;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  };
-  return {
-    BPS: numberOrNull(metrics.bps),
-    EPS: numberOrNull(metrics.eps),
-    DPS: numberOrNull(metrics.dps ?? item.trailingDps),
-    '보유지분': _holdingValueForItem(item, allItems),
-    '본주가격': _isPreferredStock(item.stock_code) ? _preferredCommonPriceForItem(item, allItems) : null,
-    '매입가': numberOrNull(item.avgPrice ?? item.avg_price),
-  };
-};
-
-_targetFormulaVariables = function(item, allItems) {
-  const metrics = item.target_metrics || {};
-  const numberOrNull = (v) => {
-    if (v === null || v === undefined || v === '') return null;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  };
   const variables = {
-    BPS: numberOrNull(metrics.bps),
-    EPS: numberOrNull(metrics.eps),
-    DPS: numberOrNull(metrics.dps ?? item.trailingDps),
+    BPS: toFiniteNumber(metrics.bps),
+    EPS: toFiniteNumber(metrics.eps),
+    DPS: toFiniteNumber(metrics.dps ?? item.trailingDps),
   };
   variables['\ubcf4\uc720\uc9c0\ubd84'] = _holdingValueForItem(item, allItems);
   variables['\ubcf8\uc8fc\uac00\uaca9'] = _isPreferredStock(item.stock_code) ? _preferredCommonPriceForItem(item, allItems) : null;
-  variables['\ub9e4\uc785\uac00'] = numberOrNull(item.avgPriceKrw ?? item.avg_price_krw ?? item.avg_price);
+  variables['\ub9e4\uc785\uac00'] = toFiniteNumber(item.avgPriceKrw ?? item.avg_price_krw ?? item.avg_price);
   return variables;
-};
+}
 
 function _evaluateTargetFormula(formula, variables) {
   const text = String(formula || '').trim();
@@ -905,90 +883,4 @@ function _portfolioLinkActions(stockCode, options = {}) {
     });
   }
   return actions;
-}
-
-function _runOrShowPortfolioLinks(stockCode, e) {
-  const actions = _portfolioLinkActions(stockCode);
-  if (actions.length === 0) return false;
-  if (actions.length === 1) {
-    actions[0].run();
-    return true;
-  }
-  _showPortfolioLinkMenu(actions, e);
-  return true;
-}
-
-function _positionPortfolioPopupMenu(menu, e) {
-  const margin = 8;
-  const anchor = e && e.target && e.target.closest
-    ? (e.target.closest('.js-pf-analyze, .pf-stock-link, button, a') || e.target)
-    : null;
-  const rect = anchor && anchor.getBoundingClientRect
-    ? anchor.getBoundingClientRect()
-    : { left: 100, right: 100, top: 100, bottom: 100 };
-
-  menu.style.visibility = 'hidden';
-  menu.style.left = '0px';
-  menu.style.top = '0px';
-  menu.style.maxHeight = '';
-  menu.style.overflowY = '';
-
-  const viewportW = window.innerWidth || document.documentElement.clientWidth || 1024;
-  const viewportH = window.innerHeight || document.documentElement.clientHeight || 768;
-  const menuW = menu.offsetWidth || 240;
-  const menuH = menu.scrollHeight || menu.offsetHeight || 120;
-  const below = Math.max(0, viewportH - rect.bottom - margin);
-  const above = Math.max(0, rect.top - margin);
-  const openAbove = menuH > below && above > below;
-  const maxViewportMenuH = Math.max(64, viewportH - margin * 2);
-  const available = Math.min(maxViewportMenuH, Math.max(96, (openAbove ? above : below) - 4));
-  const finalH = Math.min(menuH, available);
-
-  if (menuH > available) {
-    menu.style.maxHeight = `${available}px`;
-    menu.style.overflowY = 'auto';
-  }
-
-  let left = rect.left;
-  if (left + menuW > viewportW - margin) {
-    left = Math.max(margin, viewportW - menuW - margin);
-  }
-  left = Math.max(margin, left);
-
-  let top = openAbove ? rect.top - finalH - 4 : rect.bottom + 4;
-  if (top + finalH > viewportH - margin) {
-    top = Math.max(margin, viewportH - finalH - margin);
-  }
-  top = Math.max(margin, top);
-
-  menu.classList.toggle('open-above', openAbove);
-  menu.style.left = `${Math.round(left)}px`;
-  menu.style.top = `${Math.round(top)}px`;
-  menu.style.visibility = '';
-}
-
-function _showPortfolioLinkMenu(actions, e) {
-  document.querySelectorAll('.pf-pref-menu').forEach(el => el.remove());
-  const menu = document.createElement('div');
-  menu.className = 'pf-pref-menu pf-link-menu';
-  menu.innerHTML = actions.map((action, idx) => `
-    <div class="pf-pref-item" data-action-idx="${idx}">
-      <strong>${escapeHtml(action.label)}</strong>
-      <span>${escapeHtml(action.hint || '')}</span>
-    </div>
-  `).join('');
-  document.body.appendChild(menu);
-  _positionPortfolioPopupMenu(menu, e);
-  menu.querySelectorAll('[data-action-idx]').forEach(el => {
-    el.addEventListener('click', () => {
-      const action = actions[Number(el.dataset.actionIdx)];
-      menu.remove();
-      if (action) action.run();
-    });
-  });
-  setTimeout(() => {
-    document.addEventListener('click', function close(ev) {
-      if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', close); }
-    });
-  }, 0);
 }

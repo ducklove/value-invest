@@ -79,13 +79,6 @@ function _ecRuleMatches(ev) {
   });
 }
 
-function _ecFmtDate(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
 // 이번 주(월요일~일요일, 브라우저 로컬=KST 기준).
 function _ecThisWeek() {
   const now = new Date();
@@ -95,13 +88,13 @@ function _ecThisWeek() {
   monday.setDate(today.getDate() - dow);
   const sunday = new Date(monday);
   sunday.setDate(monday.getDate() + 6);
-  return { start: _ecFmtDate(monday), end: _ecFmtDate(sunday) };
+  return { start: formatLocalYmd(monday), end: formatLocalYmd(sunday) };
 }
 
 // 중요도별 국가 선택을 localStorage 에 보존(브라우저 기준, 로그인 불필요).
 function _ecLoadLevels() {
   try {
-    const raw = localStorage.getItem(EC_LS_KEY);
+    const raw = safeStorageGet(EC_LS_KEY);
     if (raw) {
       const o = JSON.parse(raw);
       const norm = (v) => (v === 'all' ? 'all' : new Set(Array.isArray(v) ? v : []));
@@ -111,13 +104,11 @@ function _ecLoadLevels() {
 }
 
 function _ecSaveLevels() {
-  try {
-    const o = {};
-    for (const lvl of ['high', 'mid', 'low']) {
-      o[lvl] = _ecLevels[lvl] === 'all' ? 'all' : [..._ecLevels[lvl]];
-    }
-    localStorage.setItem(EC_LS_KEY, JSON.stringify(o));
-  } catch (e) { /* noop */ }
+  const o = {};
+  for (const lvl of ['high', 'mid', 'low']) {
+    o[lvl] = _ecLevels[lvl] === 'all' ? 'all' : [..._ecLevels[lvl]];
+  }
+  safeStorageSet(EC_LS_KEY, JSON.stringify(o));
 }
 
 // 한 중요도의 선택을 API 파라미터 문자열로. 'all' | 'kr,us' | '' (비활성).
@@ -228,7 +219,7 @@ function _ecDateHeading(iso) {
   if (parts.length !== 3 || parts.some((n) => !isFinite(n))) return escapeHtml(iso);
   const d = new Date(parts[0], parts[1] - 1, parts[2]);
   const wd = EC_WEEKDAYS[d.getDay()] || '';
-  const todayIso = _ecFmtDate(new Date());
+  const todayIso = formatLocalYmd(new Date());
   const isToday = iso === todayIso;
   return `${parts[1]}월 ${parts[2]}일 <span class="ec-dow">(${wd})</span>`
     + (isToday ? '<span class="ec-today-badge">오늘</span>' : '');
@@ -279,7 +270,7 @@ function _ecRenderBody(data) {
     return;
   }
   const groups = _ecGroupByDate(events);
-  const todayIso = _ecFmtDate(new Date());
+  const todayIso = formatLocalYmd(new Date());
   body.innerHTML = groups.map(([iso, rows]) => {
     const sorted = rows.slice().sort((a, b) => (String(a.time) < String(b.time) ? -1 : 1));
     // 오늘 그룹에만 현재 시각 표시선을 끼운다.

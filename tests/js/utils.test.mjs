@@ -333,3 +333,41 @@ test("schedulePoll re-fires a run that has hung for more than 3 intervals", asyn
     w.close();
   }
 });
+
+test("toFiniteNumber / formatLocalYmd / kstTodayYmd / currentTheme / apiNotificationsFetch", async () => {
+  const w = loadUtils();
+  try {
+    assert.equal(w.toFiniteNumber(42), 42);
+    assert.equal(w.toFiniteNumber("3.14"), 3.14);
+    assert.equal(w.toFiniteNumber(0), 0);
+    assert.equal(w.toFiniteNumber(""), null);
+    assert.equal(w.toFiniteNumber(null), null);
+    assert.equal(w.toFiniteNumber(undefined), null);
+    assert.equal(w.toFiniteNumber("abc"), null);
+    assert.equal(w.toFiniteNumber(Infinity), null);
+
+    assert.equal(w.formatLocalYmd(new Date(2026, 2, 5)), "2026-03-05");
+    assert.match(w.kstTodayYmd(new Date("2026-03-05T15:30:00Z")), /^2026-03-06$/);
+
+    assert.equal(w.currentTheme(), "light");
+    w.document.documentElement.setAttribute("data-theme", "dark");
+    assert.equal(w.currentTheme(), "dark");
+
+    const calls = [];
+    w.fetch = async (url, init) => {
+      calls.push({ url, init });
+      return { ok: true, json: async () => ({ ok: true }) };
+    };
+    await w.apiNotificationsFetch("/alerts", { method: "POST", body: JSON.stringify({ x: 1 }) });
+    assert.equal(calls[0].url, "/api/notifications/alerts");
+    assert.equal(calls[0].init.headers["Content-Type"], "application/json");
+    assert.equal(calls[0].init.headers["X-Requested-With"], "fetch");
+
+    const data = await w.apiNotificationsFetchJson("/channels");
+    assert.equal(calls[1].url, "/api/notifications/channels");
+    assert.equal(calls[1].init.headers, undefined);
+    assert.equal(data.ok, true);
+  } finally {
+    w.close();
+  }
+});
