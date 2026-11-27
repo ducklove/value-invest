@@ -74,6 +74,16 @@ class StockTimelineSourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data["sources"]["news"]["count"], 1)
         self.assertNotIn("items", data["sources"]["news"])
 
+    async def test_limit_applies_per_source_so_filings_survive_busy_news_days(self):
+        news = [{"type": "news", "id": str(i), "date": "2026-11-28", "time": f"{i:02d}:00", "title": f"n{i}", "source": "", "url": ""} for i in range(20)]
+        disc = [{"type": "disclosure", "id": "d", "date": "2026-11-20", "time": "", "title": "공시", "source": "DART", "url": ""}]
+        with patch.object(tl, "_news_source", new=AsyncMock(return_value={"status": "ok", "items": news})), \
+             patch.object(tl, "_disclosure_source", new=AsyncMock(return_value={"status": "ok", "items": disc})):
+            data = await tl.get_stock_timeline("005930", 5)
+        types = [r["type"] for r in data["items"]]
+        self.assertEqual(types.count("news"), 5)
+        self.assertEqual(types.count("disclosure"), 1)
+
     async def test_unsupported_codes_skip_upstream(self):
         with patch.object(tl, "_load_news", new=AsyncMock()) as news:
             data = await tl.get_stock_timeline("AAPL")

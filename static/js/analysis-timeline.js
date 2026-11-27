@@ -21,7 +21,12 @@ function _stockTimelineSourceNote(name, src) {
 function stockTimelineHtml(data, filter = 'all') {
   const sources = data?.sources || {};
   const all = Array.isArray(data?.items) ? data.items : [];
-  const items = filter === 'all' ? all : all.filter(row => row.type === filter);
+  // '전체'는 최근 뉴스 10건 + 최근 공시 4건을 날짜순으로 섞는다 — 뉴스가 많은 날에도
+  // 공시가 묻히지 않게. 필터를 고르면 그 종류를 전부 보여 준다.
+  const items = filter === 'all'
+    ? [...all.filter(r => r.type === 'news').slice(0, 10), ...all.filter(r => r.type === 'disclosure').slice(0, 4)]
+      .sort((a, b) => `${b.date || ''} ${b.time || ''}`.localeCompare(`${a.date || ''} ${a.time || ''}`))
+    : all.filter(row => row.type === filter);
   const notes = ['news', 'disclosure'].map(n => _stockTimelineSourceNote(n, sources[n])).filter(Boolean);
   const allFailed = ['news', 'disclosure'].every(n => ['error', 'quota', 'unsupported'].includes(sources[n]?.status));
   const chip = (key, label) => `<button type="button" class="stl-chip js-stl-filter${filter === key ? ' active' : ''}" data-filter="${key}" aria-pressed="${filter === key}">${label}</button>`;

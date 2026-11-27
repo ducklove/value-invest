@@ -187,8 +187,9 @@ async def get_stock_timeline(code: str, limit: int = 12) -> dict[str, Any]:
             "disclosure": {"status": "unsupported", "items": []},
         }}
     news, disc = await asyncio.gather(_news_source(code), _disclosure_source(code))
+    # 한도는 소스별로 적용한다 — 합친 뒤 자르면 당일 뉴스가 많을 때 공시가 통째로 밀려난다.
     limit = max(1, min(int(limit or 12), 40))
-    items = merge_rows(news["items"], disc["items"], limit=limit)
+    items = merge_rows(news["items"][:limit], disc["items"][:limit], limit=limit * 2)
     sources = {
         name: {k: v for k, v in src.items() if k != "items"} | {"count": len(src["items"])}
         for name, src in (("news", news), ("disclosure", disc))

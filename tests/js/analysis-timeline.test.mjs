@@ -89,3 +89,17 @@ test("늦게 도착한 이전 종목 응답은 버리고, 미지원 종목은 �
   await w2.loadStockTimeline("AAPL");
   assert.equal(w2.document.getElementById("stockTimelinePanel").hidden, true);
 });
+
+test("'전체'는 뉴스가 많은 날에도 최근 공시를 섞어 보여 준다", async () => {
+  const news = Array.from({ length: 20 }, (_, i) => ({ type: "news", id: `n${i}`, date: "2026-11-28", time: `${String(i).padStart(2, "0")}:00`, title: `기사${i}`, source: "", url: "https://n/x" }));
+  const disc = [{ type: "disclosure", id: "d1", date: "2026-11-20", time: "", title: "현금배당결정", source: "DART", url: "https://dart.fss.or.kr/x" }];
+  const w = load(async () => ({ stock_code: "005930", items: [...news, ...disc],
+    sources: { news: { status: "ok", count: 20 }, disclosure: { status: "ok", count: 1 } } }));
+  await w.loadStockTimeline("005930");
+  const host = w.document.getElementById("stockTimelinePanel");
+  assert.equal(host.querySelectorAll(".stl-news").length, 10);
+  assert.equal(host.querySelectorAll(".stl-disclosure").length, 1);
+  assert.equal(host.querySelector(".stl-row:last-child .stl-type").textContent, "공시", "날짜순이라 오래된 공시가 뒤");
+  host.querySelector('.js-stl-filter[data-filter="news"]').click();
+  assert.equal(host.querySelectorAll(".stl-news").length, 20);
+});
