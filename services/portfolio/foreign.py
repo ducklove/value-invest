@@ -27,7 +27,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from core.cache import MemoryTTLCache
-from core.errors import DBError
+from core.errors import DBError, ExternalServiceError
 from core.http import get_http_client
 from domain.portfolio_codes import is_hong_kong_rmb_counter, is_korean_listing
 from repositories import corp_codes
@@ -59,6 +59,28 @@ from services.portfolio.identifiers import (
 )
 
 logger = logging.getLogger(__name__)
+
+_YFINANCE_BASE_ERRORS: tuple[type[BaseException], ...] = (
+    yfinance_runner.YFinanceUnavailable,
+    TimeoutError,
+    ImportError,
+    OSError,
+    ValueError,
+    TypeError,
+    KeyError,
+    AttributeError,
+    IndexError,
+    ZeroDivisionError,
+    NotImplementedError,
+)
+
+
+def _yfinance_errors(yf_module=None) -> tuple[type[BaseException], ...]:
+    exc_mod = getattr(yf_module, "exceptions", None)
+    yf_exc = getattr(exc_mod, "YFException", None)
+    if isinstance(yf_exc, type) and issubclass(yf_exc, BaseException):
+        return (*_YFINANCE_BASE_ERRORS, yf_exc)
+    return _YFINANCE_BASE_ERRORS
 
 # Backward-compatible module export; the rule itself lives with the other
 # currency mappings so history and quote paths cannot drift apart.
@@ -148,7 +170,8 @@ async def fetch_naver_stock_name(stock_code: str) -> str | None:
             )
         m = re.search(r"<title>\s*(.+?)\s*:\s*N", resp.text)
         return m.group(1).strip() if m else None
-    except Exception:
+    except (httpx.HTTPError, TimeoutError, UnicodeError, ValueError) as exc:
+        logger.debug("Naver stock name fetch failed (%s): %s", stock_code, exc)
         return None
 
 
@@ -204,7 +227,8 @@ async def fetch_naver_world_stock(reuters_code: str) -> dict | None:
         if not d.get("stockName"):
             return None
         return d
-    except Exception:
+    except (httpx.HTTPError, TimeoutError, ValueError, TypeError, AttributeError) as exc:
+        logger.debug("Naver world stock fetch failed (%s): %s", reuters_code, exc)
         return None
 
 
@@ -302,10 +326,10 @@ async def yfinance_find_ticker(ticker: str) -> str | None:
                 if hit:
                     _lookup_ticker_cache.set(ticker, hit)
                     return hit
-            except (asyncio.TimeoutError, Exception):
+            except _yfinance_errors(yf):
                 continue
-    except Exception:
-        pass
+    except (ImportError, OSError) as exc:
+        logger.debug("yfinance ticker probe unavailable (%s): %s", ticker, exc)
     yf_mark_failed(ticker)
     return None
 
@@ -324,6 +348,7 @@ async def yfinance_resolve_name(ticker: str) -> str | None:
     static = _static_foreign_ticker(ticker)
     if static:
         return static["name"]
+    yf = None
     try:
         import yfinance as yf
         found = await yfinance_find_ticker(ticker)
@@ -335,7 +360,8 @@ async def yfinance_resolve_name(ticker: str) -> str | None:
             return info.get("shortName") or info.get("longName")
 
         return await yf_run(partial(_name, found))
-    except (asyncio.TimeoutError, Exception):
+    except _yfinance_errors(yf) as exc:
+        logger.debug("yfinance name resolve failed (%s): %s", ticker, exc)
         return None
 
 
@@ -423,7 +449,17 @@ async def kis_fetch_foreign_quote(ticker: str) -> dict:
                     "change": round(change_krw),
                     "change_pct": s.get("change_pct"),
                 }
-        except Exception as exc:
+        except (
+            TimeoutError,
+            kis_proxy_client.KISProxyError,
+            ExternalServiceError,
+            httpx.HTTPError,
+            ValueError,
+            TypeError,
+            KeyError,
+            AttributeError,
+            OverflowError,
+        ) as exc:
             logger.debug("KIS overseas quote failed (%s/%s): %s", excd, symbol, exc)
     return {}
 
@@ -441,7 +477,7 @@ async def fetch_foreign_quote(reuters_code: str) -> dict:
                 yfinance_fetch_quote_fast(static["ticker"]),
                 timeout=_STATIC_FOREIGN_QUOTE_TIMEOUT,
             )
-        except Exception as exc:
+        except (TimeoutError, ExternalServiceError, httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
             logger.warning(
                 "static foreign quote fast path failed (%s): %s",
                 static["ticker"],
@@ -507,6 +543,7 @@ async def fetch_naver_foreign_quote(reuters_code: str) -> dict:
 async def yfinance_fetch_quote(ticker: str) -> dict:
     if _is_pseudo_code(ticker) or yf_marked_failed(ticker):
         return {}
+    yf = None
     try:
         import yfinance as yf
 
@@ -538,7 +575,7 @@ async def yfinance_fetch_quote(ticker: str) -> dict:
             "change": round(change_krw),
             "change_pct": change_pct,
         }
-    except Exception as exc:
+    except (*_yfinance_errors(yf), ExternalServiceError, httpx.HTTPError, OverflowError) as exc:
         logger.warning("yfinance 시세 조회 실패(%s): %s", ticker, exc)
         yf_mark_failed(ticker)
         return {}
@@ -658,7 +695,7 @@ async def search_foreign_tickers(query: str, *, limit: int = 8) -> list[dict]:
             item = _normalize_yahoo_search_quote(quote_row)
             if item:
                 results.append(item)
-    except Exception as exc:
+    except (httpx.HTTPError, TimeoutError, ValueError, TypeError, AttributeError) as exc:
         logger.debug("Yahoo ticker search failed (%s): %s", raw, exc)
 
     fallback = _foreign_search_fallback(raw)
@@ -733,7 +770,17 @@ async def yfinance_fetch_quote_fast(ticker: str, *, require_regular_session: boo
             "change": round(change_krw),
             "change_pct": change_pct,
         }
-    except Exception as exc:
+    except (
+        TimeoutError,
+        ExternalServiceError,
+        httpx.HTTPError,
+        OSError,
+        ValueError,
+        TypeError,
+        KeyError,
+        AttributeError,
+        OverflowError,
+    ) as exc:
         logger.warning("fast yfinance quote failed (%s): %s", ticker, exc)
         return {}
 
@@ -747,7 +794,7 @@ async def ensure_ticker_map():
         saved = await ticker_map_repo.load_ticker_map()
         _ticker_map.update(saved)
         logger.info("Ticker map loaded: %d entries from DB", len(saved))
-    except Exception as exc:
+    except (DBError, sqlite3.Error, OSError) as exc:
         logger.warning("Ticker map load failed: %s", exc)
     _ticker_map_loaded = True
 
@@ -758,7 +805,7 @@ async def save_ticker(stock_code: str, resolved: str):
     _unsaved_ticker_codes.discard(stock_code)
     try:
         await ticker_map_repo.save_ticker(stock_code, resolved)
-    except Exception as exc:
+    except (DBError, sqlite3.Error, OSError) as exc:
         logger.warning("Ticker map save failed (%s -> %s): %s", stock_code, resolved, exc)
 
 
@@ -900,6 +947,7 @@ async def detect_currency(stock_code: str) -> str:
     if static:
         return static["currency"]
     # yfinance first
+    yf = None
     try:
         import yfinance as yf
         found = await yfinance_find_ticker(stock_code)
@@ -907,8 +955,8 @@ async def detect_currency(stock_code: str) -> str:
             def _curr(c):
                 return yahoo.major_currency(yf.Ticker(c).fast_info.currency) or "USD"
             return await yf_run(partial(_curr, found))
-    except (asyncio.TimeoutError, Exception):
-        pass
+    except _yfinance_errors(yf) as exc:
+        logger.debug("yfinance currency detect failed (%s): %s", stock_code, exc)
     # Naver fallback
     d = await fetch_naver_world_stock(stock_code.upper())
     if d:

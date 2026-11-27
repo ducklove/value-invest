@@ -49,6 +49,7 @@ from services.ecosystem import adapters, links, siblings, signals
 from services.ecosystem.fetch import FETCH_ERRORS, cached_fetch, stale_value
 
 logger = logging.getLogger(__name__)
+_SIGNAL_ERRORS = (*FETCH_ERRORS, TimeoutError)
 
 
 # SITE 키 → 레지스트리 도구 id.
@@ -566,7 +567,7 @@ async def _fill_etf_changes(picks: list[dict]) -> None:
         )
         quotes = results[0] if isinstance(results[0], dict) else {}
         quotes.update({c: q for c, q in zip(foreign, results[1:]) if isinstance(q, dict)})
-    except Exception as exc:
+    except _SIGNAL_ERRORS as exc:
         logger.warning("ETF picks quote fetch failed: %s", exc)
         return
     for p in picks:
@@ -951,7 +952,7 @@ async def fetch_portfolio_signals(codes: list[str]) -> dict[str, list[dict]]:
                 metric=spread,
                 short_label="우선주",
             ))
-    except Exception as exc:
+    except _SIGNAL_ERRORS as exc:
         logger.warning("portfolio signal preferred lookup failed: %s", exc)
 
     try:
@@ -974,7 +975,7 @@ async def fetch_portfolio_signals(codes: list[str]) -> dict[str, list[dict]]:
                 metric=ratio,
                 short_label="지주사",
             ))
-    except Exception as exc:
+    except _SIGNAL_ERRORS as exc:
         logger.warning("portfolio signal holding lookup failed: %s", exc)
 
     try:
@@ -993,7 +994,7 @@ async def fetch_portfolio_signals(codes: list[str]) -> dict[str, list[dict]]:
                     severity="info",
                     short_label="ETF",
                 ))
-    except Exception as exc:
+    except _SIGNAL_ERRORS as exc:
         logger.warning("portfolio signal etf lookup failed: %s", exc)
 
     try:
@@ -1017,7 +1018,7 @@ async def fetch_portfolio_signals(codes: list[str]) -> dict[str, list[dict]]:
                 metric=ratio_pct,
                 short_label="자사주",
             ))
-    except Exception as exc:
+    except _SIGNAL_ERRORS as exc:
         logger.warning("portfolio signal buybacks lookup failed: %s", exc)
 
     try:
@@ -1041,7 +1042,7 @@ async def fetch_portfolio_signals(codes: list[str]) -> dict[str, list[dict]]:
                     metric=gap,
                     short_label="갭",
                 ))
-    except Exception as exc:
+    except _SIGNAL_ERRORS as exc:
         logger.warning("portfolio signal gold-gap lookup failed: %s", exc)
 
     return {code: signals for code, signals in out.items() if signals}
@@ -1062,19 +1063,19 @@ async def fetch_stock_links(code: str) -> dict:
         pref = _match_preferred(code, cur, cfg)
         if pref:
             result["preferred"] = pref
-    except Exception as exc:
+    except _SIGNAL_ERRORS as exc:
         logger.warning("stock-link preferred lookup failed (%s): %s", code, exc)
     try:
         cur, cfg = await _load_pair("holding_value")
         hold = _match_holding(code, cur, cfg)
         if hold:
             result["holding"] = hold
-    except Exception as exc:
+    except _SIGNAL_ERRORS as exc:
         logger.warning("stock-link holding lookup failed (%s): %s", code, exc)
     try:
         etf = await etf_link_for(code)
         if etf:
             result["etf"] = etf
-    except Exception as exc:
+    except _SIGNAL_ERRORS as exc:
         logger.warning("stock-link etf lookup failed (%s): %s", code, exc)
     return result

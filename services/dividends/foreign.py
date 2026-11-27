@@ -19,8 +19,13 @@ typically stable over a reporting period, and the stock list is small
 from __future__ import annotations
 
 import logging
+import sqlite3
+import sys
 from datetime import datetime
 
+import httpx
+
+from core.errors import DBError, ExternalServiceError
 from repositories import db as db_repo
 from repositories import foreign_dividends as foreign_dividends_repo
 from services.market.sources import yfinance_runner
@@ -29,6 +34,29 @@ from services.portfolio.identifiers import is_korean_stock as _is_portfolio_kore
 from services.portfolio.identifiers import is_special_asset, yahoo_symbol
 
 logger = logging.getLogger(__name__)
+
+_DB_ERRORS = (DBError, sqlite3.Error, OSError)
+_YFINANCE_BASE_ERRORS: tuple[type[BaseException], ...] = (
+    yfinance_runner.YFinanceUnavailable,
+    TimeoutError,
+    ImportError,
+    OSError,
+    ValueError,
+    TypeError,
+    KeyError,
+    AttributeError,
+    IndexError,
+    ZeroDivisionError,
+    NotImplementedError,
+)
+
+
+def _yfinance_errors(yf_module=None) -> tuple[type[BaseException], ...]:
+    exc_mod = getattr(yf_module, "exceptions", None)
+    yf_exc = getattr(exc_mod, "YFException", None)
+    if isinstance(yf_exc, type) and issubclass(yf_exc, BaseException):
+        return (*_YFINANCE_BASE_ERRORS, yf_exc)
+    return _YFINANCE_BASE_ERRORS
 
 
 def _is_korean_code(code: str) -> bool:
@@ -94,7 +122,7 @@ def _fetch_one_sync(ticker: str) -> dict | None:
             t = yf.Ticker(sym)
             info = t.info or {}
             return info, t
-        except Exception as exc:
+        except _yfinance_errors(yf) as exc:
             logger.warning("yfinance info failed (%s): %s", sym, exc)
             return {}, None
 
@@ -149,7 +177,7 @@ def _fetch_one_sync(ticker: str) -> dict | None:
                 recent = divs[divs.index >= cutoff]
                 if len(recent):
                     dps = round(float(recent.sum()), 4)
-        except Exception as exc:
+        except _yfinance_errors(yf) as exc:
             logger.debug("dividends Series fallback failed (%s): %s", ticker, exc)
 
     currency = (info.get("currency") or "USD").upper()
@@ -174,7 +202,7 @@ async def refresh_foreign_dividends(
     if stock_codes is None:
         try:
             stock_codes = await select_foreign_target_codes()
-        except Exception as exc:
+        except _DB_ERRORS as exc:
             logger.warning("foreign_dividends: target selection failed: %s", exc)
             return {"ok": False, "error": str(exc)[:300], "rows_written": 0,
                     "total_attempted": 0}
@@ -201,7 +229,7 @@ async def refresh_foreign_dividends(
         ticker = yahoo_symbol(ticker_map.get(code) or code)
         try:
             info = await _fetch_one(ticker)
-        except Exception as exc:
+        except _yfinance_errors(sys.modules.get("yfinance")) as exc:
             logger.warning("foreign_dividends: fetch_one crashed (%s): %s", code, exc)
             failures.append(code)
             continue
@@ -213,7 +241,7 @@ async def refresh_foreign_dividends(
         nation = _CUR_TO_NATION.get(currency, "USA")
         try:
             dps_krw = await portfolio_quotes.fx_to_krw(nation, dps_native)
-        except Exception as exc:
+        except (ExternalServiceError, httpx.HTTPError, TimeoutError, ValueError, TypeError, OverflowError) as exc:
             logger.warning("foreign_dividends: fx to KRW failed (%s %s): %s", code, currency, exc)
             failures.append(code)
             continue
@@ -226,7 +254,7 @@ async def refresh_foreign_dividends(
 
     try:
         written = await foreign_dividends_repo.upsert_foreign_dividends_auto(rows)
-    except Exception as exc:
+    except _DB_ERRORS as exc:
         logger.exception("foreign_dividends: upsert failed")
         return {"ok": False, "error": f"upsert: {exc}", "rows_written": 0,
                 "total_attempted": len(stock_codes)}

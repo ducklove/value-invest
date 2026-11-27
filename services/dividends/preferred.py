@@ -28,8 +28,12 @@ import io
 import logging
 import os
 import re
+import sqlite3
 from datetime import datetime
 
+import httpx
+
+from core.errors import DBError
 from core.http import get_http_client
 from repositories import portfolio as portfolio_repo
 
@@ -168,18 +172,18 @@ async def refresh_preferred_dividends() -> dict:
     started = datetime.now()
     try:
         csv_text = await fetch_csv()
-    except Exception as exc:
+    except (httpx.HTTPError, TimeoutError, UnicodeError) as exc:
         logger.warning("preferred_dividends: fetch failed: %s", exc)
         return {"ok": False, "error": str(exc)[:300], "rows_written": 0}
     try:
         rows = parse_sheet_csv(csv_text)
-    except Exception as exc:
+    except (csv.Error, ValueError, TypeError, IndexError) as exc:
         logger.exception("preferred_dividends: parse failed")
         return {"ok": False, "error": f"parse: {exc}", "rows_written": 0}
 
     try:
         written = await portfolio_repo.upsert_preferred_dividends(rows)
-    except Exception as exc:
+    except (DBError, sqlite3.Error, OSError) as exc:
         logger.exception("preferred_dividends: upsert failed")
         return {"ok": False, "error": f"upsert: {exc}", "rows_written": 0}
 
