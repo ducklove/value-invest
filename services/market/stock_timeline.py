@@ -79,6 +79,8 @@ def news_rows(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def disclosure_rows(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """DART list.json 항목 → 타임라인 행. 공시는 시각이 없어 날짜만 쓴다."""
+    from services.portfolio.disclosure_reprice import classify_reprice_disclosure
+
     rows: list[dict[str, Any]] = []
     for item in items:
         rcept = str(item.get("rcept_no") or "").strip()
@@ -87,7 +89,7 @@ def disclosure_rows(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         raw_dt = str(item.get("rcept_dt") or "")
         day = f"{raw_dt[0:4]}-{raw_dt[4:6]}-{raw_dt[6:8]}" if len(raw_dt) == 8 and raw_dt.isdigit() else ""
-        rows.append({
+        row: dict[str, Any] = {
             "type": "disclosure",
             "id": rcept,
             "date": day,
@@ -95,7 +97,11 @@ def disclosure_rows(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "title": title,
             "source": str(item.get("flr_nm") or "DART").strip() or "DART",
             "url": f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept}",
-        })
+        }
+        reprice_type = classify_reprice_disclosure(title)
+        if reprice_type:
+            row["reprice_type"] = reprice_type
+        rows.append(row)
     return rows
 
 

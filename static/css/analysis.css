@@ -725,3 +725,56 @@
 .stl-empty { margin: 8px 0 0; color: var(--text-secondary); font-size: 13px; }
 .stl-more { display: inline-block; margin-top: 8px; color: var(--primary); font-size: 12px; text-decoration: none; }
 .stl-more:hover { text-decoration: underline; }
+
+/* 공시 재가격(Pro-forma) 서브카드 — analysis-timeline.js _stockTimelineRepriceHtml */
+.stl-reprice {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+.stl-rp-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--text); font-weight: 600; }
+.stl-rp-badge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 14%, var(--surface));
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 700;
+}
+.stl-rp-badge.is-warn {
+  background: color-mix(in srgb, var(--warning, #d97706) 15%, var(--surface));
+  color: var(--warning, #d97706);
+}
+.stl-rp-badge.is-muted {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.stl-rp-line { color: var(--text); }
+.stl-rp-muted { color: var(--text-secondary); }
+.stl-rp-delta.up, .stl-rp-ret.up { color: var(--up); }
+.stl-rp-delta.down, .stl-rp-ret.down { color: var(--down); }
+.stl-rp-verdict {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+.stl-rp-verdict.is-underreacted { border-color: var(--primary); color: var(--primary); }
+.stl-rp-link { color: var(--primary); text-decoration: underline; font-weight: 600; }
+.stl-rp-assume { display: block; margin-top: 2px; color: var(--text-secondary); font-size: 11px; line-height: 1.4; }

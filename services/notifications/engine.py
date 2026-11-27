@@ -409,10 +409,10 @@ def _format_stock_daily_message(rule: dict, name: str, metric: float) -> str:
     )
 
 
-def _format_disclosure_message(rule: dict, name: str, item: dict) -> str:
+def _format_disclosure_message(rule: dict, name: str, item: dict, reprice_line: str = "") -> str:
     rcept = str(item.get("rcept_no") or "").strip()
     url = f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept}" if rcept else ""
-    lines = [f"📑 [{name}] 새 공시", str(item.get("report_nm") or "").strip()]
+    lines = [f"📑 [{name}] 새 공시", str(item.get("report_nm") or "").strip(), reprice_line]
     if url:
         lines.append(url)
     return "\n".join(p for p in lines if p) + _note_suffix(rule)
@@ -719,7 +719,27 @@ async def _cached_feed(kind: str, code: str, feed_cache: dict | None):
     return result
 
 
-async def _eval_stock_feed(google_sub: str, rule: dict, name: str, feed_cache: dict | None) -> int:
+async def _safe_disclosure_reprice_line(
+    code: str, item: dict, holding: dict | None, google_sub: str, recent: list[dict] | None
+) -> str:
+    from services.portfolio import disclosure_reprice
+
+    try:
+        return await disclosure_reprice.format_notification_reprice_line(
+            code, item, holding, google_sub=google_sub, recent_disclosures=recent
+        )
+    except Exception as exc:  # noqa: BLE001 — 부가 정보 경계, 본 공시 알림을 막지 않음
+        logger.warning("disclosure reprice line failed (%s): %s", code, exc)
+        return ""
+
+
+async def _eval_stock_feed(
+    google_sub: str,
+    rule: dict,
+    name: str,
+    feed_cache: dict | None,
+    holding: dict | None = None,
+) -> int:
     code = rule.get("stock_code") or ""
     if not code:
         return 0
@@ -753,7 +773,16 @@ async def _eval_stock_feed(google_sub: str, rule: dict, name: str, feed_cache: d
             await notifications_repo.set_portfolio_alert_state_json(rule["id"], json.dumps({"baseline": ident}))
         return 0
     if alert_type == "disclosure_new":
-        texts = [_format_disclosure_message(rule, name, item) for item in _disclosures_since(latest, str(baseline), code)]
+        recent = latest.get("_recent")
+        texts = [
+            _format_disclosure_message(
+                rule,
+                name,
+                item,
+                await _safe_disclosure_reprice_line(code, item, holding, google_sub, recent),
+            )
+            for item in _disclosures_since(latest, str(baseline), code)
+        ]
     else:
         texts = [text]
     sent = 0
@@ -803,7 +832,16 @@ async def _eval_blanket_feed(
             continue
         name = item.get("stock_name") or code
         if kind == "disc":
-            texts = [_format_disclosure_message(rule, name, d) for d in _disclosures_since(latest, str(baseline), code)]
+            recent = latest.get("_recent")
+            texts = [
+                _format_disclosure_message(
+                    rule,
+                    name,
+                    d,
+                    await _safe_disclosure_reprice_line(code, d, item, google_sub, recent),
+                )
+                for d in _disclosures_since(latest, str(baseline), code)
+            ]
         else:
             texts = [_format_report_message(rule, name, latest)]
         for text in texts:
@@ -1043,7 +1081,10 @@ async def _evaluate_plan(
             continue
 
         if alert_type in STOCK_FEED_TYPES:
-            sent += await _eval_stock_feed(google_sub, rule, await _name(rule.get("stock_code")), feed_cache)
+            code = rule.get("stock_code") or ""
+            sent += await _eval_stock_feed(
+                google_sub, rule, await _name(code), feed_cache, items_by_code.get(code)
+            )
             continue
 
         if alert_type in REBALANCE_TYPES:  # 리밸런싱 드리프트 (스냅샷 기반, 시세 불필요)
