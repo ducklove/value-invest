@@ -5,7 +5,6 @@ from datetime import date, datetime, timedelta
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-import analyzer
 from deps import (
     ANALYSIS_SEMAPHORE,
     analysis_snapshot_is_stale,
@@ -20,6 +19,7 @@ from repositories import cache_values, corp_codes
 from repositories import financial as financial_repo
 from repositories import user_stocks as user_stocks_repo
 from services import research_valuation, stock_price, stock_quotes
+from services.analysis import analyzer
 from services.dart import client as dart_client
 from services.market.sources import close_price
 
@@ -404,7 +404,7 @@ async def get_stock_dr(stock_code: str):
 
     일간 등락이라 장중 갱신은 필요하되 매 방문 재조회는 과하므로 5분 캐시.
     """
-    import dr_registry
+    from services.market import dr_registry
     from services.portfolio import foreign
 
     drs = dr_registry.drs_for(stock_code)

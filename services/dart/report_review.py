@@ -28,7 +28,7 @@ from repositories import wiki as wiki_repo
 from services import ai_client
 from services.dart import client as dart_client
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("dart_report_review")
 
 DART_VIEWER_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}"
 PERIODIC_REPORT_KEYWORDS = ("분기보고서", "반기보고서", "사업보고서")

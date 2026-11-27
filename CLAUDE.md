@@ -19,7 +19,7 @@
 | `ecosystem/python`, `ecosystem/js` | 형제에 벤더링되는 발행 헬퍼 정본(`vc_publish.py`, `vc-publish.mjs`) |
 | `domain/` | 순수 규칙 — `market_calendar`(KRX 휴장일·수능), `timeutil`(`KST`·`now_kst`), `numbers`(`parse_number`) … |
 | `static/` | 프론트엔드 — 아래 "프론트엔드 계약" 필독 |
-| 루트 `*.py` 15개 | `main.py`(ASGI 진입점) + [레거시] `ai_config`·`analyzer`·`asset_insights`·`auth_service`·`cache_layer`·`dart_report_review`·`deps`·`dr_registry`·`kis_key_manager`·`kis_ws_manager`·`observability`·`report_client`·`wiki_ingestion` — services/core로 이전 중, **새 코드를 여기 만들지 말 것**. `snapshot_nav.py`는 deploy/repairs 용 호환 shim(정본 `services/portfolio/nav_snapshot`). 옮긴 모듈의 옛 이름 import 는 `tests/test_legacy_root_modules.py`가 막는다 |
+| 루트 `*.py` 7개 | `main.py`(ASGI 진입점) + [레거시] `ai_config`·`auth_service`·`cache_layer`·`deps`·`observability` — services/core로 이전 중, **새 코드를 여기 만들지 말 것**. `snapshot_nav.py`는 deploy/repairs 용 호환 shim(정본 `services/portfolio/nav_snapshot`). 옮긴 모듈의 옛 이름 import 는 `tests/test_legacy_root_modules.py`가 막는다 |
 
 `cache.py`는 2026-07 삭제됐다. 오래된 문서·커밋에서 `cache.get_db` 류를 보면
 `repositories/{db,bootstrap,corp_codes,cache_values}`가 현재 위치다.

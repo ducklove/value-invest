@@ -384,7 +384,7 @@ class WikiDiagRouteTests(TempDbMixin):
             for i in range(25)
         ]
         with patch("routes.admin.get_current_user", AsyncMock(return_value=await self._mk_admin())), \
-             patch("report_client.fetch_reports", AsyncMock(return_value=fake_reports)):
+             patch("services.market.sources.naver_research.fetch_reports", AsyncMock(return_value=fake_reports)):
             out = await admin_route.diag_wiki(_admin_request(), code="058650")
         self.assertEqual(out["naver"]["total"], 25)
         self.assertEqual(out["naver"]["has_pdf"], 0)
@@ -393,7 +393,7 @@ class WikiDiagRouteTests(TempDbMixin):
 
     async def test_verdict_empty_response_scenario(self):
         with patch("routes.admin.get_current_user", AsyncMock(return_value=await self._mk_admin())), \
-             patch("report_client.fetch_reports", AsyncMock(return_value=[])):
+             patch("services.market.sources.naver_research.fetch_reports", AsyncMock(return_value=[])):
             out = await admin_route.diag_wiki(_admin_request(), code="999999")
         self.assertEqual(out["naver"]["total"], 0)
         self.assertIn("Naver 에서 리포트 0건", out["verdict"])
@@ -412,14 +412,14 @@ class WikiDiagRouteTests(TempDbMixin):
             "model": "m", "tokens_in": 1, "tokens_out": 1, "created_at": "2026-03-06T00:00:00",
         })
         with patch("routes.admin.get_current_user", AsyncMock(return_value=await self._mk_admin())), \
-             patch("report_client.fetch_reports", AsyncMock(return_value=fake_reports)):
+             patch("services.market.sources.naver_research.fetch_reports", AsyncMock(return_value=fake_reports)):
             out = await admin_route.diag_wiki(_admin_request(), code="051910")
         self.assertEqual(out["db"]["wiki_entries"], 1)
         self.assertIn("정상", out["verdict"])
 
     async def test_scraper_exception_surfaces_in_verdict(self):
         with patch("routes.admin.get_current_user", AsyncMock(return_value=await self._mk_admin())), \
-             patch("report_client.fetch_reports", AsyncMock(side_effect=RuntimeError("timeout"))):
+             patch("services.market.sources.naver_research.fetch_reports", AsyncMock(side_effect=RuntimeError("timeout"))):
             out = await admin_route.diag_wiki(_admin_request(), code="051910")
         self.assertIn("Naver 응답 실패", out["verdict"])
         self.assertEqual(out["naver"]["total"], 0)

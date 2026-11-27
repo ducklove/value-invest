@@ -10,10 +10,16 @@ from unittest.mock import AsyncMock, patch
 
 from _harness import TempDbMixin
 
-import wiki_ingestion
 from repositories import db as db_repo
 from repositories import system_events as system_events_repo
 from repositories import wiki as wiki_repo
+from services.wiki import ingestion as wiki_ingestion
+
+
+def test_default_pdf_cache_is_relative_to_repo_root():
+    root = Path(__file__).resolve().parents[1]
+    assert wiki_ingestion.APP_DIR == root
+    assert wiki_ingestion.PDF_CACHE_DIR == root / "data" / "pdf_cache"
 
 
 class PerStockLimitEnvTests(unittest.TestCase):

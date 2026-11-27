@@ -638,7 +638,7 @@ async def _fetch_latest_disclosure(code: str) -> dict | None:
 
 
 async def _fetch_latest_report_sig(code: str) -> dict | None:
-    import report_client
+    from services.market.sources import naver_research as report_client
     try:
         report = await report_client.fetch_latest_report(code)
     except Exception as exc:

@@ -1290,7 +1290,7 @@ async def diag_wiki(request: Request, code: str = ""):
     if not code:
         raise HTTPException(status_code=400, detail="code is required")
 
-    import report_client
+    from services.market.sources import naver_research as report_client
     from services.report_url_policy import is_allowed_report_pdf_url
 
     # --- Naver funnel -----------------------------------------------------

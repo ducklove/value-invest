@@ -8,20 +8,20 @@ import httpx
 import pytest
 
 import ai_config
-import dart_report_review
-import kis_key_manager
-import kis_ws_manager
 import observability
-import wiki_ingestion
 from core import http, lifespan
 from core.app_factory import create_app
 from core.config import AppSettings
 from repositories import bootstrap, corp_codes, db
 from services.dart import client as dart_client
+from services.dart import report_review as dart_report_review
 from services.market.sources import close_price as close_price_client
+from services.market.sources import kis_keys as kis_key_manager
 from services.market.sources import kis_proxy as kis_proxy_client
+from services.market.sources import kis_ws as kis_ws_manager
 from services.notifications import engine
 from services.portfolio import insights
+from services.wiki import ingestion as wiki_ingestion
 
 
 @pytest.fixture

@@ -36,6 +36,14 @@ MOVED: dict[str, str] = {
     "market_indicators": "services.market.indicators",
     "stock_price": "services.stock_price",
     "snapshot_nav": "services.portfolio.nav_snapshot",
+    "analyzer": "services.analysis.analyzer",
+    "asset_insights": "services.portfolio.asset_insights",
+    "dart_report_review": "services.dart.report_review",
+    "dr_registry": "services.market.dr_registry",
+    "kis_key_manager": "services.market.sources.kis_keys",
+    "kis_ws_manager": "services.market.sources.kis_ws",
+    "report_client": "services.market.sources.naver_research",
+    "wiki_ingestion": "services.wiki.ingestion",
 }
 
 # 루트 shim 을 남긴 모듈(외부가 경로로 import). 저장소 안 코드는 여전히 정본을 쓴다.

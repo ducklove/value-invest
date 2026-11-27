@@ -16,10 +16,10 @@ import re
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-import report_client
 from cache_layer import MemoryTTLCache, cached_fetch
 from core.http import get_http_client
 from repositories import cache_values
+from services.market.sources import naver_research as report_client
 from services.report_url_policy import is_allowed_report_pdf_url
 
 logger = logging.getLogger(__name__)

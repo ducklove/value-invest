@@ -30,7 +30,7 @@ class ReportsRouteCacheTests(TempDbMixin):
     async def test_empty_cached_list_is_refetched(self):
         await cache_values.save_report_list("005930", [])
         fetch = AsyncMock(return_value=[FAKE_REPORT])
-        with patch("report_client.fetch_reports", fetch):
+        with patch("services.market.sources.naver_research.fetch_reports", fetch):
             out = await reports_route.get_reports("005930")
         fetch.assert_awaited_once_with("005930", known_reports=[])
         self.assertFalse(out["cached"])
@@ -38,7 +38,7 @@ class ReportsRouteCacheTests(TempDbMixin):
 
         # 이제 채워진 목록은 캐시로 서빙되고 수집기는 다시 호출되지 않는다.
         fetch2 = AsyncMock(return_value=[])
-        with patch("report_client.fetch_reports", fetch2):
+        with patch("services.market.sources.naver_research.fetch_reports", fetch2):
             again = await reports_route.get_reports("005930")
         fetch2.assert_not_awaited()
         self.assertTrue(again["cached"])
@@ -51,7 +51,7 @@ class ReportsRouteCacheTests(TempDbMixin):
     async def test_non_empty_cache_served_without_fetch(self):
         await cache_values.save_report_list("005930", [FAKE_REPORT])
         fetch = AsyncMock(side_effect=AssertionError("should not fetch"))
-        with patch("report_client.fetch_reports", fetch):
+        with patch("services.market.sources.naver_research.fetch_reports", fetch):
             out = await reports_route.get_reports("005930")
         self.assertTrue(out["cached"])
         self.assertEqual(out["reports"][0]["nid"], "96027")
@@ -59,7 +59,7 @@ class ReportsRouteCacheTests(TempDbMixin):
     async def test_refresh_bypasses_cache(self):
         await cache_values.save_report_list("005930", [FAKE_REPORT])
         fetch = AsyncMock(return_value=[dict(FAKE_REPORT, title="새 리포트", nid="97000")])
-        with patch("report_client.fetch_reports", fetch):
+        with patch("services.market.sources.naver_research.fetch_reports", fetch):
             out = await reports_route.get_reports("005930", refresh=True)
         fetch.assert_awaited_once()
         self.assertFalse(out["cached"])
@@ -68,12 +68,12 @@ class ReportsRouteCacheTests(TempDbMixin):
     async def test_refresh_passes_previous_list_for_detail_reuse(self):
         await cache_values.save_report_list("005930", [FAKE_REPORT])
         fetch = AsyncMock(return_value=[FAKE_REPORT])
-        with patch("report_client.fetch_reports", fetch):
+        with patch("services.market.sources.naver_research.fetch_reports", fetch):
             await reports_route.get_reports("005930", refresh=True)
         fetch.assert_awaited_once_with("005930", known_reports=[FAKE_REPORT])
 
     async def test_fetch_failure_returns_empty_with_error(self):
-        with patch("report_client.fetch_reports", AsyncMock(side_effect=RuntimeError("upstream down"))):
+        with patch("services.market.sources.naver_research.fetch_reports", AsyncMock(side_effect=RuntimeError("upstream down"))):
             out = await reports_route.get_reports("005930")
         self.assertEqual(out["reports"], [])
         self.assertIn("upstream down", out["error"])

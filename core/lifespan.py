@@ -47,8 +47,6 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
     load_environment(settings.project_root)
 
     import ai_config
-    import kis_key_manager
-    import kis_ws_manager
     import observability
 
     # 공유 httpx 클라이언트 매니저 — ``async with httpx.AsyncClient()`` 패턴을
@@ -61,7 +59,9 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
     from services import screener_history
     from services.dart import client as dart_client
     from services.market.sources import close_price as close_price_client
+    from services.market.sources import kis_keys as kis_key_manager
     from services.market.sources import kis_proxy as kis_proxy_client
+    from services.market.sources import kis_ws as kis_ws_manager
     from services.portfolio import insights as portfolio_insights
 
     kis_key_manager.load_keys()
@@ -117,7 +117,7 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
 
             tasks.append((insight_warmup_task, None))
 
-        import wiki_ingestion
+        from services.wiki import ingestion as wiki_ingestion
         wiki_stop = asyncio.Event()
         wiki_interval = float(os.environ.get("WIKI_INGEST_INTERVAL_S", "0"))
         wiki_task: asyncio.Task | None = None
@@ -132,7 +132,7 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
 
             tasks.append((wiki_task, wiki_stop))
 
-        import dart_report_review
+        from services.dart import report_review as dart_report_review
         dart_review_stop = asyncio.Event()
         dart_review_interval = float(os.environ.get("DART_REVIEW_INTERVAL_S", "0"))
         dart_review_task: asyncio.Task | None = None

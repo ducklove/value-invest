@@ -18,7 +18,6 @@ except ImportError:  # pragma: no cover - optional dependency
 
 import httpx
 
-import kis_ws_manager
 from cache_layer import MemoryTTLCache, cached_fetch
 from core.http import get_http_client
 from domain.numbers import parse_number
@@ -26,6 +25,7 @@ from services import stock_valuation
 from services.dart import client as dart_client
 from services.market.sources import close_price as close_price_client
 from services.market.sources import kis_proxy as kis_proxy_client
+from services.market.sources import kis_ws as kis_ws_manager
 from services.market.sources import yfinance_runner
 
 logger = logging.getLogger(__name__)

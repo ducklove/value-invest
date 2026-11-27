@@ -16,8 +16,8 @@ def test_normalize_and_classify_portfolio_codes():
 
 
 def test_domestic_alias_is_canonical_in_trade_and_websocket_requests():
-    import kis_ws_manager
     from domain.portfolio_trades import TradeInput
+    from services.market.sources import kis_ws as kis_ws_manager
 
     trade = TradeInput(stock_code=" 0074k0.ks ", stock_name="ETF", side="sell", quantity=1, price=17880)
     assert trade.stock_code == "0074K0"

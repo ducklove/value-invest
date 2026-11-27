@@ -318,7 +318,7 @@ async def run_wiki_ingest(request: Request, payload: dict = Body(default={})):
         }
     """
     _require_loopback(request)
-    import wiki_ingestion
+    from services.wiki import ingestion as wiki_ingestion
     body = payload or {}
     codes = body.get("stock_codes") if isinstance(body, dict) else None
     per_stock = body.get("per_stock_limit") if isinstance(body, dict) else None
@@ -338,7 +338,7 @@ async def run_wiki_ingest(request: Request, payload: dict = Body(default={})):
 async def run_dart_review_ingest(request: Request, payload: dict = Body(default={})):
     """Drive the DART filing AI review pre-generation pipeline."""
     _require_loopback(request)
-    import dart_report_review
+    from services.dart import report_review as dart_report_review
     body = payload or {}
     codes = body.get("stock_codes") if isinstance(body, dict) else None
     target_limit = body.get("target_limit") if isinstance(body, dict) else None

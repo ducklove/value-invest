@@ -1,6 +1,6 @@
 import unittest
 
-import dr_registry
+from services.market import dr_registry
 
 
 class DrRegistryTests(unittest.TestCase):

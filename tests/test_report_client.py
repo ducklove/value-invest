@@ -8,8 +8,8 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
-import report_client
-from report_client import (
+from services.market.sources import naver_research as report_client
+from services.market.sources.naver_research import (
     NAVER_RESEARCH_API,
     _dedupe_reports,
     _detail_fields,

@@ -25,21 +25,21 @@ import logging
 import os
 import re
 from datetime import datetime
-from pathlib import Path
 
 import ai_config
 import observability
-import report_client
+from core.config import PROJECT_ROOT
 from core.http import get_http_client
 from repositories import cache_values, corp_codes
 from repositories import wiki as wiki_repo
 from services import ai_client
+from services.market.sources import naver_research as report_client
 from services.report_url_policy import is_allowed_report_pdf_url
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("wiki_ingestion")
 
 
-APP_DIR = Path(__file__).parent
+APP_DIR = PROJECT_ROOT
 PDF_CACHE_DIR = APP_DIR / "data" / "pdf_cache"
 
 # Truncate parsed PDF text before sending to the LLM. Most broker reports

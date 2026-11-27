@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import time
 
-import kis_ws_manager
 from repositories import brokers
 from services.brokers import kis_realtime
 from services.market.quote_policy import trade_timestamp
+from services.market.sources import kis_ws as kis_ws_manager
 
 
 class KisSource:

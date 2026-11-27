@@ -17,9 +17,9 @@ from pathlib import Path
 
 import aiosqlite
 
-import kis_key_manager
 from repositories.db import get_db
 from services.market.quote_policy import trade_timestamp
+from services.market.sources import kis_keys as kis_key_manager
 from services.portfolio.quotes import should_accept_quote_snapshot
 from services.realtime.allocation import PRIORITIES, allocate, fair_codes, sanitize
 from services.realtime.fx import CODES as FX_CODES

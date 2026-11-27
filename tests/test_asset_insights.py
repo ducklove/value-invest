@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 
-import asset_insights
+from services.portfolio import asset_insights
 
 
 def _rows(values):

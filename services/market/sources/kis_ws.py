@@ -31,7 +31,7 @@ from domain.timeutil import KST
 from services.market.quote_policy import integrated_market_enabled
 from services.portfolio.identifiers import is_korean_stock as _is_portfolio_korean_stock
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("kis_ws_manager")
 
 # ---------------------------------------------------------------------------
 # Constants

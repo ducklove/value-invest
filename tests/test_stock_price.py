@@ -243,8 +243,8 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0]["dividend_yield"], 0.0)
 
     async def test_fetch_quote_snapshot_can_bypass_stale_ws_cache(self):
-        with patch("services.stock_price.kis_ws_manager.get_cached_quote", return_value={"price": 1000}), \
-             patch("services.stock_price.kis_ws_manager.active_market_code", return_value="J"), \
+        with patch("services.market.sources.kis_ws.get_cached_quote", return_value={"price": 1000}), \
+             patch("services.market.sources.kis_ws.active_market_code", return_value="J"), \
              patch("services.stock_price.kis_proxy_client.get_quote", new=AsyncMock(return_value={
                  "summary": {
                      "current_price": "2000",
@@ -260,13 +260,13 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["previous_close"], 1980.0)
 
     async def test_fetch_quote_snapshot_prefers_ws_cache_by_default(self):
-        with patch("services.stock_price.kis_ws_manager.get_cached_quote", return_value={
+        with patch("services.market.sources.kis_ws.get_cached_quote", return_value={
             "date": "20260518",
             "price": 1000,
             "change": 10,
             "change_pct": 1.0,
             "ts": time.time(),
-        }), patch("services.stock_price.kis_ws_manager.ws_cache_matches_rest_market", return_value=True), \
+        }), patch("services.market.sources.kis_ws.ws_cache_matches_rest_market", return_value=True), \
              patch("services.stock_price.kis_proxy_client.get_quote", new=AsyncMock()) as get_quote:
             result = await stock_price.fetch_quote_snapshot("005930")
 
@@ -275,14 +275,14 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["source"], "ws")
 
     async def test_fetch_quote_snapshot_ignores_old_ws_cache_by_default(self):
-        with patch("services.stock_price.kis_ws_manager.get_cached_quote", return_value={
+        with patch("services.market.sources.kis_ws.get_cached_quote", return_value={
             "date": "20260518",
             "price": 1000,
             "change": 10,
             "change_pct": 1.0,
             "ts": time.time() - 120,
-        }), patch("services.stock_price.kis_ws_manager.ws_cache_matches_rest_market", return_value=True), \
-             patch("services.stock_price.kis_ws_manager.active_market_code", return_value="J"), \
+        }), patch("services.market.sources.kis_ws.ws_cache_matches_rest_market", return_value=True), \
+             patch("services.market.sources.kis_ws.active_market_code", return_value="J"), \
              patch("services.stock_price.kis_proxy_client.get_quote", new=AsyncMock(return_value={
                  "summary": {
                      "current_price": "2000",
@@ -297,14 +297,14 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["price"], 2000.0)
 
     async def test_fetch_quote_snapshot_ignores_ws_cache_when_rest_market_differs(self):
-        with patch("services.stock_price.kis_ws_manager.get_cached_quote", return_value={
+        with patch("services.market.sources.kis_ws.get_cached_quote", return_value={
             "date": "20260520",
             "price": 1745000,
             "change": 0,
             "change_pct": 0.0,
             "ts": time.time(),
-        }), patch("services.stock_price.kis_ws_manager.ws_cache_matches_rest_market", return_value=False), \
-             patch("services.stock_price.kis_ws_manager.active_market_code", return_value="NX"), \
+        }), patch("services.market.sources.kis_ws.ws_cache_matches_rest_market", return_value=False), \
+             patch("services.market.sources.kis_ws.active_market_code", return_value="NX"), \
              patch("services.stock_price.kis_proxy_client.get_quote", new=AsyncMock(return_value={
                  "summary": {
                      "current_price": "1786000",
@@ -333,9 +333,9 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
                 }
             },
         ])
-        with patch("services.stock_price.kis_ws_manager.get_cached_quote", return_value=None), \
-             patch("services.stock_price.kis_ws_manager.active_market_code", return_value="NX"), \
-             patch("services.stock_price.kis_ws_manager.mark_nxt_unsupported") as mark_unsupported, \
+        with patch("services.market.sources.kis_ws.get_cached_quote", return_value=None), \
+             patch("services.market.sources.kis_ws.active_market_code", return_value="NX"), \
+             patch("services.market.sources.kis_ws.mark_nxt_unsupported") as mark_unsupported, \
              patch("services.stock_price.kis_proxy_client.get_quote", new=get_quote):
             result = await stock_price.fetch_quote_snapshot("000660")
 
@@ -347,8 +347,8 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("_stale", result)
 
     async def test_fetch_quote_snapshot_falls_back_to_history_when_quote_fails(self):
-        with patch("services.stock_price.kis_ws_manager.get_cached_quote", return_value=None), \
-             patch("services.stock_price.kis_ws_manager.active_market_code", return_value="J"), \
+        with patch("services.market.sources.kis_ws.get_cached_quote", return_value=None), \
+             patch("services.market.sources.kis_ws.active_market_code", return_value="J"), \
              patch("services.stock_price.kis_proxy_client.get_quote", new=AsyncMock(side_effect=RuntimeError("quote down"))), \
              patch("services.stock_price.kis_proxy_client.get_history", new=AsyncMock(return_value={
                  "items": [
@@ -378,10 +378,10 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
             }},
         ])
 
-        with patch("services.stock_price.kis_ws_manager.get_cached_quote", return_value=None), \
-             patch("services.stock_price.kis_ws_manager.active_market_code", return_value="NX"), \
-             patch("services.stock_price.kis_ws_manager.is_nxt_unsupported", return_value=False), \
-             patch("services.stock_price.kis_ws_manager.mark_nxt_unsupported") as mark_unsupported, \
+        with patch("services.market.sources.kis_ws.get_cached_quote", return_value=None), \
+             patch("services.market.sources.kis_ws.active_market_code", return_value="NX"), \
+             patch("services.market.sources.kis_ws.is_nxt_unsupported", return_value=False), \
+             patch("services.market.sources.kis_ws.mark_nxt_unsupported") as mark_unsupported, \
              patch("services.stock_price.kis_proxy_client.get_quote", new=get_quote):
             result = await stock_price.fetch_quote_snapshot("000660")
 
@@ -400,9 +400,9 @@ class StockPriceFallbackTests(unittest.IsolatedAsyncioTestCase):
             "change_rate": "-1.63",
         }})
 
-        with patch("services.stock_price.kis_ws_manager.get_cached_quote", return_value=None), \
-             patch("services.stock_price.kis_ws_manager.active_market_code", return_value="NX"), \
-             patch("services.stock_price.kis_ws_manager.is_nxt_unsupported", return_value=True), \
+        with patch("services.market.sources.kis_ws.get_cached_quote", return_value=None), \
+             patch("services.market.sources.kis_ws.active_market_code", return_value="NX"), \
+             patch("services.market.sources.kis_ws.is_nxt_unsupported", return_value=True), \
              patch("services.stock_price.kis_proxy_client.get_quote", new=get_quote):
             result = await stock_price.fetch_quote_snapshot("000950")
 

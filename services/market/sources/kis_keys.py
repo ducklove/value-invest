@@ -23,7 +23,7 @@ import time
 
 from core.http import get_http_client
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("kis_key_manager")
 
 APPROVAL_KEY_TTL_S = 23 * 3600  # 23 hours — KIS keys valid ~24h
 

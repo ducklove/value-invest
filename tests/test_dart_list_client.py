@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-import dart_report_review
 from services.dart import client as dart_client
+from services.dart import report_review as dart_report_review
 from services.market import daily as market_daily
 
 KST = timezone(timedelta(hours=9))
