@@ -20,13 +20,20 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import time
 from urllib.parse import urlencode
 
+import httpx
+
+from core.errors import DBError, ExternalServiceError
 from core.http import get_http_client
 from repositories import notifications as notifications_repo
 
 logger = logging.getLogger(__name__)
+
+_KAKAO_API_ERRORS = (httpx.HTTPError, ExternalServiceError, ValueError, TypeError, KeyError, AttributeError)
+_DB_ERRORS = (DBError, sqlite3.Error, OSError)
 
 AUTH_BASE = "https://kauth.kakao.com"
 API_BASE = "https://kapi.kakao.com"
@@ -89,7 +96,7 @@ async def exchange_code(rest_key: str, code: str, redirect: str) -> dict:
     resp = await client.post(f"{AUTH_BASE}/oauth/token", data=data, timeout=15.0)
     payload = resp.json()
     if "access_token" not in payload:
-        raise RuntimeError(f"kakao token exchange failed: {payload}")
+        raise ExternalServiceError(f"kakao token exchange failed: {payload}")
     return _store_format(payload)
 
 
@@ -99,7 +106,7 @@ async def _refresh_token(rest_key: str, refresh: str) -> dict:
     resp = await client.post(f"{AUTH_BASE}/oauth/token", data=data, timeout=15.0)
     payload = resp.json()
     if "access_token" not in payload:
-        raise RuntimeError(f"kakao refresh failed: {payload}")
+        raise ExternalServiceError(f"kakao refresh failed: {payload}")
     return _store_format(payload)
 
 
@@ -113,7 +120,8 @@ async def fetch_nickname(access_token: str) -> str | None:
         )
         data = resp.json()
         return ((data.get("properties") or {}).get("nickname")) or None
-    except Exception:
+    except (httpx.HTTPError, ValueError, TypeError, AttributeError) as exc:
+        logger.debug("kakao fetch_nickname failed: %s", exc)
         return None
 
 
@@ -210,14 +218,14 @@ async def _refresh_into(google_sub: str, config: dict, enabled: bool) -> bool:
         return False
     try:
         fresh = await _refresh_token(rest_key, refresh)
-    except Exception as exc:
+    except _KAKAO_API_ERRORS as exc:
         logger.warning("kakao refresh failed user=%s: %s", google_sub[:8], exc)
         try:
             await notifications_repo.upsert_notification_channel(
                 google_sub, "kakao", config=config, enabled=enabled, verified=False
             )
-        except Exception:
-            pass
+        except _DB_ERRORS as db_exc:
+            logger.warning("kakao mark-unverified failed user=%s: %s", google_sub[:8], db_exc)
         return False
     config["access_token"] = fresh["access_token"]
     config["access_expires_at"] = fresh["access_expires_at"]
@@ -247,6 +255,6 @@ async def send_to_user(google_sub: str, channel: dict, text: str) -> bool:
             logger.warning("kakao memo failed status=%s user=%s", status, google_sub[:8])
             return False
         return True
-    except Exception as exc:
+    except (*_KAKAO_API_ERRORS, *_DB_ERRORS) as exc:
         logger.warning("kakao send error user=%s: %s", google_sub[:8], exc)
         return False

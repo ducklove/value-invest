@@ -14,11 +14,15 @@ from __future__ import annotations
 import logging
 import os
 
+import httpx
+
+from core.errors import ExternalServiceError
 from core.http import get_http_client
 
 logger = logging.getLogger(__name__)
 
 API_BASE = "https://api.telegram.org"
+_TELEGRAM_ERRORS = (httpx.HTTPError, ExternalServiceError, ValueError, TypeError, AttributeError)
 
 
 def default_token() -> str:
@@ -33,13 +37,13 @@ def is_configured() -> bool:
 
 async def _api(token: str, method: str, payload: dict | None = None, *, timeout: float = 15.0):
     if not token:
-        raise RuntimeError("telegram bot token missing")
+        raise ExternalServiceError("telegram bot token missing")
     url = f"{API_BASE}/bot{token}/{method}"
     client = await get_http_client("telegram")
     resp = await client.post(url, json=payload or {}, timeout=timeout)
     data = resp.json()
     if not data.get("ok"):
-        raise RuntimeError(f"telegram {method} failed: {data.get('description') or data}")
+        raise ExternalServiceError(f"telegram {method} failed: {data.get('description') or data}")
     return data.get("result")
 
 
@@ -47,7 +51,7 @@ async def get_me(token: str) -> dict | None:
     """Validate a bot token; returns the bot info (incl. username) or None."""
     try:
         return await _api(token, "getMe")
-    except Exception as exc:
+    except _TELEGRAM_ERRORS as exc:
         logger.info("telegram getMe failed: %s", exc)
         return None
 
@@ -60,7 +64,7 @@ async def get_recent_chat_id(token: str) -> tuple[str, str] | None:
     """
     try:
         updates = await _api(token, "getUpdates", {"timeout": 0, "limit": 10}, timeout=15.0)
-    except Exception as exc:
+    except _TELEGRAM_ERRORS as exc:
         logger.info("telegram getUpdates failed: %s", exc)
         return None
     for upd in reversed(updates or []):
@@ -82,6 +86,6 @@ async def send_message(token: str, chat_id, text: str, *, parse_mode: str | None
     try:
         await _api(token, "sendMessage", payload)
         return True
-    except Exception as exc:
+    except _TELEGRAM_ERRORS as exc:
         logger.warning("telegram sendMessage failed chat=%s: %s", chat_id, exc)
         return False

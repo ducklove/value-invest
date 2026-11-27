@@ -35,9 +35,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
 
+import httpx
+
+from core.errors import AppError, DBError
 from repositories import calendar_rules as calendar_rules_repo
 from repositories import corp_codes
 from repositories import db as db_repo
@@ -57,6 +61,10 @@ from services.portfolio.target_resolver import (
 from services.portfolio.time_windows import portfolio_today_baseline_date, settlement_marker_seconds
 
 logger = logging.getLogger(__name__)
+_DB_ERRORS = (DBError, sqlite3.Error, OSError)
+_QUOTE_ERRORS = (TimeoutError, httpx.HTTPError, AppError, sqlite3.Error, OSError, ValueError, TypeError, KeyError)
+_FEED_ERRORS = (httpx.HTTPError, AppError, sqlite3.Error, OSError, ValueError, TypeError, KeyError)
+_CALENDAR_FETCH_ERRORS = (httpx.HTTPError, AppError, TimeoutError, sqlite3.Error, OSError, ValueError, TypeError, KeyError)
 _evaluate_all_lock = asyncio.Lock()
 _evaluate_calendar_lock = asyncio.Lock()
 # 패스 공유 시세의 개별 조회 동시성(벌크가 못 채운 국내·해외·특수자산).
@@ -166,7 +174,7 @@ async def _regular_daily_quote(code: str) -> dict:
                     quote = await foreign.yfinance_fetch_quote_fast(resolved, require_regular_session=True)
                     await foreign.remember_quote_ticker(code, resolved, quote_ok=bool(quote))
             return quote or {}
-    except Exception as exc:
+    except _QUOTE_ERRORS as exc:
         logger.info("regular daily quote failed for %s: %s", code, str(exc) or type(exc).__name__)
         return {}
 
@@ -190,7 +198,7 @@ async def _safe_quote(code: str, *, regular_daily_change: bool = False, market_o
                     force_refresh=regular_daily_change,
                     use_ws_cache=not regular_daily_change,
                 )
-    except Exception as exc:
+    except _QUOTE_ERRORS as exc:
         logger.warning("alert quote fetch failed for %s: %s", code, str(exc) or type(exc).__name__)
         return {}
     if not quote or quote.get("_stale") is True:
@@ -292,7 +300,7 @@ async def _portfolio_nav(
             total = await snapshot_intraday._fetch_total_value(
                 google_sub, quote_map=quote_map, force_kr=market_open
             )
-    except Exception as exc:
+    except (snapshot_intraday.IntradaySnapshotIncomplete, *_QUOTE_ERRORS) as exc:
         logger.info("alert NAV unavailable for %s: %s", google_sub[:8], exc)
         return None
     return total if total and total > 0 else None
@@ -462,7 +470,7 @@ async def _eval_rebalance(google_sub: str, rule: dict) -> int:
 
     try:
         report = await rebalance_service.compute_rebalance(google_sub)
-    except Exception as exc:
+    except (*_DB_ERRORS, ValueError, TypeError, KeyError) as exc:
         logger.warning("rebalance report failed for %s: %s", google_sub[:8], exc)
         return 0
 
@@ -627,7 +635,7 @@ async def _fetch_latest_disclosure(code: str) -> dict | None:
         if not corp_code:
             return None
         items = await dart_client.fetch_recent_disclosures(corp_code)
-    except Exception as exc:
+    except _FEED_ERRORS as exc:
         logger.info("disclosure fetch failed for %s: %s", code, exc)
         return None
     for item in items or []:
@@ -641,7 +649,7 @@ async def _fetch_latest_report_sig(code: str) -> dict | None:
     from services.market.sources import naver_research as report_client
     try:
         report = await report_client.fetch_latest_report(code)
-    except Exception as exc:
+    except _FEED_ERRORS as exc:
         logger.info("report fetch failed for %s: %s", code, exc)
         return None
     if not report:
@@ -828,7 +836,7 @@ async def _plan_user(google_sub: str) -> _UserPlan | int:
         for item in await annotate_avg_price_krw(await portfolio_repo.get_portfolio(google_sub)):
             item = {**item, "avg_price": item.get("avg_price_krw", item.get("avg_price"))}
             items_by_code[item["stock_code"]] = item
-    except Exception as exc:
+    except (*_DB_ERRORS, AppError, httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
         logger.warning("portfolio alert load failed user=%s: %s", str(google_sub)[:8], exc)
         if any(r["alert_type"] in BLANKET_TYPES for r in rules):
             logger.warning("skipping blanket portfolio alerts after portfolio load failure user=%s", str(google_sub)[:8])
@@ -958,7 +966,8 @@ async def _evaluate_plan(
             return nm
         try:  # 비보유 종목(분석 화면 알림)은 corp_codes 표에서 이름 보강
             return (await corp_codes.get_corp_name(code)) or code or ""
-        except Exception:
+        except _DB_ERRORS as exc:
+            logger.debug("corp name lookup failed for %s: %s", code, exc)
             return code or ""
 
     nav: float | None = None  # 오늘 총평가액 (총평가액 알림 + 일간등락 분자)
@@ -1053,7 +1062,7 @@ async def _guard_user(google_sub: str, coro):
     """사용자 하나의 실패가 패스 전체를 멈추지 않게 한다(실패 시 None)."""
     try:
         return await coro
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — 의도된 경계: 사용자별 독립 실패 격리
         logger.warning("alert evaluation failed for %s: %s", google_sub[:8], exc)
         return None
 
@@ -1074,7 +1083,7 @@ async def evaluate_all() -> dict:
         users = set(await snapshots_repo.get_all_users_with_portfolio())
         try:
             users |= set(await notifications_repo.get_all_users_with_alerts())
-        except Exception as exc:
+        except _DB_ERRORS as exc:
             logger.warning("alert rule user discovery failed: %s", exc)
         feed_cache: dict = {}
         total_sent = 0
@@ -1211,7 +1220,7 @@ async def _evaluate_calendar_all() -> dict:
             await calendar_rules.discover(rules, list(events_by_id.values()))
             pending = await notifications_repo.list_pending_calendar_subscriptions()
             candidates = [s for s in pending if s["event_date"] <= today]
-        except Exception as exc:
+        except _CALENDAR_FETCH_ERRORS as exc:
             logger.warning("calendar alert fetch failed: %s", exc)
 
     by_user: dict[str, list] = defaultdict(list)
@@ -1235,7 +1244,7 @@ async def _evaluate_calendar_all() -> dict:
                 if delivered:
                     await notifications_repo.mark_calendar_subscription_fired(sub["id"])
                     sent += 1
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — 의도된 경계: 사용자별 캘린더 알림 독립 실패 격리
             logger.warning("calendar alert eval failed for %s: %s", google_sub[:8], exc)
 
     return {"subs": len(pending), "sent": sent}
@@ -1261,7 +1270,7 @@ async def run_alert_loop(stop_event: asyncio.Event, *, interval_seconds: float, 
                 logger.info("alert loop sent %d notifications", result["sent"])
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — 의도된 경계: 백그라운드 알림 루프
             logger.warning("alert loop pass failed: %s", exc)
         try:
             cal = await evaluate_calendar_all()
@@ -1269,7 +1278,7 @@ async def run_alert_loop(stop_event: asyncio.Event, *, interval_seconds: float, 
                 logger.info("calendar alert loop sent %d notifications", cal["sent"])
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — 의도된 경계: 백그라운드 캘린더 알림 루프
             logger.warning("calendar alert pass failed: %s", exc)
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)

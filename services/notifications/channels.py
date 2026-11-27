@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import sqlite3
 from datetime import datetime
 
+from core.errors import DBError
 from repositories import notifications as notifications_repo
 from services.notifications import kakao, telegram
 
 logger = logging.getLogger(__name__)
+_DB_ERRORS = (DBError, sqlite3.Error, OSError)
 
 
 def _digest(value: str) -> str:
@@ -76,7 +79,7 @@ async def dispatch(
     """
     try:
         channels = await notifications_repo.list_notification_channels(google_sub)
-    except Exception as exc:
+    except _DB_ERRORS as exc:
         logger.warning("dispatch channel lookup failed user=%s: %s", google_sub[:8], exc)
         return 0
 
@@ -120,11 +123,11 @@ async def dispatch(
             else:
                 await _release_delivery(str(name or ""), target_key, dedupe_key, sent_date)
                 logger.debug("dispatch: unknown channel %s", name)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — 의도된 경계: 채널별 독립 실패 격리
             try:
                 await _release_delivery(str(name or ""), target_key, dedupe_key, sent_date)
-            except Exception:
-                pass
+            except _DB_ERRORS as release_exc:
+                logger.debug("dispatch release delivery failed user=%s channel=%s: %s", google_sub[:8], name, release_exc)
             logger.warning("dispatch failed user=%s channel=%s: %s", google_sub[:8], name, exc)
     return sent
 
@@ -132,6 +135,7 @@ async def dispatch(
 async def has_active_channel(google_sub: str) -> bool:
     try:
         channels = await notifications_repo.list_notification_channels(google_sub)
-    except Exception:
+    except _DB_ERRORS as exc:
+        logger.warning("has_active_channel lookup failed user=%s: %s", google_sub[:8], exc)
         return False
     return any(c.get("enabled") and c.get("verified") for c in channels)

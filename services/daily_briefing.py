@@ -24,9 +24,13 @@ from __future__ import annotations
 
 import logging
 import re
+import sqlite3
 from datetime import timedelta
 from math import copysign, isfinite
 
+import httpx
+
+from core.errors import AppError, DBError, ExternalServiceError
 from domain.numbers import parse_number as _safe_float
 from repositories import dart_review as dart_review_repo
 from repositories import notifications as notifications_repo
@@ -44,6 +48,20 @@ from services.notifications import channels
 from services.portfolio import after_close, ai_analysis, morning_valuation, snapshot_views, time_windows
 
 logger = logging.getLogger(__name__)
+_DB_BLOCK_ERRORS = (DBError, sqlite3.Error, OSError, ValueError, TypeError, KeyError)
+_MARKET_BLOCK_ERRORS = (httpx.HTTPError, AppError, TimeoutError, ValueError, TypeError, KeyError)
+_LLM_ERRORS = (
+    ai_client.OpenRouterError,
+    AppError,
+    httpx.HTTPError,
+    TimeoutError,
+    sqlite3.Error,
+    OSError,
+    ValueError,
+    TypeError,
+    KeyError,
+)
+_EVENT_LOG_ERRORS = (DBError, sqlite3.Error, OSError)
 
 FEATURE = "daily_briefing"
 OPT_IN_KEY = "daily_briefing_enabled"
@@ -298,7 +316,7 @@ async def _daily_price_changes_by_code(codes: list[str], since: str | None, unti
             until=until,
             fields=("close",),
         )
-    except Exception as exc:
+    except (ExternalServiceError, httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
         logger.warning("briefing daily price change block failed: %s", exc)
         return {}
 
@@ -568,14 +586,14 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
                     "mover_snapshot_price_fallbacks": sum(1 for m in movers if m.get("basis") == "snapshot_price"),
                 }
                 context["mover_basis_note"] = "기여도는 전일·당일 결산의 공통 보유 수량 기준입니다. 당일 매매손익은 포함하지 않습니다."
-        except Exception as exc:
+        except _DB_BLOCK_ERRORS as exc:
             logger.warning("briefing NAV block failed user=%s: %s", google_sub[:8], exc)
 
     # --- 오늘 포트폴리오 성과 (클로징/나이트: 현재 평가액 vs 전일 결산, 입출금 제외) ---
     if profile["kind"] in TODAY_PORTFOLIO_BRIEFING_TYPES:
         try:
             context["portfolio_today"] = await _fetch_today_portfolio_block(google_sub, today.isoformat())
-        except Exception as exc:
+        except _DB_BLOCK_ERRORS as exc:
             logger.warning("briefing today portfolio block failed user=%s: %s", google_sub[:8], exc)
 
     if profile["kind"] == "night":
@@ -587,7 +605,7 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
             valuation = await morning_valuation.load(google_sub, today.isoformat())
             context["morning_valuation"] = valuation
             context["overseas_groups"] = (valuation or {}).get("overseas_groups") or []
-        except Exception as exc:
+        except (*_DB_BLOCK_ERRORS, AttributeError) as exc:
             logger.warning("briefing overseas group block failed user=%s: %s", google_sub[:8], exc)
 
     # --- 신규 공시 리뷰 / 증권사 리포트 (보유 종목만) ---
@@ -613,7 +631,7 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
             {**report, "stock_name": holding_names.get(report.get("stock_code"), report.get("stock_code"))}
             for report in reports
         ]
-    except Exception as exc:
+    except _DB_BLOCK_ERRORS as exc:
         logger.warning("briefing feed block failed user=%s: %s", google_sub[:8], exc)
 
     # --- 오늘 주요 경제 일정 (캐시되는 기존 캘린더 fetch — 중요도 '상'만) ---
@@ -634,7 +652,7 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
             }
             for e in (data.get("events") or [])[:CALENDAR_EVENT_LIMIT]
         ]
-    except Exception as exc:
+    except _MARKET_BLOCK_ERRORS as exc:
         logger.warning("briefing calendar block failed: %s", exc)
 
     # --- 내일 주요 일정 (나이트 브리핑 전망 재료) ---
@@ -657,31 +675,31 @@ async def build_briefing_context(google_sub: str, briefing_type: object = None) 
                 }
                 for e in (data.get("events") or [])[:CALENDAR_EVENT_LIMIT]
             ]
-        except Exception as exc:
+        except _MARKET_BLOCK_ERRORS as exc:
             logger.warning("briefing tomorrow calendar block failed: %s", exc)
 
     # --- 오늘 알림이 켜져 있는 캘린더 이벤트 ---
     try:
         context["calendar_alerts"] = await _today_calendar_alerts(google_sub, today.isoformat())
-    except Exception as exc:
+    except _DB_BLOCK_ERRORS as exc:
         logger.warning("briefing calendar alert block failed user=%s: %s", google_sub[:8], exc)
 
     # --- 야간선물 일간 상승률/하락률 ---
     if profile["kind"] != "market_close":
         try:
             context["night_futures"] = await _fetch_night_futures_block()
-        except Exception as exc:
+        except _MARKET_BLOCK_ERRORS as exc:
             logger.warning("briefing night futures block failed: %s", exc)
 
     # --- 국내 지수 + 투자자 수급 (클로징/나이트 브리핑 핵심 입력) ---
     if profile["kind"] in {"market_close", "night"}:
         try:
             context["domestic_market"] = await _fetch_domestic_market_block()
-        except Exception as exc:
+        except _MARKET_BLOCK_ERRORS as exc:
             logger.warning("briefing domestic market block failed: %s", exc)
         try:
             context["market_flows"] = await _fetch_market_flow_block()
-        except Exception as exc:
+        except _MARKET_BLOCK_ERRORS as exc:
             logger.warning("briefing market flow block failed: %s", exc)
 
     # --- 시장 지표 (ai_analysis 의 헬퍼 재사용 — 실패 시 안내 한 줄) ---
@@ -1215,7 +1233,7 @@ async def generate_briefing(google_sub: str, briefing_type: object = None) -> di
                 "custom_instructions": bool(custom_instructions),
             }
         logger.warning("daily briefing LLM returned empty content user=%s", google_sub[:8])
-    except Exception as exc:
+    except _LLM_ERRORS as exc:
         logger.warning("daily briefing LLM failed user=%s: %s", google_sub[:8], exc)
     return {
         "text": fallback_text,
@@ -1330,7 +1348,7 @@ async def send_briefings(briefing_type: object = None) -> dict:
                     },
                     wait=True,
                 )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — 의도된 경계: 사용자별 브리핑 발송 독립 실패 격리
             failed += 1
             logger.warning("daily briefing failed user=%s: %s", google_sub[:8], exc)
             try:
@@ -1346,8 +1364,8 @@ async def send_briefings(briefing_type: object = None) -> dict:
                     },
                     wait=True,
                 )
-            except Exception:
-                pass
+            except _EVENT_LOG_ERRORS as log_exc:
+                logger.debug("daily briefing error event log failed user=%s: %s", google_sub[:8], log_exc)
     return {
         "briefing_type": profile["kind"],
         "briefing_name": profile["name"],

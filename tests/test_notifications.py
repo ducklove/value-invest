@@ -20,6 +20,7 @@ from _harness import TempDbMixin
 
 from core.app_factory import create_app
 from core.config import PROJECT_ROOT, AppSettings
+from core.errors import DBError
 from repositories import corp_codes
 from repositories import db as db_repo
 from repositories import notifications as notifications_repo
@@ -616,7 +617,7 @@ class AlertEngineHarness(TempDbMixin):
     async def test_blanket_alert_skips_when_portfolio_load_fails(self):
         await self._rule(scope="all_stocks", alert_type="target_reached", threshold=0.0, stock_code=None)
 
-        with patch.object(engine.portfolio_repo, "get_portfolio", new=AsyncMock(side_effect=RuntimeError("db down"))), \
+        with patch.object(engine.portfolio_repo, "get_portfolio", new=AsyncMock(side_effect=DBError("db down"))), \
              patch.object(engine, "_safe_quote", new=AsyncMock()) as quote, \
              patch.object(channels, "dispatch", new=AsyncMock()) as disp:
             with self.assertLogs(engine.logger, level="WARNING") as logs:
