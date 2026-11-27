@@ -101,7 +101,7 @@ async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any
             response.raise_for_status()
             payload = response.json()
             return payload if isinstance(payload, dict) else {}
-        except Exception as exc:
+        except (httpx.HTTPError, ValueError, OSError) as exc:
             last_exc = exc
             should_retry = False
             if isinstance(exc, httpx.HTTPStatusError):
@@ -220,7 +220,7 @@ async def _cached_get(key: str, path: str, params: dict[str, Any] | None = None)
     except asyncio.CancelledError:
         future.cancel()
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — 의도된 경계: single-flight 대기자에게 예외 전파 후 재발생
         if not future.done():
             future.set_exception(exc)
             # 대기자가 없을 때 "exception was never retrieved" 경고를 막는다.

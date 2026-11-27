@@ -26,6 +26,7 @@ from services.market.sources.finance_pi import (  # noqa: F401 — 호환 재노
 )
 
 logger = logging.getLogger(__name__)
+_FETCH_ERRORS = (httpx.HTTPError, ValueError, TypeError)
 
 
 class ClosePriceClientError(ExternalServiceError):
@@ -270,7 +271,7 @@ async def get_daily_closes(
 
     try:
         return normalize_close_rows(await _get_json("/api/prices/close", params), ticker=ticker)
-    except Exception as exc:
+    except _FETCH_ERRORS as exc:
         if _should_mark_failure(exc):
             _mark_failure()
         logger.warning("internal close price API failed (%s): %r", ticker, exc)
@@ -304,7 +305,7 @@ async def get_daily_prices(
     }
     try:
         return normalize_daily_rows(await _get_json("/api/prices/daily", params), ticker=ticker)
-    except Exception as exc:
+    except _FETCH_ERRORS as exc:
         if _should_mark_failure(exc):
             _mark_failure()
         logger.warning("internal daily price API failed (%s): %r", ticker, exc)
@@ -368,7 +369,7 @@ async def get_daily_prices_batch(
     try:
         payload = await _get_json("/api/prices/daily", params)
         return {code: normalize_daily_rows(payload, ticker=code) for code in codes}
-    except Exception as exc:
+    except _FETCH_ERRORS as exc:
         if _should_mark_failure(exc):
             _mark_failure()
         logger.warning("internal batch daily price API failed (%s): %r", ",".join(codes[:5]), exc)
@@ -392,7 +393,7 @@ async def get_macro_index(
     params = {"series_id": series_id, "since": since_iso, "until": until_iso}
     try:
         return normalize_value_rows(await _get_json("/api/macro/indices", params), keys=("indices",))
-    except Exception as exc:
+    except _FETCH_ERRORS as exc:
         if _should_mark_failure(exc):
             _mark_failure()
         logger.warning("internal macro index API failed (%s): %s", series_id, exc)
@@ -416,7 +417,7 @@ async def get_macro_commodity(
     params = {"commodity": commodity, "since": since_iso, "until": until_iso}
     try:
         return normalize_value_rows(await _get_json("/api/macro/commodities", params), keys=("commodities",))
-    except Exception as exc:
+    except _FETCH_ERRORS as exc:
         if _should_mark_failure(exc):
             _mark_failure()
         logger.warning("internal macro commodity API failed (%s): %s", commodity, exc)
@@ -449,7 +450,7 @@ async def get_basic_fundamentals(
     try:
         effective_timeout = timeout if timeout is not None else _fundamentals_timeout_for_count(len(codes))
         payload = await _get_json("/api/fundamentals/basic", params, timeout=effective_timeout)
-    except Exception as exc:
+    except _FETCH_ERRORS as exc:
         # Fundamentals can be materially slower than price endpoints. Do not
         # trip the shared price cooldown for a fundamentals-only timeout.
         logger.warning("internal fundamentals API failed (%s): %s", ",".join(codes[:5]), exc)
@@ -529,7 +530,7 @@ async def get_screener_snapshot(
     try:
         # 전 유니버스 조인은 단일 ticker 조회보다 느릴 수 있다 — 여유 timeout.
         payload = await _get_json("/api/fundamentals/screener", params, timeout=30.0)
-    except Exception as exc:
+    except _FETCH_ERRORS as exc:
         logger.warning("internal screener API failed: %s", exc)
         raise ClosePriceClientError("internal screener API failed") from exc
 

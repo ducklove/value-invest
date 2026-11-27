@@ -202,7 +202,7 @@ async def fetch_economic_calendar(
         result = _result(_parse_calendar(data))
         _cache.set(key, result)
         return result
-    except Exception as exc:
+    except (httpx.HTTPError, TimeoutError, ValueError, TypeError, KeyError) as exc:
         logger.warning("economic calendar fetch failed: %s", exc)
         entry = _cache.get_entry(key, allow_stale=True) if hasattr(_cache, "get_entry") else None
         if entry and getattr(entry, "value", None):

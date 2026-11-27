@@ -1,8 +1,10 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
+from services import ai_client
 from services.market import daily as market_daily
 
 
@@ -19,7 +21,7 @@ def _llm_env_patches(post_mock):
 @pytest.mark.asyncio
 async def test_call_openrouter_retries_transient_failure_then_succeeds():
     ok = {"content": "## 시황", "model": "test-model", "input_tokens": 10, "output_tokens": 20, "cost_usd": 0.001}
-    post = AsyncMock(side_effect=[RuntimeError("timeout"), ok])
+    post = AsyncMock(side_effect=[httpx.ReadTimeout("timeout"), ok])
     p1, p2, p3, p4 = _llm_env_patches(post)
     with p1, p2, p3, p4:
         result = await market_daily._call_openrouter({"market": [], "movers": [], "market_news": []}, None)
@@ -35,7 +37,7 @@ async def test_call_openrouter_falls_back_after_all_attempts():
         "movers": [],
         "market_news": [],
     }
-    post = AsyncMock(side_effect=RuntimeError("down"))
+    post = AsyncMock(side_effect=ai_client.OpenRouterError("down", status_code=503))
     p1, p2, p3, p4 = _llm_env_patches(post)
     with p1, p2, p3, p4:
         result = await market_daily._call_openrouter(payload, None)

@@ -75,7 +75,7 @@ async def test_fetch_night_futures_falls_back_to_empty_on_proxy_error():
     with patch.object(
         mi.kis_proxy_client,
         "get_night_futures_quote",
-        new=AsyncMock(side_effect=RuntimeError("proxy down")),
+        new=AsyncMock(side_effect=mi.kis_proxy_client.KISProxyError("proxy down")),
     ):
         out = await mi._fetch_night_futures()
     assert out == mi._EMPTY

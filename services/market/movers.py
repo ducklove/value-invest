@@ -24,6 +24,7 @@ from core.http import get_http_client
 from domain.timeutil import KST
 
 logger = logging.getLogger(__name__)
+_SCRAPE_ERRORS = (httpx.HTTPError, TimeoutError, ValueError, TypeError, AttributeError)
 
 _BASE = "https://finance.naver.com"
 # kind -> (path, metric header to surface or None)
@@ -143,7 +144,7 @@ async def fetch_market_movers(kind: str, market: str = "kospi", limit: int = 10)
         if items:
             _movers_cache.set(key, items)
         return items[:limit]
-    except Exception as exc:
+    except _SCRAPE_ERRORS as exc:
         logger.warning("market movers fetch failed (%s/%s): %s", kind, market, exc)
         return _stale(_movers_cache, key, limit)
 
@@ -200,7 +201,7 @@ async def fetch_sectors(limit: int = 12) -> list[dict]:
         if items:
             _sector_cache.set(key, items)
         return items[:limit]
-    except Exception as exc:
+    except _SCRAPE_ERRORS as exc:
         logger.warning("sector fetch failed: %s", exc)
         return _stale(_sector_cache, key, limit)
 
@@ -262,7 +263,7 @@ async def fetch_investor_flows() -> dict:
         if out:
             _flows_cache.set("flows", out)
         return out
-    except Exception as exc:
+    except _SCRAPE_ERRORS as exc:
         logger.warning("investor flows fetch failed: %s", exc)
         entry = _flows_cache.get_entry("flows", allow_stale=True) if hasattr(_flows_cache, "get_entry") else None
         if entry and getattr(entry, "value", None):

@@ -77,7 +77,7 @@ async def run(
             if timeout is None:
                 return await future
             return await asyncio.wait_for(future, timeout=timeout)
-    except Exception:
+    except Exception:  # noqa: BLE001 — 의도된 경계: 임의 yfinance 콜백 실패를 negative cache 에 기록 후 재전파
         if negative_key is not None:
             _failed.set(negative_key, True)
         raise

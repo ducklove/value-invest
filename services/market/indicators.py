@@ -10,6 +10,7 @@ import asyncio
 import csv
 import io
 import json as _json
+import logging
 import os
 import re
 import xml.etree.ElementTree as ET
@@ -28,6 +29,9 @@ from services.ecosystem import siblings
 from services.market import naver_indicators
 from services.market.sources import kis_proxy as kis_proxy_client
 from services.market.sources import yahoo
+
+logger = logging.getLogger(__name__)
+_HTTP_PARSE_ERRORS = (httpx.HTTPError, TimeoutError, ValueError, TypeError, AttributeError)
 
 # ---------------------------------------------------------------------------
 # Catalog
@@ -387,7 +391,8 @@ async def _fetch_world_daily_quote(client: httpx.AsyncClient, market_code: str) 
             "change_pct": pct_str,
             "direction": direction,
         }
-    except Exception:
+    except _HTTP_PARSE_ERRORS as exc:
+        logger.debug("world daily quote fetch failed (%s): %s", market_code, exc)
         return dict(_EMPTY)
 
 
@@ -438,7 +443,8 @@ async def _fetch_sofr(client: httpx.AsyncClient) -> dict:
             "change_pct": change_pct,
             "direction": "up" if diff > 0 else "down",
         }
-    except Exception:
+    except (*_HTTP_PARSE_ERRORS, KeyError) as exc:
+        logger.debug("SOFR fetch failed: %s", exc)
         return dict(_EMPTY)
 
 
@@ -557,8 +563,8 @@ async def _fetch_cnbc_bonds(client: httpx.AsyncClient, codes: list[str]) -> dict
             code = sym_to_code.get(q.get("symbol"))
             if code:
                 out[code] = _parse_cnbc_quote(q)
-    except Exception:
-        pass
+    except _HTTP_PARSE_ERRORS as exc:
+        logger.debug("CNBC bonds fetch failed: %s", exc)
     return out
 
 
@@ -687,8 +693,8 @@ async def _fetch_us_policy_rate(client: httpx.AsyncClient) -> dict:
             parsed = _parse_fed_openmarket_page(r.text)
             if _indicator_has_value(parsed):
                 return parsed
-    except Exception:
-        pass
+    except _HTTP_PARSE_ERRORS as exc:
+        logger.debug("Fed openmarket policy rate fetch failed: %s", exc)
     # FRED 폴백 — 예전 urllib+to_thread 우회 대신 core/http 공유 클라이언트('fred').
     try:
         fred = await get_http_client("fred")
@@ -728,7 +734,8 @@ async def _fetch_kr_policy_rate(client: httpx.AsyncClient) -> dict:
         if r.status_code != 200:
             return dict(_EMPTY)
         return _parse_bok_base_rate_page(r.text)
-    except Exception:
+    except _HTTP_PARSE_ERRORS as exc:
+        logger.debug("BOK policy rate fetch failed: %s", exc)
         return dict(_EMPTY)
 
 
@@ -757,7 +764,8 @@ async def _fetch_jp_policy_rate(client: httpx.AsyncClient) -> dict:
         if r.status_code != 200:
             return dict(_EMPTY)
         return _parse_boj_policy_rate_page(r.text)
-    except Exception:
+    except _HTTP_PARSE_ERRORS as exc:
+        logger.debug("BOJ policy rate fetch failed: %s", exc)
         return dict(_EMPTY)
 
 
@@ -773,7 +781,8 @@ async def _fetch_bis_policy_rate(client: httpx.AsyncClient, ref_area: str) -> di
         if r.status_code != 200:
             return dict(_EMPTY)
         return _parse_bis_policy_csv(r.text, ref_area)
-    except Exception:
+    except (*_HTTP_PARSE_ERRORS, csv.Error) as exc:
+        logger.debug("BIS policy rate fetch failed (%s): %s", ref_area, exc)
         return dict(_EMPTY)
 
 
@@ -895,7 +904,8 @@ async def _fetch_boj_tona(client: httpx.AsyncClient) -> dict:
             if prev_r.status_code == 200:
                 prev = _parse_boj_tona_xlsx(prev_r.content)
         return _quote_from_current_prev(current, prev, decimals=3)
-    except Exception:
+    except (httpx.HTTPError, TimeoutError, zipfile.BadZipFile, ET.ParseError, KeyError, ValueError, TypeError) as exc:
+        logger.debug("BOJ TONA fetch failed: %s", exc)
         return dict(_EMPTY)
 
 
@@ -913,8 +923,8 @@ async def _fetch_mof_jgb_bonds(client: httpx.AsyncClient, codes: list[str]) -> d
         if r.status_code != 200:
             return out
         out.update(_parse_mof_jgb_csv(r.content, wanted))
-    except Exception:
-        pass
+    except (*_HTTP_PARSE_ERRORS, csv.Error) as exc:
+        logger.debug("MOF JGB fetch failed: %s", exc)
     return out
 
 
@@ -1017,8 +1027,8 @@ async def _fetch_ecos_bonds(client: httpx.AsyncClient, codes: list[str]) -> dict
                 "change_pct": change_pct,
                 "direction": "up" if diff > 0 else "down",
             }
-    except Exception:
-        pass
+    except _HTTP_PARSE_ERRORS as exc:
+        logger.debug("ECOS bonds fetch failed: %s", type(exc).__name__)
     return out
 
 
@@ -1120,7 +1130,8 @@ async def _fetch_night_futures() -> dict:
     try:
         payload = await kis_proxy_client.get_night_futures_quote()
         return _parse_night_futures_summary(payload.get("summary") or {})
-    except Exception:
+    except (kis_proxy_client.KISProxyError, *_HTTP_PARSE_ERRORS) as exc:
+        logger.debug("night futures fetch failed: %s", exc)
         return dict(_EMPTY)
 
 

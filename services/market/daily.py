@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from typing import Any, AsyncIterator
@@ -14,6 +15,7 @@ from typing import Any, AsyncIterator
 import httpx
 
 from core.cache import MemoryTTLCache, cached_fetch_result
+from core.errors import AppError, DBError
 from core.http import get_http_client
 from repositories import corp_codes
 from services import ai_client
@@ -25,6 +27,17 @@ from services.market import news as market_news
 from services.market import sessions as market_sessions
 
 logger = logging.getLogger(__name__)
+_LLM_ERRORS = (
+    ai_client.OpenRouterError,
+    AppError,
+    httpx.HTTPError,
+    TimeoutError,
+    sqlite3.Error,
+    OSError,
+    ValueError,
+    TypeError,
+    KeyError,
+)
 
 DART_VIEWER_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}"
 
@@ -362,7 +375,8 @@ async def _fetch_dart_disclosures(
     for item in interests:
         try:
             corp_code = await corp_codes.get_corp_code(item["stock_code"])
-        except Exception:
+        except (DBError, sqlite3.Error, OSError) as exc:
+            logger.debug("corp_code lookup failed for %s: %s", item.get("stock_code"), exc)
             corp_code = None
         if corp_code:
             corp_rows.append((item, corp_code))
@@ -507,7 +521,7 @@ async def _fetch_stock_news(stock_code: str, limit: int = NEWS_PER_STOCK) -> lis
                 break
         _NEWS_CACHE.set(stock_code, news)
         return news
-    except Exception as exc:
+    except (httpx.HTTPError, TimeoutError, ValueError, TypeError, KeyError, AttributeError) as exc:
         logger.info("daily market: news skipped for %s: %s", stock_code, exc)
         return []
 
@@ -556,7 +570,7 @@ async def _fetch_investor_flow(stock_code: str) -> dict[str, Any] | None:
         result = {"stock_code": stock_code, **parsed} if parsed else None
         _FLOW_CACHE.set(stock_code, result)
         return result
-    except Exception as exc:
+    except (httpx.HTTPError, TimeoutError, UnicodeError, ValueError, TypeError) as exc:
         logger.info("daily market: investor flow skipped for %s: %s", stock_code, exc)
         return None
 
@@ -994,7 +1008,7 @@ async def _call_openrouter(payload: dict[str, Any], google_sub: str | None) -> d
                 timeout=httpx.Timeout(90.0, read=90.0),
                 ok_if_content=True,
             )
-        except Exception as exc:
+        except _LLM_ERRORS as exc:
             last_error = str(exc)
             logger.exception("daily market: LLM call failed (attempt %d/%d)", attempt, attempts)
             continue
@@ -1037,7 +1051,7 @@ async def build_daily_market_brief(*, google_sub: str | None = None, brief_date:
         # 나머지 근거만으로 브리프를 만든다(전체 요청 hang 방지).
         try:
             return await asyncio.wait_for(coro, timeout=BRIEF_SOURCE_TIMEOUT_S)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — 의도된 경계: 소스별 독립 실패 허용 fan-out
             reason = "타임아웃" if isinstance(exc, asyncio.TimeoutError) else str(exc)
             logger.warning("daily market: %s 수집 실패: %s", name, reason)
             warnings.append(f"{name} 수집 실패")
