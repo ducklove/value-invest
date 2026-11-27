@@ -638,11 +638,44 @@ async def _fetch_latest_disclosure(code: str) -> dict | None:
     except _FEED_ERRORS as exc:
         logger.info("disclosure fetch failed for %s: %s", code, exc)
         return None
-    for item in items or []:
-        if _is_excluded_disclosure(str(item.get("report_nm") or "")):
-            continue
-        return item  # 최신순이므로 첫 비저신호 공시가 최신
-    return None
+    recent = [
+        item for item in items or []
+        if not _is_excluded_disclosure(str(item.get("report_nm") or ""))
+    ][:_RECENT_DISCLOSURES_KEPT]
+    if not recent:
+        return None
+    # 최신순이므로 첫 비저신호 공시가 최신. 두 조회 사이에 여러 건이 나와도 놓치지
+    # 않도록 최근 목록을 함께 실어 보낸다(_disclosures_since 가 기준선 이후를 고른다).
+    return {**recent[0], "_recent": recent}
+
+
+# 한 번 조회에서 기준선 이후 공시로 인정할 최대 건수 — 기준선이 오래돼(서버 중단 등)
+# 한꺼번에 많이 보이면 최신 몇 건만 보내고 나머지는 로그로 남긴다.
+_RECENT_DISCLOSURES_KEPT = 20
+_MAX_NEW_DISCLOSURES_PER_PASS = 5
+
+
+def _disclosures_since(latest: dict, baseline: str, code: str = "") -> list[dict]:
+    """기준선(접수번호) 이후 새 공시를 오래된 것부터 돌려준다.
+
+    DART 접수번호(rcept_no)는 14자리 날짜순 번호라 같은 길이의 숫자 문자열 비교가
+    시간순이다. 형식이 다르면 예전처럼 최신 1건만 비교한다.
+    """
+    recent = latest.get("_recent") or [latest]
+    ident = str(latest.get("rcept_no") or "")
+    idents = [str(item.get("rcept_no") or "") for item in recent]
+    comparable = baseline.isdigit() and all(i.isdigit() and len(i) == len(baseline) for i in idents)
+    if comparable:
+        newer = [item for item, i in zip(recent, idents) if i > baseline]
+    else:
+        newer = [latest] if ident and ident != baseline else []
+    if len(newer) > _MAX_NEW_DISCLOSURES_PER_PASS:
+        logger.info(
+            "disclosure backlog for %s: %d new since %s, sending latest %d",
+            code, len(newer), baseline, _MAX_NEW_DISCLOSURES_PER_PASS,
+        )
+        newer = newer[:_MAX_NEW_DISCLOSURES_PER_PASS]
+    return list(reversed(newer))
 
 
 async def _fetch_latest_report_sig(code: str) -> dict | None:
@@ -717,9 +750,13 @@ async def _eval_stock_feed(google_sub: str, rule: dict, name: str, feed_cache: d
         if baseline != ident:
             await notifications_repo.set_portfolio_alert_state_json(rule["id"], json.dumps({"baseline": ident}))
         return 0
-    if rule.get("important"):
-        text = _emphasize(text)
-    sent = await alert_delivery.dispatch(google_sub, rule["id"], text)
+    if alert_type == "disclosure_new":
+        texts = [_format_disclosure_message(rule, name, item) for item in _disclosures_since(latest, str(baseline), code)]
+    else:
+        texts = [text]
+    sent = 0
+    for one in texts:
+        sent += await alert_delivery.dispatch(google_sub, rule["id"], _emphasize(one) if rule.get("important") else one)
     await notifications_repo.set_portfolio_alert_state_json(rule["id"], json.dumps({"baseline": ident}))
     return sent
 
@@ -761,10 +798,14 @@ async def _eval_blanket_feed(
         if ident == baseline:
             continue
         name = item.get("stock_name") or code
-        text = _format_disclosure_message(rule, name, latest) if kind == "disc" else _format_report_message(rule, name, latest)
-        if rule.get("important"):
-            text = _emphasize(text)
-        sent += await alert_delivery.dispatch(google_sub, rule["id"], text)
+        if kind == "disc":
+            texts = [_format_disclosure_message(rule, name, d) for d in _disclosures_since(latest, str(baseline), code)]
+        else:
+            texts = [_format_report_message(rule, name, latest)]
+        for text in texts:
+            if rule.get("important"):
+                text = _emphasize(text)
+            sent += await alert_delivery.dispatch(google_sub, rule["id"], text)
         state[code] = ident
         changed = True
 

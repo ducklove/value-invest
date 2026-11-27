@@ -982,6 +982,60 @@ class AlertEngineHarness(TempDbMixin):
             self.assertEqual(await engine.evaluate_user("u1"), 1)  # 005930 신규 → 1회
             self.assertEqual(disp.await_count, 1)
 
+    async def test_disclosure_new_sends_every_disclosure_between_polls(self):
+        # 직전 접수번호 A, 다음 조회 C·B·A → B·C 를 오래된 것부터 한 번씩. 같은 목록 재조회는 미발송.
+        await self._rule(scope="stock", alert_type="disclosure_new", threshold=0.0, stock_code="005930")
+        disp = AsyncMock()
+        a = {"rcept_no": "20260101000001", "report_nm": "주요사항보고서", "rcept_dt": "20260101"}
+        b = {"rcept_no": "20260102000002", "report_nm": "단일판매ㆍ공급계약체결", "rcept_dt": "20260102"}
+        c = {"rcept_no": "20260102000003", "report_nm": "자기주식취득결정", "rcept_dt": "20260102"}
+        box = {"recent": [a]}
+
+        async def fake_feed(kind, code, fc):
+            return {**box["recent"][0], "_recent": list(box["recent"])}
+
+        with patch.object(engine, "_cached_feed", new=fake_feed), \
+             patch.object(channels, "dispatch", new=disp):
+            self.assertEqual(await engine.evaluate_user("u1"), 0)  # 첫 관측 A: 기준선만
+            box["recent"] = [c, b, a]
+            self.assertEqual(await engine.evaluate_user("u1"), 2)
+            texts = [call.args[1] for call in disp.await_args_list]
+            self.assertIn("단일판매", texts[0])  # B 먼저
+            self.assertIn("자기주식", texts[1])  # 그다음 C
+            self.assertEqual(await engine.evaluate_user("u1"), 0)  # 같은 목록 → 추가 발송 없음
+            self.assertEqual(disp.await_count, 2)
+
+    async def test_blanket_disclosure_sends_every_disclosure_between_polls(self):
+        await self._rule(scope="all_stocks", alert_type="disclosure_new_all", threshold=0.0, stock_code=None)
+        disp = AsyncMock()
+        a = {"rcept_no": "20260101000001", "report_nm": "주요사항보고서", "rcept_dt": "20260101"}
+        b = {"rcept_no": "20260102000002", "report_nm": "단일판매ㆍ공급계약체결", "rcept_dt": "20260102"}
+        c = {"rcept_no": "20260102000003", "report_nm": "자기주식취득결정", "rcept_dt": "20260102"}
+        box = {"recent": [a]}
+
+        async def fake_feed(kind, code, fc):
+            if code != "005930":
+                return None
+            return {**box["recent"][0], "_recent": list(box["recent"])}
+
+        with patch.object(engine, "_cached_feed", new=fake_feed), \
+             patch.object(channels, "dispatch", new=disp):
+            self.assertEqual(await engine.evaluate_user("u1"), 0)
+            box["recent"] = [c, b, a]
+            self.assertEqual(await engine.evaluate_user("u1"), 2)
+            self.assertEqual(await engine.evaluate_user("u1"), 0)
+            self.assertEqual(disp.await_count, 2)
+
+    def test_disclosures_since_caps_backlog_and_falls_back_for_odd_ids(self):
+        recent = [{"rcept_no": f"202601010000{n:02d}"} for n in range(20, 0, -1)]
+        latest = {**recent[0], "_recent": recent}
+        picked = engine._disclosures_since(latest, "20260101000001", "005930")
+        self.assertEqual(len(picked), engine._MAX_NEW_DISCLOSURES_PER_PASS)
+        self.assertEqual(picked[-1]["rcept_no"], "20260101000020")  # 최신이 마지막
+        # 형식이 비교 불가하면 예전처럼 최신 1건만.
+        self.assertEqual(engine._disclosures_since({"rcept_no": "X2"}, "X1"), [{"rcept_no": "X2"}])
+        self.assertEqual(engine._disclosures_since({"rcept_no": "X1"}, "X1"), [])
+
     async def test_blanket_feed_respects_per_stock_override(self):
         # 전체 신규공시 ON + 개별: 005930 켜짐(개별 발송), 000660 꺼짐(억제).
         # blanket 은 개별 규칙이 있는 두 종목을 모두 스킵 → 발송은 005930 개별 경로만.
