@@ -266,6 +266,8 @@ function _pfApplyColVisibility(vis) {
     .map(c => `.${c.cls} { display: none !important; }`)
     .join('\n');
   _pfColStyleEl.textContent = rules;
+  // 메모 컬럼이 보이면 종목명 옆 메모 배지는 중복이라 CSS 로 숨긴다.
+  document.body?.classList.toggle('pf-memo-col-visible', !!vis.memo);
 }
 function pfToggleCol(key, checked) {
   const vis = _pfGetColVisibility();
@@ -343,6 +345,7 @@ function switchView(view, options = {}) {
   // 화면과 함께 가려지지만 body 의 스크롤 잠금은 남아 새 화면에서 휠·스크롤바가
   // 모두 죽는다. 전환 시점에 모달 상태를 확실히 되감는다.
   if (typeof closeAllManagedModals === 'function') closeAllManagedModals();
+  if (typeof pfCloseMemoEditor === 'function') pfCloseMemoEditor();
   // 브라우저 히스토리 동기화 — 이게 없으면 탭 전환은 DOM 만 바뀌고 URL/히스토리는 그대로라
   // 뒤로가기를 누르면 이전 탭이 아니라 앱 밖으로 나가버린다. skipHistory 는 (a) 최초 진입
   // 라우팅(app-main.js initApp, 이미 그 URL에 있으므로 다시 쓸 필요 없음)과 (b) popstate

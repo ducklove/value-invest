@@ -124,7 +124,7 @@ function _pfTaxHarvest(data, verified) {
   const harvest = data.loss_harvest || {};
   if (!harvest.available) return '';
   const candidates = harvest.candidates || [];
-  const rows = candidates.map(row => `<tr><th scope="row">${escapeHtml(row.stock_name || row.stock_code)} <small>${escapeHtml(row.account_name || '')}</small></th><td>${escapeHtml(pfTaxMoney(row.unrealized_krw, verified))}</td><td>${escapeHtml(pfTaxMoney(row.tax_saving_krw, verified))}</td></tr>`).join('');
+  const rows = candidates.map(row => `<tr><th scope="row">${stockLinkHtml(row.stock_code, escapeHtml(row.stock_name || row.stock_code))} <small>${escapeHtml(row.account_name || '')}</small></th><td>${escapeHtml(pfTaxMoney(row.unrealized_krw, verified))}</td><td>${escapeHtml(pfTaxMoney(row.tax_saving_krw, verified))}</td></tr>`).join('');
   const notes = [];
   if (harvest.as_of) notes.push(`${harvest.as_of} 정산 기준`);
   if (harvest.unpriced_count) notes.push(`평가 기준이 없는 ${Number(harvest.unpriced_count)}종목 제외`);
@@ -142,7 +142,7 @@ function _pfTaxStocks(data, verified) {
   if (!stocks.length) return '';
   const rows = stocks.map(stock => {
     const name = stock.stock_name || stock.stock_code || '일자 합계 (종목 상세 없음)';
-    return `<tr><th scope="row">${escapeHtml(name)} <small>${escapeHtml(_PF_TAX_MARKET_LABEL[stock.market] || '')}</small></th><td>${stock.market === 'overseas' ? escapeHtml(pfTaxMoney(stock.realized_krw, verified)) : escapeHtml(pfTaxExact(stock.realized_krw))}</td><td>${stock.market === 'overseas' ? _pfTaxNative(stock.realized_native, stock.currency) : '—'}</td></tr>`;
+    return `<tr><th scope="row">${stockLinkHtml(stock.stock_code, escapeHtml(name))} <small>${escapeHtml(_PF_TAX_MARKET_LABEL[stock.market] || '')}</small></th><td>${stock.market === 'overseas' ? escapeHtml(pfTaxMoney(stock.realized_krw, verified)) : escapeHtml(pfTaxExact(stock.realized_krw))}</td><td>${stock.market === 'overseas' ? _pfTaxNative(stock.realized_native, stock.currency) : '—'}</td></tr>`;
   }).join('');
   return `<details class="pf-insight-method"><summary>${Number(data.year)}년 종목별 실현손익 (${stocks.length}종목)</summary>
     <div class="pf-insight-table-scroll"><table class="pf-insight-table pf-tax-table"><thead><tr><th>종목</th><th>원화</th><th>거래통화</th></tr></thead><tbody>${rows}</tbody></table></div>

@@ -14,7 +14,7 @@ function pfAttributionHtml(data) {
   const bars = parts.map(row => `<div class="pf-attribution-row">
     <span>${escapeHtml(row.label)}</span><div class="pf-attribution-track" aria-hidden="true"><i class="${Number(row.amount) < 0 ? 'negative' : 'positive'}" style="width:${Math.max(0, Math.min(100, Math.abs(Number(row.amount)) / max * 100))}%"></i></div>
     <strong>${pfAttributionMoney(row.amount)}</strong></div>`).join('');
-  const stocks = (data.stocks || []).map(row => `<tr><th scope="row">${escapeHtml(row.stock_name || row.stock_code)} <small>${escapeHtml(row.stock_code)}</small></th><td>${pfAttributionMoney(row.price)}</td><td>${pfAttributionMoney(row.fx)}</td><td>${pfAttributionMoney(row.combined)}</td><td>${pfAttributionMoney(row.total)}</td></tr>`).join('');
+  const stocks = (data.stocks || []).map(row => `<tr><th scope="row">${stockLinkHtml(row.stock_code, escapeHtml(row.stock_name || row.stock_code))} <small>${escapeHtml(row.stock_code)}</small></th><td>${pfAttributionMoney(row.price)}</td><td>${pfAttributionMoney(row.fx)}</td><td>${pfAttributionMoney(row.combined)}</td><td>${pfAttributionMoney(row.total)}</td></tr>`).join('');
   const issues = Object.entries(data.coverage?.issues || {}).map(([label, count]) => `${escapeHtml(label)} ${Number(count)}구간`).join(' · ');
   return `<p class="pf-chart-note">실제 기준일 ${escapeHtml(data.baseline_date)} → ${escapeHtml(data.ending_date)}${data.baseline_mode === 'first_in_period' ? ' · 기간 내 첫 기록부터 계산' : ''}</p>
     <div class="pf-insight-summary"><div>자산 증감<strong>${pfAttributionMoney(data.value_change)}</strong></div><div>순입출금 제외 손익<strong>${pfAttributionMoney(data.investment_pnl)}</strong></div></div>

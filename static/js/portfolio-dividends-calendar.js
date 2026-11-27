@@ -112,7 +112,7 @@ function _pfDivCalEventHtml(ev, todayIso) {
 
   return `<tr class="${classes.join(' ')}">
     <td class="pf-divcal-record-date" title="${escapeHtml(basisTitle)}"><span class="pf-divcal-basis-day">${_pfDivCalDateHtml(basisDay, ev)}</span>${exBadge}</td>
-    <th scope="row" class="pf-divcal-stock"><span class="pf-divcal-stock-name">${escapeHtml(ev.stock_name || ev.stock_code)}${sold}</span>${_pfDivCalEstimateBadge(ev)}</th>
+    <th scope="row" class="pf-divcal-stock"><span class="pf-divcal-stock-name">${stockLinkHtml(ev.stock_code, escapeHtml(ev.stock_name || ev.stock_code))}${sold}</span>${_pfDivCalEstimateBadge(ev)}</th>
     <td class="pf-divcal-payment-date"><span class="pf-divcal-pay-day">${_pfDivCalDateHtml(payDay, actualPay ? {} : ev)}</span> ${actualPay ? _pfDivCalBrokerBadge(evidence) : ''}</td>
     <td class="pf-divcal-per-share pf-divcal-number">${hasPerShare ? _pfDivCalPerShare(ev) : '<span class="pf-divcal-unknown">미확인</span>'}</td>
     <td class="pf-divcal-quantity pf-divcal-number">${quantity}</td>

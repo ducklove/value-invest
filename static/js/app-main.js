@@ -75,6 +75,7 @@ QuoteManager.onQuote = function(code, q) {
         date: activeQuoteSnapshot.date, price: activeQuoteSnapshot.price, previous_close: activeQuoteSnapshot.previous_close,
         change: activeQuoteSnapshot.change, change_pct: activeQuoteSnapshot.change_pct,
       }, activeIndicators);
+      if (typeof analysisPositionRefreshPrice === 'function') analysisPositionRefreshPrice();
       flashEl(document.getElementById('quoteSummary'));
     }
   }

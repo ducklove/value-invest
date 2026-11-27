@@ -928,3 +928,9 @@ html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   .sidebar { width: 280px; padding: 16px; }
   .main { padding: 20px; }
 }
+
+/* 공통 종목 링크 (utils.js stockLinkHtml) — 표 안에서 튀지 않게 글자색은 유지하고
+   가리킬 때만 링크임을 드러낸다. */
+a.vc-stock-link { color: inherit; text-decoration: none; cursor: pointer; }
+a.vc-stock-link:hover,
+a.vc-stock-link:focus-visible { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }

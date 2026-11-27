@@ -409,7 +409,10 @@ function _apiErrorMessageFromBody(body) {
 }
 
 async function apiFetchJson(path, options = {}) {
-  if (typeof PfStore !== 'undefined' && PfStore.accountId && path.startsWith('/api/portfolio/') && !['GET', 'HEAD'].includes((options.method || 'GET').toUpperCase())) {
+  // aggregate: true — 합산(전체 계좌) 기준 호출. 계좌 헤더를 붙이지 않는다.
+  const aggregate = !!(options && options.aggregate);
+  if (aggregate) { const { aggregate: _drop, ...rest } = options; options = rest; }
+  if (!aggregate && typeof PfStore !== 'undefined' && PfStore.accountId && path.startsWith('/api/portfolio/') && !['GET', 'HEAD'].includes((options.method || 'GET').toUpperCase())) {
     options = { ...options, headers: { ...(options.headers || {}), 'X-Portfolio-Account': PfStore.accountId } };
     if (/^\/api\/portfolio\/(trades|distributions)(\/|$)/.test(path) && options.body) {
       const body = JSON.parse(options.body);
@@ -1459,3 +1462,41 @@ function schedulePoll(name, fn, intervalMs, options = {}) {
     isActive: () => !poll.cancelled,
   };
 }
+
+// --- 공통 종목 링크 -------------------------------------------------------
+// 심층 분석 카드·팝오버·스크리너 등 어디서든 종목명을 누르면 같은 SPA 안에서
+// 종목분석으로 이동한다. 진짜 <a href="/analysis?code="> 라서 새 탭(⌘/가운데
+// 클릭)·주소 복사도 그대로 되고, 일반 클릭만 아래 위임 핸들러가 가로챈다.
+const VC_STOCK_LINK_CODE_RE = /^[0-9][0-9A-Z]{5}$/;
+
+function stockLinkHtml(code, innerHtml, title = '종목 분석 열기') {
+  const c = String(code || '').trim().toUpperCase();
+  if (!VC_STOCK_LINK_CODE_RE.test(c)) return innerHtml;
+  return `<a href="/analysis?code=${encodeURIComponent(c)}" class="vc-stock-link" data-candle-code="${c}" title="${escapeHtml(title)}">${innerHtml}</a>`;
+}
+
+function vcStockCodeFromAnalysisHref(href) {
+  try {
+    const url = new URL(href, window.location.origin);
+    if (url.origin !== window.location.origin || url.pathname !== '/analysis') return null;
+    const code = String(url.searchParams.get('code') || '').trim().toUpperCase();
+    return VC_STOCK_LINK_CODE_RE.test(code) ? code : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+(function initVcStockLinks() {
+  if (typeof document === 'undefined') return;
+  document.addEventListener('click', (e) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const link = e.target.closest?.('a[href^="/analysis?"]');
+    if (!link || link.target === '_blank') return;
+    const code = vcStockCodeFromAnalysisHref(link.getAttribute('href'));
+    if (!code || typeof switchView !== 'function' || typeof analyzeStock !== 'function') return;
+    e.preventDefault();
+    if (typeof pfCloseSummaryContributors === 'function') pfCloseSummaryContributors();
+    switchView('analysis');
+    analyzeStock(code);
+  });
+})();

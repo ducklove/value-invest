@@ -139,7 +139,7 @@ function _pfRenderContributorPopover() {
   const section = (key, label) => `<section class="pf-contributors-section ${key}">
     <h4>${label} <span>TOP 3</span></h4>
     ${data[key].length ? `<ol>${data[key].map(row => `<li data-code="${escapeHtml(row.code)}">
-      <span class="pf-contributor-stock"><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(row.code)}</small></span>
+      <span class="pf-contributor-stock"><strong>${stockLinkHtml(row.code, escapeHtml(row.name))}</strong><small>${escapeHtml(row.code)}</small></span>
       <span class="pf-contributor-numbers ${key}"><strong>${_pfContributorMoney(row.amount)}</strong><small>${fmtPct(row.pct)}</small></span>
     </li>`).join('')}</ol>` : '<p class="pf-contributors-empty">해당 종목이 없습니다.</p>'}
   </section>`;

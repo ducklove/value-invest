@@ -418,6 +418,7 @@ function updateMobileAuthChrome() {
 }
 
 function renderAuthState() {
+  if (typeof analysisPositionAuthChanged === 'function') analysisPositionAuthChanged();
   const statusTitle = document.getElementById('authStatusTitle');
   const statusDetail = document.getElementById('authStatusDetail');
   const authUser = document.getElementById('authUser');

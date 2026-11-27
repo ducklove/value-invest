@@ -4086,3 +4086,96 @@ body.pf-mobile-simple #pfPerformanceTab .pf-deep-anchors { top: calc(var(--m-hea
 body.pf-mobile-simple .pf-deep-section,
 body.pf-mobile-simple #pfPerformanceTab .pf-nav-chart-wrap,
 body.pf-mobile-simple #pfPerformanceTab .pf-cashflow-section { scroll-margin-top: calc(var(--m-header-h, 42px) + 112px); }
+
+/* 메모 빠른 입력 (portfolio-memo.js) — 수정 모드 없이 칸·배지·인사이트 모달에서 편집 */
+.pf-memo-cell {
+  display: block;
+  width: 100%;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border: 1px dashed transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: text;
+}
+.pf-memo-cell:hover,
+.pf-memo-cell:focus-visible { border-color: var(--border); background: var(--hover-bg); outline: none; }
+.pf-memo-cell.is-empty { color: var(--text-secondary); font-size: 12px; opacity: 0; }
+.pf-table tbody tr:hover .pf-memo-cell.is-empty,
+.pf-memo-cell.is-empty:focus-visible { opacity: 0.7; }
+@media (hover: none) { .pf-memo-cell.is-empty { opacity: 0.5; } }
+.pf-memo-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.pf-memo-badge:hover,
+.pf-memo-badge:focus-visible { background: var(--hover-bg); outline: none; }
+.pf-memo-badge.is-empty { display: none; opacity: 0.45; filter: grayscale(1); }
+.pf-table tbody tr:hover .pf-memo-badge.is-empty,
+.pf-memo-badge.is-empty:focus-visible { display: inline-flex; }
+/* 메모 칸이 실제로 보일 때만 배지를 숨긴다 — 모바일 간편 모드는 메모 칸을 강제로 숨긴다. */
+body.pf-memo-col-visible:not(.pf-mobile-simple) .pf-memo-badge { display: none !important; }
+@media (hover: none) { .pf-memo-badge.is-empty { display: none !important; } }
+.pf-memo-popover {
+  position: fixed;
+  z-index: 1200;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card-bg, var(--surface));
+  box-shadow: var(--shadow-lg);
+}
+.pf-memo-popover-head { display: flex; gap: 6px; align-items: baseline; margin-bottom: 6px; font-size: 13px; }
+.pf-memo-popover-head span { color: var(--text-secondary); font-size: 12px; }
+.pf-memo-popover-input,
+.pf-insight-memo-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg, var(--surface));
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  resize: vertical;
+}
+.pf-memo-popover-input:focus,
+.pf-insight-memo-input:focus { outline: 2px solid var(--ring, var(--primary)); outline-offset: -1px; }
+.pf-memo-popover-foot { display: flex; gap: 6px; align-items: center; margin-top: 6px; font-size: 11px; color: var(--text-secondary); }
+.pf-memo-popover-hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-memo-popover-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.pf-memo-popover-btn.primary { border-color: var(--primary); background: var(--primary); color: #fff; }
+.pf-memo-popover-btn:disabled { opacity: 0.6; cursor: default; }
+@media (hover: none) { .pf-memo-popover-hint { display: none; } }
+.pf-insight-memo-panel {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+}
+.pf-insight-memo-panel .pf-insight-tag-head { margin-bottom: 8px; }
+.pf-insight-memo-status { color: var(--text-secondary); font-size: 12px; }

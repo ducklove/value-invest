@@ -716,16 +716,22 @@ function renderPortfolio(options = {}) {
     const signalBadgeHtml = typeof pfActionBoardBadgesForCode === 'function'
       ? pfActionBoardBadgesForCode(r.stock_code)
       : '';
-    const stockIdentity = `<span class="pf-stock-main"><span class="pf-stock-line"><a href="#" class="pf-stock-link js-pf-open-insight" title="${safeName}"><strong>${safeName}</strong></a><span class="pf-stock-code">${displayCode}</span>${curTag}${liveDotE}${signalBadgeHtml}</span>${tagHtml}</span>`;
+    // 메모 — 기본 숨김 컬럼. 폭이 부족하면 셀 안에서 줄바꿈되도록
+    // .pf-col-memo 만 white-space: normal (다른 셀은 nowrap 유지).
+    // 보기 모드에서도 칸을 누르면 메모 팝오버가 열린다 (portfolio-memo.js).
+    const memoText = String(r.memo || '');
+    const memoAria = `${escapeHtml(r.stock_name)} 메모 ${memoText ? '편집' : '추가'}`;
+    const memoCell = memoText
+      ? `<button type="button" class="pf-memo-cell js-pf-memo-edit" title="${escapeHtml(memoText)}" aria-label="${memoAria}"><span class="pf-memo-text">${escapeHtml(memoText)}</span></button>`
+      : `<button type="button" class="pf-memo-cell is-empty js-pf-memo-edit" aria-label="${memoAria}">+ 메모</button>`;
+    // 메모 컬럼을 숨겨도(기본값·모바일 간편 모드) 종목명 옆 배지로 보고 고친다.
+    const memoBadge = memoText
+      ? `<button type="button" class="pf-memo-badge js-pf-memo-edit" title="${escapeHtml(memoText)}" aria-label="${memoAria}">📝</button>`
+      : `<button type="button" class="pf-memo-badge is-empty js-pf-memo-edit" title="메모 추가" aria-label="${memoAria}">📝</button>`;
+    const stockIdentity = `<span class="pf-stock-main"><span class="pf-stock-line"><a href="#" class="pf-stock-link js-pf-open-insight" title="${safeName}"><strong>${safeName}</strong></a><span class="pf-stock-code">${displayCode}</span>${curTag}${liveDotE}${memoBadge}${signalBadgeHtml}</span>${tagHtml}</span>`;
     const stockEditIdentity = `<span class="pf-stock-main pf-stock-edit-main"><input class="pf-edit-input pf-stock-name-edit js-pf-edit-name" id="pfEditName" value="${safeName}" type="text" maxlength="80" autocomplete="off"${editAttrs}><span class="pf-stock-line"><span class="pf-stock-code">${displayCode}</span>${curTag}${liveDotE}${signalBadgeHtml}</span>${tagHtml}</span>`;
     const heatAttrs = pfHeatRowAttrs(r);
     const changeCell = pfChangeCellHtml(r);
-    // 메모 — 기본 숨김 컬럼. 폭이 부족하면 셀 안에서 줄바꿈되도록
-    // .pf-col-memo 만 white-space: normal (다른 셀은 nowrap 유지).
-    const memoText = String(r.memo || '');
-    const memoCell = memoText
-      ? `<span class="pf-memo-text" title="${escapeHtml(memoText)}">${escapeHtml(memoText)}</span>`
-      : '-';
     // 편집 모드 그룹 셀: 숏(음수 수량) 행에는 롱숏 페어 선택 박스를 함께
     // 노출한다. 페어가 걸린 숏의 그룹은 롱을 따라가므로 그룹 select 잠금.
     let groupEditCell = `<select class="pf-group-select js-pf-group"${editAttrs}${pairLongCode ? ' disabled title="페어 롱 종목의 그룹을 따릅니다"' : ''}>${groupOpts}</select>`;

@@ -623,3 +623,54 @@
   font-size: 12px; color: var(--warning);
   background: color-mix(in srgb, var(--warning) 10%, transparent);
 }
+
+/* 종목분석 "내 포지션" 바 (analysis-position.js) — 보유 종목일 때만 보인다 */
+.analysis-position {
+  margin: 10px 0 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.analysis-position[hidden] { display: none; }
+.ap-head { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.ap-kicker { font-size: 12px; font-weight: 700; color: var(--primary); }
+.ap-group { padding: 1px 8px; border-radius: 999px; background: var(--surface-muted); color: var(--text-secondary); font-size: 11px; }
+.ap-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px 12px; }
+.ap-stat { display: flex; flex-direction: column; min-width: 0; }
+.ap-stat span { color: var(--text-secondary); font-size: 11px; }
+.ap-stat strong { font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ap-stat strong small { color: var(--text-secondary); font-weight: 500; }
+.ap-stat strong.up { color: var(--up); }
+.ap-stat strong.down { color: var(--down); }
+.ap-memo {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  margin-top: 10px;
+  padding: 6px 8px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: text;
+}
+.ap-memo:hover, .ap-memo:focus-visible { background: var(--hover-bg); outline: none; border-color: var(--primary); }
+.ap-memo-label { flex: none; color: var(--text-secondary); font-size: 12px; }
+.ap-memo-text { min-width: 0; font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+.ap-memo-text.is-empty { color: var(--text-secondary); }
+.ap-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.ap-btn {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.ap-btn:hover, .ap-btn:focus-visible { border-color: var(--primary); color: var(--primary); outline: none; }

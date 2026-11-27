@@ -205,6 +205,8 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
     <div class="meta" id="companyMeta"></div>
     <!-- ?from=<도구> 돌아가기 칩 + 이 종목을 받는 연결 도구 칩 (analysis-valuation.js renderAnalysisToolLinks) -->
     <div class="analysis-eco-links" id="analysisEcoLinks" hidden></div>
+    <!-- 보유 종목이면 내 포지션·보유 메모·포트폴리오 바로가기 (analysis-position.js) -->
+    <section class="analysis-position" id="analysisPositionStrip" aria-label="내 포지션" hidden></section>
     <div class="personalization-panel" id="personalizationPanel">
       <div class="personalization-actions">
         <button class="personalization-btn" id="favoriteBtn" type="button" onclick="toggleFavorite()">관심종목</button>
@@ -1338,6 +1340,7 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
 <script src="./js/analysis-filings.js" defer></script>
 <script src="./js/analysis-valuation.js" defer></script>
 <script src="./js/analysis-360.js" defer></script>
+<script src="./js/analysis-position.js" defer></script>
 <script src="./js/analysis.js" defer></script>
 <script src="./js/stock-alerts.js" defer></script>
 <script src="./js/market-bond-mate.js" defer></script>
@@ -1357,6 +1360,7 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
 <script src="./js/portfolio-action-board.js" defer></script>
 <script src="./js/portfolio-add-search.js" defer></script>
 <script src="./js/portfolio-actions.js" defer></script>
+<script src="./js/portfolio-memo.js" defer></script>
 <script src="./js/portfolio-pair.js" defer></script>
 <script src="./js/portfolio-insights.js" defer></script>
 <script src="./js/portfolio-groups-market.js" defer></script>

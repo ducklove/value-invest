@@ -7,6 +7,7 @@ function setup() {
   const dom = new JSDOM(readFileSync(new URL('../../static/index.html', import.meta.url), 'utf8'), { runScripts: 'outside-only', url: 'http://localhost' });
   const win = dom.window;
   win.escapeHtml = value => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+  win.stockLinkHtml = (code, inner) => inner;
   win.eval(readFileSync(new URL('../../static/js/portfolio-tax.js', import.meta.url), 'utf8'));
   return dom;
 }

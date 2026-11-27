@@ -117,7 +117,7 @@ function _pfActionCardHtml(item) {
   const status = item.status || 'open';
   const source = item.source ? `<span class="pf-action-source">${escapeHtml(item.source)}</span>` : '';
   const stock = item.stock_name || item.stock_code
-    ? `<span class="pf-action-stock">${escapeHtml(item.stock_name || item.stock_code)}</span>`
+    ? `<span class="pf-action-stock">${stockLinkHtml(item.stock_code, escapeHtml(item.stock_name || item.stock_code))}</span>`
     : '';
   const href = item.url || '';
   const openBtn = href

@@ -16,6 +16,9 @@ async function pfOpenAssetInsight(stockCode) {
   const body = document.getElementById('pfAssetInsightBody');
   const trendHost = document.getElementById('pfAssetInsightTrends');
   if (!modal || !body || !trendHost || !stockCode) return;
+  // 모달 마크업은 #portfolioView 안에 있어 종목분석 화면에서 열면 숨은 부모 때문에
+  // 보이지 않고 스크롤만 잠긴다. 어느 화면에서 열어도 보이도록 body 로 옮긴다.
+  if (modal.parentElement !== document.body) document.body.appendChild(modal);
   const loadSeq = ++_pfAssetInsightLoadSeq;
   _pfDisposePopupTrends(trendHost.firstElementChild);
   trendHost.innerHTML = _pfRenderPopupTrendShell('평가금액', '전체 계좌 정산 · 종목별 일간 평가 기준');
@@ -419,6 +422,7 @@ function _renderAssetInsight(data) {
       </div>
     </div>
     ${tagPanel}
+    ${typeof pfRenderInsightMemo === 'function' ? pfRenderInsightMemo(code) : ''}
     <div class="pf-insight-grid">${cards}</div>
     <div class="pf-insight-two-col">
       <section class="pf-insight-section">

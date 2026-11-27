@@ -43,6 +43,7 @@ PORTFOLIO_SPLIT_FILES = [
     "portfolio-action-board.js",
     "portfolio-add-search.js",
     "portfolio-actions.js",
+    "portfolio-memo.js",
     "portfolio-pair.js",
     "portfolio-insights.js",
     "portfolio-groups-market.js",
@@ -73,6 +74,7 @@ ANALYSIS_SPLIT_FILES = [
     "analysis-filings.js",
     "analysis-valuation.js",
     "analysis-360.js",
+    "analysis-position.js",
     "analysis.js",
 ]
 

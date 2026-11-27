@@ -61,6 +61,11 @@
       } else if (t.closest('.js-pf-row-drag')) {
         e.preventDefault();
         return;
+      } else if ((el = t.closest('.js-pf-memo-edit'))) {
+        e.preventDefault();
+        e.stopPropagation();
+        const code = codeFromTr(el);
+        if (code && typeof pfOpenMemoEditor === 'function') pfOpenMemoEditor(code, el);
       } else if ((el = t.closest('.js-pf-save'))) {
         e.preventDefault();
         const code = codeFromTr(el);
