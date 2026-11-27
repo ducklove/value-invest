@@ -47,7 +47,9 @@ test("보유 종목을 분석하면 포트폴리오를 안 열어도 내 포지�
   assert.match(text, /목표가\s*90,000원/);
   assert.ok(host.innerHTML.includes("HBM &lt;확인&gt;"), "메모는 이스케이프한다");
 
+  w.showToast = () => {};
   host.querySelector(".js-ap-focus").click();
+  await new Promise((r) => setTimeout(r, 0));
   host.querySelector(".js-ap-insight").click();
   host.querySelector(".js-ap-memo").click();
   assert.deepEqual(w.__views, ["portfolio", "focus:005930", "insight:005930", "memo:005930:HBM <확인>"]);
@@ -124,4 +126,23 @@ test("로그아웃·사용자 전환 시 이전 사용자의 포지션을 즉시
   w.analysisPositionAuthChanged();
   await new Promise((r) => setTimeout(r, 0));
   assert.equal(w.__calls.length, 2);
+});
+
+test("[포트폴리오에서 보기]는 보유 탭으로 가고, 종목이 없는 개별 계좌면 합산으로 바꾼다", async () => {
+  const w = load({ items: [HOLDING] });
+  await w.renderAnalysisPosition("005930");
+  const tabs = [], accounts = [], toasts = [];
+  w.PfStore.accountId = "acc-2";
+  w.PfStore.loading = false;
+  w.pfSwitchTab = async (t) => tabs.push(t);
+  w.loadPortfolio = async () => { w.PfStore.items = [{ stock_code: "000660" }]; };
+  w.pfSelectAccount = async (id) => { accounts.push(id); w.PfStore.accountId = id; w.PfStore.items = [HOLDING]; };
+  w.showToast = (m) => toasts.push(m);
+  w.reportApiError = () => {};
+  await w.analysisPositionGoToHolding("005930");
+  assert.deepEqual(tabs, ["holdings"]);
+  assert.deepEqual(accounts, [""]);
+  assert.ok(w.__views.includes("focus:005930"));
+  assert.match(toasts.join(" "), /합산으로 전환/);
+  assert.match(toasts.join(" "), /필터나 검색어/, "행이 렌더되지 않았으면 가려졌다고 알린다");
 });

@@ -128,6 +128,7 @@ test('보고 있는 계좌에 없는 종목(종목분석 합산 보유)은 계�
     const a = w.document.querySelector('.pf-memo-popover');
     a.querySelector('textarea').value = 'A';
     a.querySelector('.js-pf-memo-save').click();
+    await flush();
     assert.equal(opts[0].aggregate, true);
     w.pfCloseMemoEditor();
     w.pfOpenMemoEditor('005930', anchor);
@@ -136,5 +137,29 @@ test('보고 있는 계좌에 없는 종목(종목분석 합산 보유)은 계�
     await flush();
     assert.ok(b.isConnected, 'A 의 늦은 완료가 B 를 닫지 않는다');
     assert.equal(fallback.memo, 'A');
+  } finally { dom.window.close(); }
+});
+
+test('같은 종목 메모 저장은 순서대로 보내 늦은 이전 응답이 최신 값을 덮지 않는다', async () => {
+  const {dom, w, flush} = setup();
+  try {
+    const sent = [];
+    const pending = [];
+    w.apiFetchJson = (path, options) => {
+      const memo = JSON.parse(options.body).memo;
+      sent.push(memo);
+      return new Promise((r) => pending.push(() => r({memo})));
+    };
+    const first = w.pfSaveHoldingMemo('005930', 'older');
+    const second = w.pfSaveHoldingMemo('005930', 'newer');
+    await flush();
+    assert.deepEqual(sent, ['older'], '두 번째 요청은 첫 응답 뒤에 보낸다');
+    pending.shift()();
+    await first; await flush();
+    assert.deepEqual(sent, ['older', 'newer']);
+    pending.shift()();
+    await second;
+    assert.equal(w.PfStore.items[0].memo, 'newer');
+    assert.equal(w.pfMemoEditorOpenFor('005930'), false);
   } finally { dom.window.close(); }
 });

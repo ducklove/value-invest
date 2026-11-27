@@ -163,7 +163,33 @@ function analysisPositionRefreshPrice() {
   if (!host || host.hidden || !host._apItem) return;
   // 버튼에 포커스가 있으면(키보드 사용 중) tick 으로 DOM 을 갈아엎지 않는다.
   if (host.contains(document.activeElement)) return;
+  if (typeof pfMemoEditorOpenFor === 'function' && pfMemoEditorOpenFor(host.dataset.code)) return;
   host.innerHTML = analysisPositionHtml(host._apItem, _analysisPositionPrice(), host._apItems);
+}
+
+// [포트폴리오에서 보기] — 보유 탭을 열고, 바는 합산 기준이므로 보고 있는 개별 계좌에
+// 이 종목이 없으면 합산으로 바꾼다. 그룹 필터·검색어는 사용자의 선택이라 지우지 않고 알린다.
+async function analysisPositionGoToHolding(code) {
+  switchView('portfolio');
+  try {
+    if (typeof pfSwitchTab === 'function') await pfSwitchTab('holdings');
+    // switchView 가 이미 시작한 로드는 loadPortfolio() 가 기다리지 않고 바로 돌아오므로 끝날 때까지 기다린다.
+    const waitLoaded = async () => { for (let i = 0; i < 150 && PfStore.loading; i++) await new Promise(r => setTimeout(r, 100)); };
+    await waitLoaded();
+    if (!(PfStore.items || []).length && typeof loadPortfolio === 'function') { await loadPortfolio(); await waitLoaded(); }
+    const inAccount = (PfStore.items || []).some(i => i.stock_code === code);
+    if (PfStore.accountId && !inAccount && typeof pfSelectAccount === 'function') {
+      await pfSelectAccount('');
+      showToast('이 종목이 없는 계좌라 전체 계좌 합산으로 전환했습니다.');
+    }
+  } catch (e) {
+    reportApiError(e, '포트폴리오 열기');
+  }
+  if (typeof pfFocusHolding === 'function') pfFocusHolding(code);
+  const shown = Array.from(document.querySelectorAll('#pfBody tr[data-code]')).some(tr => tr.dataset.code === code);
+  if (!shown && (PfStore.items || []).some(i => i.stock_code === code)) {
+    showToast('그룹 필터나 검색어 때문에 이 종목 행이 가려져 있습니다.');
+  }
 }
 
 (function initAnalysisPosition() {
@@ -174,8 +200,7 @@ function analysisPositionRefreshPrice() {
     if (!code) return;
     if (e.target.closest('.js-ap-focus')) {
       e.preventDefault();
-      switchView('portfolio');
-      if (typeof pfFocusHolding === 'function') pfFocusHolding(code);
+      analysisPositionGoToHolding(code);
     } else if (e.target.closest('.js-ap-insight')) {
       e.preventDefault();
       if (typeof pfOpenAssetInsight === 'function') pfOpenAssetInsight(code);

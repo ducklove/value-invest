@@ -22,7 +22,25 @@ function pfCloseMemoEditor() {
   _pfMemoPopover = null;
 }
 
-async function pfSaveHoldingMemo(stockCode, rawMemo, fallbackItem = null) {
+// 같은 종목 메모 저장은 순서대로 보낸다 — 늦게 도착한 이전 응답이 최신 값을
+// 덮어쓰지 않게(클라이언트 상태와 서버 최종값 모두).
+const _pfMemoSaveChains = new Map();
+
+function pfSaveHoldingMemo(stockCode, rawMemo, fallbackItem = null) {
+  const prev = _pfMemoSaveChains.get(stockCode) || Promise.resolve();
+  const next = prev.catch(() => {}).then(() => _pfSaveHoldingMemoNow(stockCode, rawMemo, fallbackItem));
+  _pfMemoSaveChains.set(stockCode, next);
+  const cleanup = () => { if (_pfMemoSaveChains.get(stockCode) === next) _pfMemoSaveChains.delete(stockCode); };
+  next.then(cleanup, cleanup);
+  return next;
+}
+
+// 분석 화면의 시세 tick 이 팝오버 기준(앵커) 버튼을 갈아엎지 않도록 열린 종목을 알려 준다.
+function pfMemoEditorOpenFor(stockCode) {
+  return !!(_pfMemoPopover && _pfMemoPopover.code === stockCode);
+}
+
+async function _pfSaveHoldingMemoNow(stockCode, rawMemo, fallbackItem = null) {
   const memo = String(rawMemo || '').trim().slice(0, PF_MEMO_MAX_LEN);
   const storeItem = pfMemoItem(stockCode);
   const item = storeItem || fallbackItem;
@@ -127,8 +145,9 @@ function pfOpenMemoEditor(stockCode, anchor, fallbackItem = null) {
   const onReflow = () => {
     let target = anchor;
     if (!target.isConnected) {
-      const row = Array.from(document.querySelectorAll('#pfBody tr[data-code]')).find(r => r.dataset.code === stockCode);
-      const candidates = row ? Array.from(row.querySelectorAll('.js-pf-memo-edit')) : [];
+      const row = Array.from(document.querySelectorAll('#pfBody tr[data-code], #analysisPositionStrip[data-code]'))
+        .find(r => r.dataset.code === stockCode);
+      const candidates = row ? Array.from(row.querySelectorAll('.js-pf-memo-edit, .js-ap-memo')) : [];
       target = candidates.find(c => c.getClientRects().length) || candidates[0] || null;
       if (target) anchor = target;
     }
