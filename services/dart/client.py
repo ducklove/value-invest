@@ -561,3 +561,43 @@ async def fetch_filing_list(
 
     ttl = LIST_CACHE_TTL_S if cache_ttl is None else cache_ttl
     return await cached_fetch(_list_cache, cache_key, load, ttl=ttl)
+
+
+async def fetch_document_xml_bytes(
+    rcept_no: str,
+    *,
+    essential: bool = False,
+    timeout: float = 20.0,
+) -> bytes:
+    """OpenDART 공시 원문 ZIP(``document.xml``) 다운로드 — 쿼터 가드 공유.
+
+    ``essential=False``(기본)는 비필수 예산(``NONESSENTIAL_BUDGET``)을 넘으면
+    호출을 차단해 신규 공시 푸시용 일일 한도를 보호한다.
+    """
+    key = api_key()
+    if not key:
+        raise DartListError("OPENDART_API_KEY가 설정되어 있지 않습니다.")
+    _quota.check(essential=essential)
+    client = await get_http_client("dart")
+    _quota.note_call()
+    resp = await client.get(
+        f"{BASE_URL}/document.xml",
+        params={"crtfc_key": key, "rcept_no": str(rcept_no).strip()},
+        timeout=timeout,
+    )
+    if resp.status_code != 200:
+        raise DartListError(f"DART document HTTP {resp.status_code}", http_status=resp.status_code)
+    content = resp.content
+    if zipfile.is_zipfile(io.BytesIO(content)):
+        return content
+
+    # ZIP 이 아니면 DART 가 XML/JSON 오류 본문을 돌려준 경우다.
+    raw_text = content.decode("utf-8", errors="ignore")
+    status_match = re.search(r"<status>\s*(\d+)\s*</status>", raw_text)
+    msg_match = re.search(r"<message>\s*([^<]+?)\s*</message>", raw_text)
+    dart_status = status_match.group(1) if status_match else None
+    message = msg_match.group(1).strip() if msg_match else "DART 원문 ZIP 응답이 아닙니다."
+    if dart_status == "020":
+        await _quota.mark_exhausted()
+        raise DartQuotaError(message, dart_status="020")
+    raise DartListError(message, dart_status=dart_status)

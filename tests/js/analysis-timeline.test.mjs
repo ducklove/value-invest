@@ -103,3 +103,76 @@ test("'전체'는 뉴스가 많은 날에도 최근 공시를 섞어 보여 준�
   host.querySelector('.js-stl-filter[data-filter="news"]').click();
   assert.equal(host.querySelectorAll(".stl-news").length, 20);
 });
+
+test("주식소각·현금배당 공시가 있으면 재가격 요약·목표가 변화·시차 판정을 붙이고 파싱 실패 시 원문 링크를 안내한다", async () => {
+  const tlData = {
+    stock_code: "005930",
+    items: [
+      { type: "disclosure", id: "20261120000123", date: "2026-11-20", time: "", title: "주식소각결정", reprice_type: "stock_retirement", source: "DART", url: "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261120000123" },
+      { type: "disclosure", id: "20261110000999", date: "2026-11-10", time: "", title: "현금ㆍ현물배당결정", reprice_type: "cash_dividend", source: "DART", url: "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261110000999" },
+    ],
+    sources: { news: { status: "empty", count: 0 }, disclosure: { status: "ok", count: 2 } },
+  };
+  const rpData = {
+    stock_code: "005930",
+    authenticated: true,
+    held: true,
+    status: "ok",
+    items: [
+      {
+        rcept_no: "20261120000123",
+        disclosure_type: "stock_retirement",
+        url: "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261120000123",
+        parse_status: "ok",
+        pro_forma: {
+          status: "ok",
+          summary: "소각 620,000주(유통주식수 대비 6.20%) · BPS 100,000→106,610원(+6.6%)",
+          assumption: "유통주식수에서 소각 주식 수가 순감소한다고 가정한 잠정 계산입니다.",
+        },
+        target_reprice: {
+          status: "ok",
+          pre_target: 78000,
+          post_target: 83156,
+          delta_krw: 5156,
+          delta_pct: 6.61,
+        },
+        price_reaction: {
+          status: "ok",
+          day0: { status: "ok", return_pct: 0.8 },
+          day5: { status: "in_progress", return_pct: null },
+          day20: { status: "in_progress", return_pct: null },
+        },
+        verdict: { code: "underreacted", text: "목표가 상향폭 대비 주가 반응이 작음" },
+      },
+      {
+        rcept_no: "20261110000999",
+        disclosure_type: "cash_dividend",
+        url: "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261110000999",
+        parse_status: "unparseable",
+        parse_message: "수치 확인 불가 (차등·복수 배당금 표기 — 원문 확인)",
+        pro_forma: { status: "unavailable", summary: "수치 확인 불가", assumption: null },
+        target_reprice: { status: "uncalculable", reason: "공시 수치를 확인하지 못해 미계산" },
+        price_reaction: { status: "unavailable" },
+        verdict: null,
+      },
+    ],
+  };
+
+  const w = load(async (path) => path.includes("/reprice") ? rpData : tlData);
+  await w.loadStockTimeline("005930");
+  const host = w.document.getElementById("stockTimelinePanel");
+  assert.deepEqual(w.__calls, ["/api/stocks/005930/timeline?limit=20", "/api/stocks/005930/reprice"]);
+  const cards = host.querySelectorAll(".stl-reprice");
+  assert.equal(cards.length, 2);
+  assert.match(cards[0].textContent, /78,000→83,156원/);
+  assert.match(cards[0].textContent, /\+5,156원, \+6\.6%/);
+  assert.match(cards[0].textContent, /당일 \+0\.8% · 5거래일 진행 중 · 20거래일 진행 중/);
+  assert.match(cards[0].textContent, /목표가 상향폭 대비 주가 반응이 작음/);
+  assert.match(cards[0].textContent, /잠정 계산입니다/);
+
+  assert.match(cards[1].textContent, /수치 확인 불가/);
+  assert.equal(
+    cards[1].querySelector(".stl-rp-link").getAttribute("href"),
+    "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261110000999",
+  );
+});

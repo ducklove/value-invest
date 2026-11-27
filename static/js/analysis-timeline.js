@@ -18,9 +18,80 @@ function _stockTimelineSourceNote(name, src) {
   return '';
 }
 
+function _isTimelineRepriceRow(row) {
+  if (!row || row.type !== 'disclosure') return false;
+  if (row.reprice_type) return true;
+  const compact = String(row.title || '').replace(/[\sㆍ·・•]+/g, '');
+  if (/자회사|종속회사|철회|취소|조회공시|미확정|예고|안내공시/.test(compact)) return false;
+  return compact.includes('주식소각결정') || compact.includes('현금현물배당결정') || compact.includes('현금배당결정');
+}
+
+function _fmtTimelineReactionWin(label, win) {
+  if (!win || win.status === 'unavailable') return `${label} -`;
+  if (win.status === 'in_progress') return `${label} 진행 중`;
+  const v = Number(win.return_pct);
+  if (!Number.isFinite(v)) return `${label} -`;
+  const cls = v > 0 ? ' up' : v < 0 ? ' down' : '';
+  return `${label} <strong class="stl-rp-ret${cls}">${escapeHtml(fmtPct(v, true, 1))}</strong>`;
+}
+
+function _stockTimelineRepriceHtml(row, repriceMap) {
+  const rp = repriceMap && row.id ? repriceMap[row.id] : null;
+  if (!rp) return '';
+  const rawUrl = rp.url || row.url || '';
+  const safeUrl = /^https:\/\//.test(rawUrl) ? rawUrl : '';
+  const lines = [];
+
+  if (rp.parse_status !== 'ok') {
+    const link = safeUrl
+      ? ` <a class="stl-rp-link" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">원문 확인 →</a>`
+      : '';
+    lines.push(`<div class="stl-rp-head"><span class="stl-rp-badge is-warn">수치 확인 불가</span><span>${escapeHtml(rp.parse_message || '수치 확인 불가')}${link}</span></div>`);
+  } else {
+    const pf = rp.pro_forma || {};
+    const pfBadge = pf.status === 'ok'
+      ? '<span class="stl-rp-badge">Pro-forma 재가격</span>'
+      : '<span class="stl-rp-badge is-warn">미계산</span>';
+    lines.push(`<div class="stl-rp-head">${pfBadge}<span>${escapeHtml(pf.summary || pf.reason || '')}</span></div>`);
+
+    const tr = rp.target_reprice;
+    if (tr) {
+      if (tr.status === 'ok' && Number.isFinite(Number(tr.pre_target)) && Number.isFinite(Number(tr.post_target))) {
+        const dKrw = Number(tr.delta_krw) || 0;
+        const dPct = Number(tr.delta_pct) || 0;
+        const cls = dKrw > 0 ? ' up' : dKrw < 0 ? ' down' : '';
+        const sign = dKrw > 0 ? '+' : '';
+        lines.push(`<div class="stl-rp-line">내 목표가 <strong>${escapeHtml(fmtNum(Math.round(Number(tr.pre_target))))}→${escapeHtml(fmtNum(Math.round(Number(tr.post_target))))}원</strong> <strong class="stl-rp-delta${cls}">(${sign}${escapeHtml(fmtNum(Math.round(dKrw)))}원, ${escapeHtml(fmtPct(dPct, true, 1))})</strong></div>`);
+      } else {
+        lines.push(`<div class="stl-rp-line stl-rp-muted">내 목표가: ${escapeHtml(tr.reason || '미계산')}</div>`);
+      }
+    }
+  }
+
+  const pr = rp.price_reaction;
+  if (pr && pr.status === 'ok') {
+    const windows = [
+      _fmtTimelineReactionWin('당일', pr.day0),
+      _fmtTimelineReactionWin('5거래일', pr.day5),
+      _fmtTimelineReactionWin('20거래일', pr.day20),
+    ].join(' · ');
+    const verdict = rp.verdict?.text
+      ? ` <span class="stl-rp-verdict is-${escapeHtml(rp.verdict.code || 'aligned')}">${escapeHtml(rp.verdict.text)}</span>`
+      : '';
+    lines.push(`<div class="stl-rp-line">주가 반응: ${windows}${verdict}</div>`);
+  }
+
+  const assume = rp.pro_forma?.assumption;
+  if (assume) {
+    lines.push(`<small class="stl-rp-assume">${escapeHtml(assume)}</small>`);
+  }
+  return `<div class="stl-reprice">${lines.join('')}</div>`;
+}
+
 function stockTimelineHtml(data, filter = 'all') {
   const sources = data?.sources || {};
   const all = Array.isArray(data?.items) ? data.items : [];
+  const repriceMap = data?.repriceById || null;
   // '전체'는 최근 뉴스 10건 + 최근 공시 4건을 날짜순으로 섞는다 — 뉴스가 많은 날에도
   // 공시가 묻히지 않게. 필터를 고르면 그 종류를 전부 보여 준다.
   const items = filter === 'all'
@@ -41,9 +112,10 @@ function stockTimelineHtml(data, filter = 'all') {
         ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(row.title)}</a>`
         : escapeHtml(row.title);
       const meta = [row.time, row.source].filter(Boolean).map(escapeHtml).join(' · ');
+      const repriceCard = row.type === 'disclosure' ? _stockTimelineRepriceHtml(row, repriceMap) : '';
       return `<li class="stl-row stl-${escapeHtml(row.type)}">${dateHead}
         <span class="stl-type">${escapeHtml(STOCK_TIMELINE_TYPE_LABEL[row.type] || row.type)}</span>
-        <span class="stl-main">${title}${meta ? `<small>${meta}</small>` : ''}</span></li>`;
+        <span class="stl-main">${title}${meta ? `<small>${meta}</small>` : ''}${repriceCard}</span></li>`;
     }).join('')}</ol>`;
   } else if (allFailed) {
     body = '<p class="stl-empty">지금은 뉴스와 공시를 불러올 수 없습니다.</p>';
@@ -83,6 +155,25 @@ async function loadStockTimeline(code) {
   if (unsupported) { host.hidden = true; host.innerHTML = ''; return; }
   _stockTimelineData = data;
   host.innerHTML = stockTimelineHtml(data, _stockTimelineFilter);
+
+  if ((data?.items || []).some(_isTimelineRepriceRow)) {
+    try {
+      const rpData = await apiFetchJson(`/api/stocks/${encodeURIComponent(code)}/reprice`, {
+        errorMessage: '공시 재가격 정보를 불러오지 못했습니다.',
+      });
+      if (seq !== _stockTimelineSeq || !_stockTimelineData) return;
+      const byId = {};
+      for (const item of Array.isArray(rpData?.items) ? rpData.items : []) {
+        if (item && item.rcept_no && item.disclosure_type) byId[item.rcept_no] = item;
+      }
+      if (Object.keys(byId).length) {
+        _stockTimelineData = { ..._stockTimelineData, repriceById: byId };
+        host.innerHTML = stockTimelineHtml(_stockTimelineData, _stockTimelineFilter);
+      }
+    } catch (e) {
+      // 보조 재가격 조회 실패는 타임라인 본문을 가리지 않는다.
+    }
+  }
 }
 
 (function initStockTimeline() {

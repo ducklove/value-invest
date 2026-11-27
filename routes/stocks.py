@@ -163,6 +163,19 @@ async def stock_timeline(code: str, limit: int = Query(12, ge=1, le=40)):
     return await timeline.get_stock_timeline(code, limit)
 
 
+@router.get("/api/stocks/{code}/reprice")
+async def stock_reprice(code: str, request: Request, days: int = Query(90, ge=1, le=180)):
+    """종목 공시 재가격(최근 90일 주식소각결정·현금배당결정) — 로그인 시 보유 목표가 변화 포함."""
+    from services.portfolio import disclosure_reprice
+
+    user = await get_current_user(request)
+    return await disclosure_reprice.get_stock_reprice(
+        code,
+        google_sub=user["google_sub"] if user else None,
+        days=days,
+    )
+
+
 @router.get("/api/external/opportunities")
 async def external_opportunities(request: Request):
     """Public — 형제 도구 신호 기회 보드. 순위는 보유와 무관하고, 로그인하면 보유 표시용 코드를 함께 준다."""
