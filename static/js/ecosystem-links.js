@@ -30,7 +30,7 @@ function ecoTool(id) {
 }
 
 function ecoTheme() {
-  return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  return currentTheme();
 }
 
 // 형제 대시보드(허브 자신과 허브 내부 화면 제외) — labs '연결 대시보드' 카드 목록.

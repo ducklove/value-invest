@@ -31,22 +31,27 @@ let _bondCharts = [];  // [{ec, ro}] — 재렌더 시 dispose
 
 // 차트 색은 dashboard.css 의 CSS 토큰에서 소싱한다(다크 전환 시 재렌더로 갱신).
 // 토큰이 비어 있으면(jsdom·CSS 미로드) 폴백 hex 를 쓴다 — 폴백은 토큰 정의와 동일.
-// 토큰 읽기는 utils.js cssToken 단일 소스에 위임한다(D-07).
-function _mdCssColor(varName, fallback) {
-  return cssToken(varName, fallback);
-}
 function _bondCurveColors() {
   return {
-    KR: _mdCssColor('--chart-bond-kr', '#2563eb'),
-    US: _mdCssColor('--chart-bond-us', '#e11d48'),
-    JP: _mdCssColor('--chart-bond-jp', '#16a34a'),
+    KR: cssToken('--chart-bond-kr', '#2563eb'),
+    US: cssToken('--chart-bond-us', '#e11d48'),
+    JP: cssToken('--chart-bond-jp', '#16a34a'),
   };
 }
 function _bondBarColors() {
   return {
-    tenYear: _mdCssColor('--chart-bond-bar', '#2563eb'),
-    base: _mdCssColor('--chart-bond-base', '#f97316'),
+    tenYear: cssToken('--chart-bond-bar', '#2563eb'),
+    base: cssToken('--chart-bond-base', '#f97316'),
   };
+}
+
+function _mdDirClass(direction) {
+  return direction === 'up' ? 'md-up' : (direction === 'down' ? 'md-down' : 'md-flat');
+}
+
+function _mdSignClass(value) {
+  const n = toFiniteNumber(value);
+  return n === null || n === 0 ? 'md-flat' : (n > 0 ? 'md-up' : 'md-down');
 }
 
 function _mdChange(d) {
@@ -54,7 +59,7 @@ function _mdChange(d) {
   const rawPct = String(d.change_pct || '').replace(/[-+%]/g, '');
   const isDown = d.direction === 'down';
   const isUp = d.direction === 'up';
-  const cls = isDown ? 'md-down' : (isUp ? 'md-up' : 'md-flat');
+  const cls = _mdDirClass(d.direction);
   const sign = isDown ? '-' : (isUp ? '+' : '');
   const chgVal = d.change ? `${sign}${String(d.change)}` : '';
   const chgPct = rawPct ? `(${sign}${rawPct}%)` : '';
@@ -89,17 +94,13 @@ const MD_HERO_CATEGORIES = ['국내 지수'];
 // hero + 국채 live in main; everything else goes to the rail.
 const MD_MAIN_CATEGORIES = [];
 
-function _mdCurrentTheme() {
-  return isDarkTheme() ? 'dark' : 'light';  // utils.js 단일 판정(D-07)
-}
-
 function _mdIndexFrameBaseUrl() {
   const tool = typeof ecoTool === 'function' ? ecoTool('index-popup') : null;
   const url = tool ? String(tool.url || '') : '';
   return /^https?:\/\//.test(url) ? url.replace(/\/+$/, '') + '/' : MD_INDEX_FRAME_BASE_URL;
 }
 
-function _mdIndexFrameUrl(index, theme = _mdCurrentTheme(), period = MD_INDEX_FRAME_DEFAULT_PERIOD) {
+function _mdIndexFrameUrl(index, theme = currentTheme(), period = MD_INDEX_FRAME_DEFAULT_PERIOD) {
   const params = new URLSearchParams({ index, theme, period, headless: '1' });
   return `${_mdIndexFrameBaseUrl()}?${params.toString()}`;
 }
@@ -122,7 +123,7 @@ function syncMarketDashboardFrameTheme() {
     if (typeof ecoPostFrameTheme === 'function' && ecoPostFrameTheme(frame)) return;
     const index = frame.dataset.mdFrameIndex;
     const period = frame.dataset.mdFramePeriod || MD_INDEX_FRAME_DEFAULT_PERIOD;
-    if (index) frame.src = _mdIndexFrameUrl(index, _mdCurrentTheme(), period);
+    if (index) frame.src = _mdIndexFrameUrl(index, currentTheme(), period);
   });
 }
 
@@ -211,7 +212,7 @@ function _cardFlowHtml(flow) {
   const actors = [['individual', '개인'], ['foreign', '외국인'], ['institution', '기관']];
   const rows = actors.map(([k, name]) => {
     const d = flow[k] || {};
-    const cls = d.direction === 'up' ? 'md-up' : (d.direction === 'down' ? 'md-down' : 'md-flat');
+    const cls = _mdDirClass(d.direction);
     return `<div class="cf-row"><span class="cf-actor">${name}</span>`
       + `<span class="cf-val ${cls}">${escapeHtml(String(d.value || '-'))}</span></div>`;
   }).join('');
@@ -277,7 +278,7 @@ function _mdKospiFuturesSectionHtml() {
   return '<section class="md-section md-kospi-futures-section" data-md-cat="야간선물">'
     + '<h3 class="md-section-title">야간선물</h3>'
     + '<div class="md-kospi-futures-frame-wrap">'
-    + `<iframe class="md-kospi-futures-frame" src="${escapeHtml(_mdIndexFrameUrl(index, _mdCurrentTheme(), period))}" `
+    + `<iframe class="md-kospi-futures-frame" src="${escapeHtml(_mdIndexFrameUrl(index, currentTheme(), period))}" `
     + `data-md-frame-index="${escapeHtml(index)}" data-vc-tool="index-popup" `
     + `data-md-frame-period="${escapeHtml(period)}" `
     + 'title="야간선물 실시간 그래프" loading="eager" referrerpolicy="no-referrer"></iframe>'
@@ -594,12 +595,6 @@ function _hlStopStream() {
 
 // --- 국채 (yield curve + 국가별 10년물 비교) ---
 
-function _bondVal(d) {
-  if (!d || d.value == null || d.value === '') return null;
-  const n = Number(String(d.value).replace(/,/g, ''));
-  return isFinite(n) ? n : null;
-}
-
 // 전일대비 금리 변동(%p, 부호는 direction). 값이 없으면 null.
 function _bondChg(d) {
   if (!d || d.change == null || d.change === '') return null;
@@ -629,7 +624,7 @@ function _mdBondCurve(codes, catalog, dataMap) {
     .filter((c) => (catalog[c] || {}).country === country && (catalog[c] || {}).maturity != null)
     .map((c) => ({
       m: catalog[c].maturity,
-      v: _bondVal(dataMap ? dataMap[c] : null),
+      v: _hlParseNum(dataMap?.[c]?.value),
       chg: _bondChg(dataMap ? dataMap[c] : null),
     }))
     .filter((x) => x.v != null)
@@ -659,7 +654,7 @@ function _mdBondCountries(codes, catalog, dataMap) {
   const policyByCountry = new Map(
     codes
       .filter((c) => (catalog[c] || {}).maturity === -1)
-      .map((c) => [(catalog[c] || {}).country, _bondVal(dataMap ? dataMap[c] : null)])
+      .map((c) => [(catalog[c] || {}).country, _hlParseNum(dataMap?.[c]?.value)])
       .filter((x) => x[0] && x[1] != null)
   );
   return codes
@@ -667,7 +662,7 @@ function _mdBondCountries(codes, catalog, dataMap) {
     .map((c) => ({
       country: catalog[c].country,
       name: BOND_COUNTRY_NAMES[catalog[c].country] || catalog[c].country,
-      value: _bondVal(dataMap ? dataMap[c] : null),
+      value: _hlParseNum(dataMap?.[c]?.value),
       baseValue: policyByCountry.has(catalog[c].country) ? policyByCountry.get(catalog[c].country) : null,
       changePct: _bondChangePctText(dataMap ? dataMap[c] : null),
     }))
@@ -682,7 +677,7 @@ function _bondCurveTableHtml(curve) {
   const chgCell = (c) => {
     if (c == null || !isFinite(c)) return '<td class="bt-chg">-</td>';
     const bp = Number((c * 100).toFixed(0));
-    const cls = bp > 0 ? 'md-up' : (bp < 0 ? 'md-down' : 'md-flat');
+    const cls = _mdSignClass(bp);
     return `<td class="bt-chg ${cls}">${bp > 0 ? '+' : ''}${bp}bp</td>`;
   };
   const rows = curve.labels.map((lab, i) =>
@@ -1050,7 +1045,7 @@ function _mvRenderRows(root, items) {
   }
   const showMetric = _mvKind === 'market_cap' || _mvKind === 'volume';
   body.innerHTML = items.map((it) => {
-    const dirCls = it.direction === 'up' ? 'md-up' : (it.direction === 'down' ? 'md-down' : 'md-flat');
+    const dirCls = _mdDirClass(it.direction);
     const metric = showMetric && it.metric
       ? `<span class="mv-metric">${escapeHtml(String(it.metric))}</span>` : '';
     return `<button class="mv-row" data-code="${escapeHtml(String(it.code || ''))}">`
@@ -1079,7 +1074,7 @@ function _secRenderRows(root, items) {
     return;
   }
   const rows = items.map((it) => {
-    const dirCls = it.direction === 'up' ? 'md-up' : (it.direction === 'down' ? 'md-down' : 'md-flat');
+    const dirCls = _mdDirClass(it.direction);
     return `<div class="sec-row">`
       + `<span class="sec-name">${escapeHtml(String(it.name || ''))}</span>`
       + `<span class="sec-chg ${dirCls}">${escapeHtml(String(it.change_pct || ''))}</span></div>`;
@@ -1123,7 +1118,7 @@ function _extSafeUrl(url) {
 function _withTheme(url) {
   const u = String(url || '');
   if (!/^https?:\/\//.test(u)) return u;
-  const theme = _mdCurrentTheme();
+  const theme = currentTheme();
   const hashAt = u.indexOf('#');
   const base = hashAt < 0 ? u : u.slice(0, hashAt);
   const hash = hashAt < 0 ? '' : u.slice(hashAt);
@@ -1153,13 +1148,18 @@ function _extStockHref(toolId, baseUrl, code) {
   return path ? baseUrl + path : baseUrl;
 }
 
+function _extRowHtml(href, name, valText, valCls = '') {
+  const clsAttr = valCls ? ` ${valCls}` : '';
+  return `<a class="ext-row" href="${escapeHtml(_extHref(href))}" target="_blank" rel="noopener noreferrer">`
+    + `<span class="ext-name">${escapeHtml(String(name || ''))}</span>`
+    + `<span class="ext-val${clsAttr}">${escapeHtml(valText)}</span></a>`;
+}
+
 function _extLinkRows(rows, valKey, baseUrl, stockToolId) {
   return (rows || []).map((r) => {
     // 종목 딥링크는 stockToolId 로 지정한 카드만(지주사). 그 외엔 도구 홈으로.
     const href = stockToolId && r.code ? _extStockHref(stockToolId, baseUrl, r.code) : baseUrl;
-    return `<a class="ext-row" href="${escapeHtml(_extHref(href))}" target="_blank" rel="noopener noreferrer">`
-      + `<span class="ext-name">${escapeHtml(String(r.name || r.code || ''))}</span>`
-      + `<span class="ext-val">${escapeHtml(_extPct(r[valKey]))}</span></a>`;
+    return _extRowHtml(href, r.name || r.code, _extPct(r[valKey]));
   }).join('');
 }
 
@@ -1167,11 +1167,9 @@ function _extSpacRows(rows, baseUrl) {
   // 스팩은 현재가(원)를 그대로 보여준다(저가순). spac-hunter 는 ?code= deep-link 지원.
   return (rows || []).map((r) => {
     const href = _extStockHref('spac-hunter', baseUrl, r.code);
-    const n = Number(r.currentPrice);
-    const price = (r.currentPrice != null && isFinite(n)) ? n.toLocaleString() : '-';
-    return `<a class="ext-row" href="${escapeHtml(_extHref(href))}" target="_blank" rel="noopener noreferrer">`
-      + `<span class="ext-name">${escapeHtml(String(r.name || r.code || ''))}</span>`
-      + `<span class="ext-val">${escapeHtml(price)}</span></a>`;
+    const n = toFiniteNumber(r.currentPrice);
+    const price = n !== null ? fmtNum(n) : '-';
+    return _extRowHtml(href, r.name || r.code, price);
   }).join('');
 }
 
@@ -1189,13 +1187,10 @@ const NPS_TARGET_ALLOC = {
 function _extAllocRows(classes, url) {
   // 자산배분 행은 종목 deep-link이 아니라 도구 홈으로(테마 포함).
   // 값 = 추정 현재 비중, 괄호 = 목표 비중.
-  const href = escapeHtml(_extHref(url));
   return (classes || []).map((c) => {
     const target = c.target != null ? c.target : NPS_TARGET_ALLOC[c.key];
     const valTxt = _extPct(c.pct) + (target != null ? ` (${_extPct(target)})` : '');
-    return `<a class="ext-row" href="${href}" target="_blank" rel="noopener noreferrer">`
-      + `<span class="ext-name">${escapeHtml(String(c.label || c.key || ''))}</span>`
-      + `<span class="ext-val">${escapeHtml(valTxt)}</span></a>`;
+    return _extRowHtml(url, c.label || c.key, valTxt);
   }).join('');
 }
 
@@ -1241,13 +1236,9 @@ function _extRender(root, data) {
   }
   const g = data && data.goldGap;
   if (g && (g.assets || []).length) {
-    const rows = g.assets.map((a) => {
-      const n = Number(a.gap);
-      const cls = isFinite(n) ? (n > 0 ? 'md-up' : (n < 0 ? 'md-down' : 'md-flat')) : 'md-flat';
-      return `<a class="ext-row" href="${escapeHtml(_extHref(a.link || g.url))}" target="_blank" rel="noopener noreferrer">`
-        + `<span class="ext-name">${escapeHtml(String(a.label || a.key || ''))}</span>`
-        + `<span class="ext-val ${cls}">${escapeHtml(_extPct(a.gap, true))}</span></a>`;
-    }).join('');
+    const rows = g.assets.map((a) =>
+      _extRowHtml(a.link || g.url, a.label || a.key, _extPct(a.gap, true), _mdSignClass(a.gap))
+    ).join('');
     cards.push(_extCard('김치프리미엄', g.url, '국내가 vs 국제가', rows, g));
   }
   const goldResearch = getIntegrationConfig('allAboutGold');
@@ -1258,25 +1249,16 @@ function _extRender(root, data) {
       ['금/은 · 비트코인/금', '상대가치 추이', 'ratios'],
       ['채굴량 · 국가별 보유량', '공급과 수요', 'supply'],
       ['금 투자 방법', 'KRX 현물 비교', 'investing'],
-    ].map(([name, detail, section]) =>
-      `<a class="ext-row" href="${escapeHtml(_extHref(base + '#' + section))}" target="_blank" rel="noopener noreferrer">`
-      + `<span class="ext-name">${escapeHtml(name)}</span>`
-      + `<span class="ext-val">${escapeHtml(detail)}</span></a>`
-    ).join('');
+    ].map(([name, detail, section]) => _extRowHtml(base + '#' + section, name, detail)).join('');
     cards.push(_extCard('금 투자 리서치', base, 'All About Gold · finance-pi 데이터', rows));
   }
   const ep = data && data.etfPicks;
   if (ep && (ep.top || []).length) {
     // AIYN 점수 TOP 100 중 날마다(서버, KST 날짜 시드) 5개 추첨.
     // 값 = 일간 등락률(서버가 실시간 시세로 별도 조회) — 방향 색상 포함.
-    const rows = ep.top.map((r) => {
-      const n = Number(r.changePct);
-      const has = r.changePct != null && isFinite(n);
-      const cls = has ? (n > 0 ? 'md-up' : (n < 0 ? 'md-down' : 'md-flat')) : 'md-flat';
-      return `<a class="ext-row" href="${escapeHtml(_extHref(r.link || ep.url))}" target="_blank" rel="noopener noreferrer">`
-        + `<span class="ext-name">${escapeHtml(String(r.name || r.code || ''))}</span>`
-        + `<span class="ext-val ${cls}">${escapeHtml(_extPct(r.changePct, true))}</span></a>`;
-    }).join('');
+    const rows = ep.top.map((r) =>
+      _extRowHtml(r.link || ep.url, r.name || r.code, _extPct(r.changePct, true), _mdSignClass(r.changePct))
+    ).join('');
     cards.push(_extCard('오늘의 추천 ETF', ep.url, 'AIYN TOP 100 중 오늘의 5선', rows, ep));
   }
   const nps = data && data.nps;
@@ -1374,8 +1356,7 @@ function _newsRender(root, items) {
     const meta = [it.source, it.date].filter(Boolean).map((s) => escapeHtml(String(s))).join(' · ');
     const summ = it.summary
       ? `<div class="news-summary">${escapeHtml(String(it.summary))}</div>` : '';
-    const url = String(it.url || '');
-    const safeUrl = /^https?:\/\//.test(url) ? url : '#';
+    const safeUrl = _extSafeUrl(it.url);
     return `<a class="news-item" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">`
       + `<div class="news-title">${escapeHtml(String(it.title || ''))}</div>`
       + summ

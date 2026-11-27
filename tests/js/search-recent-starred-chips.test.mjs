@@ -15,6 +15,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..", "..");
 const read = (...parts) => readFileSync(join(root, ...parts), "utf8");
 
+const UTILS_SRC = read("static", "js", "utils.js");
 const SEARCH_SRC = read("static", "js", "search.js");
 
 function appendScript(w, source) {
@@ -34,12 +35,11 @@ function buildDom({ compactMobile, currentUser = null, recentListItems = [], sta
     url: "https://app.example.com/analysis",
   });
   const { window: w } = dom;
-  // Normally declared once in utils.js (loaded well before search.js in index.html).
-  w.searchTimeout = null;
-  w.selectedIdx = -1;
+  appendScript(w, UTILS_SRC);
+  w.__initUser = currentUser;
+  w.__initRecent = recentListItems;
+  w.eval("currentUser = window.__initUser; recentListItems = window.__initRecent;");
   w.isCompactMobileViewport = () => compactMobile;
-  w.currentUser = currentUser;
-  w.recentListItems = recentListItems;
   w.trackEvent = () => {};
   const analyzeCalls = [];
   w.analyzeStock = (code) => analyzeCalls.push(code);

@@ -209,7 +209,7 @@ async function pfLoadDividendCalendarPanel({ force = false } = {}) {
   const el = _pfDivCalContentEl();
   if (!el) return;
   const key = JSON.stringify([typeof currentUser !== 'undefined' ? currentUser?.google_sub : null,
-    new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }),
+    kstTodayYmd(),
     (PfStore.items || []).map(item => [item.stock_code, item.quantity])]);
   if (!force && _pfDivCalData && _pfDivCalCacheKey === key && Date.now() - _pfDivCalLoadedAt < 300000) {
     _pfRenderDividendCalendar(_pfDivCalData);

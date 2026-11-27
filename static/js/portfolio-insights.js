@@ -69,49 +69,43 @@ async function pfOpenAssetInsight(stockCode) {
   }
 }
 
-function _insightNum(value) {
-  if (value === null || value === undefined || value === '') return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
 function _fmtInsightPct(value, signed = true) {
-  const n = _insightNum(value);
+  const n = toFiniteNumber(value);
   return n === null ? '-' : fmtPct(n, signed);
 }
 
 function _fmtInsightSignedAmount(value, currency = '') {
-  const n = _insightNum(value);
+  const n = toFiniteNumber(value);
   if (n === null) return '-';
   const prefix = n > 0 ? '+' : '';
   return `${prefix}${_fmtInsightAmount(n, currency)}`;
 }
 
 function _fmtInsightAmount(value, currency = '') {
-  const n = _insightNum(value);
+  const n = toFiniteNumber(value);
   if (n === null) return '-';
   const cur = String(currency || '').toUpperCase();
   if (!cur || cur === 'KRW') return fmtKrw(Math.round(n));
   const digits = Math.abs(n) >= 100 ? 2 : 4;
-  return `${cur} ${n.toLocaleString(undefined, { maximumFractionDigits: digits })}`;
+  return `${cur} ${fmtNum(n, { maxDecimals: digits })}`;
 }
 
 function _fmtInsightPrice(value, currency = '') {
-  const n = _insightNum(value);
+  const n = toFiniteNumber(value);
   if (n === null) return '-';
   const cur = String(currency || '').toUpperCase();
-  if (!cur || cur === 'KRW') return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  return `${cur} ${n.toLocaleString(undefined, { maximumFractionDigits: 4 })}`;
+  if (!cur || cur === 'KRW') return fmtNum(n, { maxDecimals: 2 });
+  return `${cur} ${fmtNum(n, { maxDecimals: 4 })}`;
 }
 
 function _fmtInsightMultiple(value) {
-  const n = _insightNum(value);
+  const n = toFiniteNumber(value);
   if (n === null) return '-';
-  return `${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}x`;
+  return `${fmtNum(n, { maxDecimals: 2 })}x`;
 }
 
 function _insightClass(value) {
-  const n = _insightNum(value);
+  const n = toFiniteNumber(value);
   if (n === null) return '';
   return n > 0 ? 'positive' : n < 0 ? 'negative' : '';
 }
@@ -477,8 +471,8 @@ function _applyHoldingPayload(data, persist) {
   _HOLDING_CODES = new Set(codes);
   _HOLDING_META = meta;
   if (persist) {
-    localStorage.setItem('holdingCodes', JSON.stringify({ codes, ts: Date.now() }));
-    localStorage.setItem('holdingMeta', JSON.stringify({ meta, ts: Date.now() }));
+    safeStorageSet('holdingCodes', JSON.stringify({ codes, ts: Date.now() }));
+    safeStorageSet('holdingMeta', JSON.stringify({ meta, ts: Date.now() }));
   }
   return true;
 }
@@ -501,8 +495,8 @@ function _applyHoldingIntegrationConfig() {
 (function _refreshHoldingCodes() {
   const hasConfig = _applyHoldingIntegrationConfig();
   try {
-    const codeCache = JSON.parse(localStorage.getItem('holdingCodes') || '{}');
-    const metaCache = JSON.parse(localStorage.getItem('holdingMeta') || '{}');
+    const codeCache = JSON.parse(safeStorageGet('holdingCodes', '{}'));
+    const metaCache = JSON.parse(safeStorageGet('holdingMeta', '{}'));
     if (!hasConfig) {
       if (codeCache.codes) _HOLDING_CODES = new Set(codeCache.codes);
       if (metaCache.meta) _HOLDING_META = metaCache.meta;

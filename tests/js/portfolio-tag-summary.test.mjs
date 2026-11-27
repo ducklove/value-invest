@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const UTILS_SRC = readFileSync(join(__dirname, "..", "..", "static", "js", "utils.js"), "utf8");
 const SOURCES = ["portfolio-trends.js", "portfolio-popup-trends.js", "portfolio-tag-summary.js"]
   .map(file => readFileSync(join(__dirname, "..", "..", "static", "js", file), "utf8"));
 
@@ -17,6 +18,9 @@ function loadTagSummary() {
     url: "https://app.example.com/portfolio",
   });
   const { window } = dom;
+  const utilsScript = window.document.createElement("script");
+  utilsScript.textContent = UTILS_SRC;
+  window.document.body.appendChild(utilsScript);
   window.PfStore = {
     currency: { unit: "KRW" },
     items: [

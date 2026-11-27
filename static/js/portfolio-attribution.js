@@ -34,7 +34,7 @@ async function pfLoadAttribution() {
   const start = document.getElementById('pfAttributionStart');
   const end = document.getElementById('pfAttributionEnd');
   if (!content || !start || !end) return;
-  if (!end.value) end.value = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
+  if (!end.value) end.value = kstTodayYmd();
   if (!start.value) start.value = end.value.slice(0, 7) + '-01';
   const seq = ++_pfAttributionSeq;
   content.textContent = '수익 원인을 계산하고 있습니다…';

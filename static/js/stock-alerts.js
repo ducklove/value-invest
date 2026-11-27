@@ -8,29 +8,11 @@
 const StockAlerts = { code: null, name: '', alerts: [] };
 if (typeof window !== 'undefined') window.StockAlerts = StockAlerts;
 
-function saApi(path, options = {}) {
-  const init = { ...options };
-  if (options.body !== undefined) {
-    init.headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-  }
-  return apiFetch(`/api/notifications${path}`, init);
-}
-
-function saApiJson(path, options = {}) {
-  const init = { ...options };
-  if (options.body !== undefined) {
-    init.headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-  }
-  return apiFetchJson(`/api/notifications${path}`, init);
-}
-
 // 임계값(가격·등락률) 표기 — 공용 fmtNum 으로 위임하되, 빈값/숫자아님은 '-' 로
 // 막고 소수는 2자리 상한(정수면 자동으로 소수 없음)을 준다.
 function saFmtNum(value) {
-  if (value === null || value === undefined || value === '') return '-';
-  const n = Number(value);
-  if (!isFinite(n)) return '-';
-  return fmtNum(n, { maxDecimals: 2 });
+  const n = toFiniteNumber(value);
+  return n === null ? '-' : fmtNum(n, { maxDecimals: 2 });
 }
 
 function saFindAlert(type) {
@@ -83,7 +65,7 @@ function closeStockAlerts() {
 
 async function saLoadList() {
   try {
-    StockAlerts.alerts = await saApiJson(`/alerts?stock_code=${encodeURIComponent(StockAlerts.code)}`, { fallback: [] });
+    StockAlerts.alerts = await apiNotificationsFetchJson(`/alerts?stock_code=${encodeURIComponent(StockAlerts.code)}`, { fallback: [] });
   } catch (e) {
     StockAlerts.alerts = [];
   }
@@ -171,7 +153,7 @@ function saRenderList() {
 async function saCreate(extra) {
   const payload = { stock_code: StockAlerts.code, source: 'analysis', ...extra };
   try {
-    await saApiJson('/alerts', {
+    await apiNotificationsFetchJson('/alerts', {
       method: 'POST',
       body: JSON.stringify(payload),
       errorMessage: '설정 실패',
@@ -211,7 +193,7 @@ async function saSetFeedMode(type, mode) {
 
 async function saToggle(id, enabled) {
   try {
-    await saApi(`/alerts/${id}`, { method: 'PUT', body: JSON.stringify({ enabled }) });
+    await apiNotificationsFetch(`/alerts/${id}`, { method: 'PUT', body: JSON.stringify({ enabled }) });
   } finally {
     saLoadList();
   }
@@ -219,7 +201,7 @@ async function saToggle(id, enabled) {
 
 async function saDelete(id) {
   try {
-    await saApi(`/alerts/${id}`, { method: 'DELETE' });
+    await apiNotificationsFetch(`/alerts/${id}`, { method: 'DELETE' });
   } finally {
     saLoadList();
   }

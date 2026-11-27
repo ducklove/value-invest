@@ -331,7 +331,7 @@ function portfolioIntegrationHref(href) {
 
 function openIntegration(key, path = '', query = {}) {
   // 새 탭으로 열리는 연결 대시보드가 현재 앱 테마(라이트/다크)로 뜨도록 전달.
-  const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  const theme = currentTheme();
   const url = buildIntegrationUrl(key, path, { theme, ...query });
   if (!url) {
     showToast('Integration URL is not configured.', 'warning');
@@ -437,6 +437,19 @@ async function apiFetchJson(path, options = {}) {
     throw error;
   }
   return data;
+}
+
+function _withJsonContentType(options = {}) {
+  if (options.body === undefined) return options;
+  return { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } };
+}
+
+function apiNotificationsFetch(path, options = {}) {
+  return apiFetch(`/api/notifications${path}`, _withJsonContentType(options));
+}
+
+function apiNotificationsFetchJson(path, options = {}) {
+  return apiFetchJson(`/api/notifications${path}`, _withJsonContentType(options));
 }
 
 const MANAGED_MODAL_FOCUSABLE_SELECTOR = [
@@ -649,6 +662,26 @@ function reportApiError(error, context, options = {}) {
 // options.maxDecimals(정수)를 주면 소수 자릿수를 그 값으로 상한한다(하위호환:
 // 미지정이면 기존 toLocaleString 기본 동작). 종목 알림 임계값처럼 소수 2자리로
 // 잘라야 하는 화면 포맷터가 이 옵션으로 흡수된다.
+function toFiniteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function formatLocalYmd(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function kstTodayYmd(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  try {
+    return d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
+  } catch (_) {
+    return new Date(d.getTime() + 9 * 3600000).toISOString().slice(0, 10);
+  }
+}
+
 function fmtNum(n, options = {}) {
   if (n === null || n === undefined) return '-';
   const maxDecimals = options && options.maxDecimals;
@@ -747,7 +780,7 @@ function getReportCacheKey(stockCode) {
 
 function loadReportCache(stockCode) {
   try {
-    const raw = localStorage.getItem(getReportCacheKey(stockCode));
+    const raw = safeStorageGet(getReportCacheKey(stockCode));
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return null;
@@ -759,12 +792,10 @@ function loadReportCache(stockCode) {
 }
 
 function saveReportCache(stockCode, payload) {
-  try {
-    localStorage.setItem(getReportCacheKey(stockCode), JSON.stringify({
-      ...payload,
-      savedAt: Date.now(),
-    }));
-  } catch (e) { console.warn(e); }
+  safeStorageSet(getReportCacheKey(stockCode), JSON.stringify({
+    ...payload,
+    savedAt: Date.now(),
+  }));
 }
 
 function sameReport(a, b) {
@@ -857,7 +888,13 @@ function _hideChartLoading() {
   document.querySelectorAll('.chart-loading').forEach(el => el.remove());
 }
 
-function _loadScriptWithFallback(urls, globalName) {
+const ECHARTS_CDN_URLS = [
+  'https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/echarts/5.6.0/echarts.min.js',
+  'https://unpkg.com/echarts@5.6.0/dist/echarts.min.js',
+];
+
+function _loadAssetWithFallback(urls, buildEl, { globalName = null, rejectOnExhaust = false } = {}) {
   return new Promise((resolve, reject) => {
     let index = 0;
     const tryNext = () => {
@@ -866,80 +903,55 @@ function _loadScriptWithFallback(urls, globalName) {
         return;
       }
       if (index >= urls.length) {
-        reject(new Error(`Chart lib load failed: ${globalName || urls[0]}`));
+        if (rejectOnExhaust) reject(new Error(`Chart lib load failed: ${globalName || urls[0]}`));
+        else resolve();
         return;
       }
-      const script = document.createElement('script');
+      const el = buildEl(urls[index]);
       let settled = false;
       const cleanup = () => {
         settled = true;
         clearTimeout(timer);
       };
-      const timer = setTimeout(() => {
+      const fail = () => {
         if (settled) return;
         cleanup();
-        script.remove();
+        el.remove();
         index += 1;
         tryNext();
-      }, CHART_LIB_TIMEOUT_MS);
-      script.src = urls[index];
-      script.async = true;
-      script.onload = () => {
+      };
+      const timer = setTimeout(fail, CHART_LIB_TIMEOUT_MS);
+      el.onload = () => {
         if (settled) return;
         cleanup();
         resolve();
       };
-      script.onerror = () => {
-        if (settled) return;
-        cleanup();
-        script.remove();
-        index += 1;
-        tryNext();
-      };
-      document.head.appendChild(script);
+      el.onerror = fail;
+      document.head.appendChild(el);
     };
     tryNext();
   });
 }
 
+function _loadScriptWithFallback(urls, globalName) {
+  return _loadAssetWithFallback(
+    urls,
+    (url) => {
+      const script = document.createElement('script');
+      script.src = url;
+      script.async = true;
+      return script;
+    },
+    { globalName, rejectOnExhaust: true },
+  );
+}
+
 function _loadStylesheetWithFallback(urls) {
-  return new Promise(resolve => {
-    let index = 0;
-    const tryNext = () => {
-      if (index >= urls.length) {
-        resolve();
-        return;
-      }
-      const link = document.createElement('link');
-      let settled = false;
-      const cleanup = () => {
-        settled = true;
-        clearTimeout(timer);
-      };
-      const timer = setTimeout(() => {
-        if (settled) return;
-        cleanup();
-        link.remove();
-        index += 1;
-        tryNext();
-      }, CHART_LIB_TIMEOUT_MS);
-      link.rel = 'stylesheet';
-      link.href = urls[index];
-      link.onload = () => {
-        if (settled) return;
-        cleanup();
-        resolve();
-      };
-      link.onerror = () => {
-        if (settled) return;
-        cleanup();
-        link.remove();
-        index += 1;
-        tryNext();
-      };
-      document.head.appendChild(link);
-    };
-    tryNext();
+  return _loadAssetWithFallback(urls, (url) => {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = url;
+    return link;
   });
 }
 
@@ -963,11 +975,7 @@ function loadChartLib(options = {}) {
         'https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js',
         'https://unpkg.com/uplot@1.6.31/dist/uPlot.iife.min.js',
       ]
-    : [
-        'https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js',
-        'https://cdnjs.cloudflare.com/ajax/libs/echarts/5.6.0/echarts.min.js',
-        'https://unpkg.com/echarts@5.6.0/dist/echarts.min.js',
-      ];
+    : ECHARTS_CDN_URLS;
   const promises = [_loadScriptWithFallback(scriptUrls, globalName)];
   if (USE_UPLOT) {
     promises.push(_loadStylesheetWithFallback([
@@ -989,20 +997,6 @@ function loadChartLib(options = {}) {
     });
   return _chartLibLoading;
 }
-function preloadChartLib() {
-  return loadChartLib({ silent: true }).catch(err => {
-    console.warn('Chart preload failed; will retry on demand.', err);
-  });
-}
-function scheduleChartPreload() {
-  if (_chartLibLoaded || _chartLibLoading) return;
-  const run = () => preloadChartLib();
-  if (typeof requestIdleCallback === 'function') {
-    requestIdleCallback(run, { timeout: 1500 });
-  } else {
-    setTimeout(run, 800);
-  }
-}
 // echarts 전용 로더. 모바일(USE_UPLOT)에서 밸류에이션 차트는 uPlot 을 쓰지만,
 // 증권사 목표가 차트는 echarts API(scatter+legend+tooltip+클릭)에 의존하므로
 // loadChartLib 와 별개로 echarts 를 보장 로드한다.
@@ -1010,17 +1004,11 @@ let _echartsLoading = null;
 function loadEcharts() {
   if (typeof window !== 'undefined' && window.echarts) return Promise.resolve();
   if (_echartsLoading) return _echartsLoading;
-  _echartsLoading = _loadScriptWithFallback([
-    'https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js',
-    'https://cdnjs.cloudflare.com/ajax/libs/echarts/5.6.0/echarts.min.js',
-    'https://unpkg.com/echarts@5.6.0/dist/echarts.min.js',
-  ], 'echarts')
+  _echartsLoading = _loadScriptWithFallback(ECHARTS_CDN_URLS, 'echarts')
     .then(() => { if (!window.echarts) throw new Error('echarts load failed'); })
     .catch(err => { _echartsLoading = null; throw err; });
   return _echartsLoading;
 }
-// Backwards compat alias
-const loadECharts = loadChartLib;
 
 /**
  * Map a return % to a blue-red color.
@@ -1088,8 +1076,8 @@ function createLineChart(container, opts) {
 function _createEChartsChart(container, opts) {
   const { labels, values, color = '#3b82f6', smooth = 0.3, fill = true,
           yMin, tooltipPrefix = '', yFormatter, tooltipFormatter, connectNulls = false, dataZoom = false } = opts;
-  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
-  const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
+  const textColor = cssToken('--text-secondary', '#888');
+  const gridColor = cssToken('--border', '#333');
 
   const ec = echarts.init(container);
   const zoomComponents = dataZoom ? [
@@ -1159,8 +1147,8 @@ function _createUPlotChart(container, opts) {
   const yData = values.map(v => v === null ? null : v);
   const data = [xData, yData];
 
-  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
-  const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#e0e0e0';
+  const textColor = cssToken('--text-secondary', '#888');
+  const gridColor = cssToken('--border', '#e0e0e0');
 
   const uOpts = {
     width: w,
@@ -1349,6 +1337,10 @@ function cssToken(name, fallback = '') {
 // 판정도 그와 똑같이 속성만 본다.
 function isDarkTheme() {
   return document.documentElement.getAttribute('data-theme') === 'dark';
+}
+
+function currentTheme() {
+  return isDarkTheme() ? 'dark' : 'light';
 }
 
 // ── 가시성 인지 폴링 (F1-F3) ─────────────────────────────────────────

@@ -45,6 +45,9 @@ function loadHeatDom() {
   Object.defineProperty(w.document, "visibilityState", { value: "visible", configurable: true });
   Object.defineProperty(w.document, "hidden", { value: false, configurable: true });
   // utils.js 는 앱 부팅 side effect 가 많아 실제로 쓰는 함수만 이식한다.
+  appendScript(w, extractFn("_vcStorageArea"));
+  appendScript(w, extractFn("safeStorageGet"));
+  appendScript(w, extractFn("safeStorageSet"));
   appendScript(w, extractFn("fmtPct"));
   appendScript(w, extractFn("quoteSnapshotDateValue"));
   appendScript(w, STORE_SRC);

@@ -19,20 +19,11 @@ function pfActionBoardIsEnabled() {
 }
 
 function _pfActionBoardReadEnabled() {
-  try {
-    return localStorage.getItem(PF_ACTION_BOARD_ENABLED_KEY) === '1';
-  } catch (e) {
-    console.warn(e);
-    return false;
-  }
+  return safeStorageGet(PF_ACTION_BOARD_ENABLED_KEY) === '1';
 }
 
 function _pfActionBoardPersistEnabled(enabled) {
-  try {
-    localStorage.setItem(PF_ACTION_BOARD_ENABLED_KEY, enabled ? '1' : '0');
-  } catch (e) {
-    console.warn(e);
-  }
+  safeStorageSet(PF_ACTION_BOARD_ENABLED_KEY, enabled ? '1' : '0');
 }
 
 function _pfActionBoardSetToggleState(enabled) {

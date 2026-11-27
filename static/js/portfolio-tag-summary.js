@@ -3,20 +3,14 @@ function _pfNormalizeTagKey(tag) {
   return String(tag || '').trim().replace(/^#/, '').toLowerCase();
 }
 
-function _pfNumberOrNull(value) {
-  if (value == null || value === '') return null;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : null;
-}
-
 function _pfTagSummaryRows() {
   return PfStore.items.map(item => {
     const q = item.quote || {};
     const price = quotePriceOrNull(q);
-    const qty = _pfNumberOrNull(item.quantity) ?? 0;
-    const rawChange = price !== null ? _pfNumberOrNull(q.change) : null;
+    const qty = toFiniteNumber(item.quantity) ?? 0;
+    const rawChange = price !== null ? toFiniteNumber(q.change) : null;
     const change = rawChange ?? 0;
-    const changePct = price !== null ? _pfNumberOrNull(q.change_pct) : null;
+    const changePct = price !== null ? toFiniteNumber(q.change_pct) : null;
     const marketValue = price !== null ? qty * price : null;
     const dailyPnl = price !== null ? qty * change : null;
     const baseValue = marketValue !== null && dailyPnl !== null ? marketValue - dailyPnl : null;
@@ -65,7 +59,7 @@ function _pfTagSummaryCard(label, value, sub, cls = '') {
 }
 
 function _pfTagSummaryTileColor(changePct) {
-  const value = _pfNumberOrNull(changePct);
+  const value = toFiniteNumber(changePct);
   if (value === null) return 'rgba(148, 163, 184, 0.16)';
   const clamped = Math.max(-6, Math.min(6, value));
   const alpha = 0.10 + (Math.abs(clamped) / 6) * 0.30;

@@ -293,7 +293,7 @@ async function renderTreemap() {
     return;
   }
 
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const isDark = isDarkTheme();
 
   // Build treemap data grouped by pfGetGroup (exclude negative qty)
   const groups = {};
@@ -408,13 +408,11 @@ async function renderTreemap() {
     _treemapResizeObserver = ro;
   }
 
-  const _fmtPct = v => v !== null && v !== undefined ? (v > 0 ? '+' : '') + v.toFixed(2) + '%' : '-';
-
   ec.setOption({
     tooltip: {
       formatter(info) {
         const d = info.data;
-        const cpStr = _fmtPct(d.changePct);
+        const cpStr = fmtPct(d.changePct);
         const wStr = d.weight !== undefined ? d.weight.toFixed(1) + '%' : '';
         const val = Number(info.value).toLocaleString();
         return `<strong>${escapeHtml(info.name)}</strong><br/>평가: ${val}<br/>비중: ${wStr}<br/>일간: ${cpStr}`;

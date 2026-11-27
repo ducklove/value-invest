@@ -15,6 +15,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..", "..");
 const read = (...parts) => readFileSync(join(root, ...parts), "utf8");
 
+const UTILS_SRC = read("static", "js", "utils.js");
 const SEARCH_SRC = read("static", "js", "search.js");
 
 function appendScript(w, source) {
@@ -36,16 +37,11 @@ function buildDom({ results = [] } = {}) {
     url: "https://app.example.com/analysis",
   });
   const { window: w } = dom;
-  // utils.js/auth.js 등이 평소 제공하는 전역들(칩 테스트와 동일 패턴).
-  w.searchTimeout = null;
-  w.selectedIdx = -1;
+  appendScript(w, UTILS_SRC);
   w.isCompactMobileViewport = () => false;
-  w.currentUser = null;
-  w.recentListItems = [];
   w.trackEvent = () => {};
   w.switchView = () => {};
   w.requireApiConfiguration = () => {};
-  w.escapeHtml = (s) => String(s);
   const analyzeCalls = [];
   w.analyzeStock = (code) => analyzeCalls.push(code);
   w.apiFetchJson = async () => results;

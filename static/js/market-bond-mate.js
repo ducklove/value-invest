@@ -285,7 +285,7 @@ function bondMateEmbedSrc(view) {
   const base = bondMateBaseUrl();
   const embed = (cfg && cfg.embedUrl) || (base ? base + '/?embed=' : '');
   if (!embed) return '';
-  const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  const theme = currentTheme();
   return embed + encodeURIComponent(view || 'overview') + '&theme=' + theme + '&_=' + Date.now();
 }
 

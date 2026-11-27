@@ -10,10 +10,8 @@ function _pfDistributionKey() {
 
 function _pfDistributionPersist(value) {
   _pfDistribution.pending = value;
-  try {
-    if (value) sessionStorage.setItem(_pfDistributionKey(), JSON.stringify(value));
-    else sessionStorage.removeItem(_pfDistributionKey());
-  } catch { /* 현재 화면에서는 요청 번호를 유지한다. */ }
+  if (value) safeStorageSet(_pfDistributionKey(), JSON.stringify(value), 'session');
+  else safeStorageRemove(_pfDistributionKey(), 'session');
 }
 
 function _pfDistributionInvalidate() {
@@ -134,7 +132,7 @@ async function pfOpenDistribution() {
   _pfDistribution.payload = null;
   _pfDistributionEl('Preview').textContent = '';
   _pfDistributionEl('Fields').disabled = false;
-  try { _pfDistribution.pending = JSON.parse(sessionStorage.getItem(_pfDistributionKey()) || 'null'); } catch { /* 현재 화면의 요청 유지 */ }
+  try { _pfDistribution.pending = JSON.parse(safeStorageGet(_pfDistributionKey(), 'null', 'session')); } catch { /* 현재 화면의 요청 유지 */ }
   if (_pfDistribution.pending) {
     const p = _pfDistribution.pending;
     for (const [id, key] of [['Currency', 'currency'], ['Amount', 'amount'], ['Fx', 'fx_rate'], ['Memo', 'memo']]) _pfDistributionEl(id).value = p[key] ?? '';

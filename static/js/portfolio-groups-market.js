@@ -81,7 +81,7 @@ function _drawGroupPie(stats, grandMV) {
   slices.forEach(s => {
     ctx.fillStyle = s.color;
     ctx.fillRect(lx, ly - 8, 8, 8);
-    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#333';
+    ctx.fillStyle = cssToken('--text', '#333');
     ctx.textAlign = 'left';
     const label = s.name.length > 4 ? s.name.slice(0, 4) + '..' : s.name;
     ctx.fillText(label, lx + 10, ly);
@@ -286,14 +286,14 @@ function _mbNormalizeCodes(codes) {
 
 function _mbGetCodes() {
   try {
-    const value = JSON.parse(localStorage.getItem(MB_LS_KEY));
+    const value = JSON.parse(safeStorageGet(MB_LS_KEY));
     if (Array.isArray(value)) return _mbNormalizeCodes(value);
   } catch (e) { console.warn(e); }
   return null;
 }
 function _mbSaveCodes() {
   mbCodes = _mbNormalizeCodes(mbCodes);
-  localStorage.setItem(MB_LS_KEY, JSON.stringify(mbCodes));
+  safeStorageSet(MB_LS_KEY, JSON.stringify(mbCodes));
   // localStorage 가 1차 저장소 — 서버 동기화는 best-effort 라 조용히 로그만.
   if (currentUser) apiFetchJson('/api/settings/market-bar', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codes: mbCodes }), fallback: null }).catch(e => reportApiError(e, '시장바 설정 저장', { silent: true }));
 }
@@ -303,7 +303,7 @@ async function _mbLoadCodes() {
       const d = await apiFetchJson('/api/settings/market-bar', { fallback: null });
       if (d?.codes) {
         mbCodes = _mbNormalizeCodes(d.codes);
-        localStorage.setItem(MB_LS_KEY, JSON.stringify(mbCodes));
+        safeStorageSet(MB_LS_KEY, JSON.stringify(mbCodes));
         return;
       }
     } catch (e) { console.warn(e); }
@@ -353,14 +353,10 @@ function _mbApplyIndicators(dataMap) {
         const badge = document.createElement('span'); badge.className = 'mi-stale'; badge.textContent = '지연';
         label.appendChild(badge);
       }
-      label.title = _mbIndicatorTitle(row);
+      label.title = marketIndicatorTitle(row);
       if (value) value.title = label.title;
     }
   });
-}
-
-function _mbIndicatorTitle(d) {
-  return marketIndicatorTitle(d);
 }
 
 function _mbRenderBar(dataMap) {
@@ -372,14 +368,7 @@ function _mbRenderBar(dataMap) {
     const cat = mbCatalog[code];
     const label = cat ? cat.label : code;
     const d = dataMap ? dataMap[code] : null;
-    const stamp = d?.as_of || d?.fetched_at;
-    const parsedStamp = stamp ? new Date(stamp) : null;
-    const timeLabel = parsedStamp && !Number.isNaN(parsedStamp.getTime())
-      ? parsedStamp.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) + ' KST' : '';
-    const details = [d?._stale ? '갱신 지연 · 이전 값 표시 중' : d?._degraded ? '주 공급원 장애 · Yahoo 대체 시세 사용' : '',
-      timeLabel ? `${d?.as_of ? '시세 기준' : '마지막 수집'}: ${timeLabel}` : '',
-      Number(d?.delay_minutes) > 0 ? `제공 시세 ${Number(d.delay_minutes)}분 지연` : '',
-      d?.update_mode === 'polling' ? `${d.refresh_seconds}초 갱신` : ''].filter(Boolean).join(' · ');
+    const details = marketIndicatorTitle(d);
     const title = details ? ` title="${escapeHtml(details)}"` : '';
     const staleBadge = d?._stale ? ' <span class="mi-stale" aria-label="갱신 지연">지연</span>'
       : d?._degraded ? ' <span class="mi-stale" aria-label="대체 시세">대체</span>' : '';

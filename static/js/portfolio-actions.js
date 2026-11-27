@@ -607,19 +607,14 @@ function _targetFormulaUses(item, variableName) {
 
 function _targetFormulaVariables(item, allItems) {
   const metrics = item.target_metrics || {};
-  const numberOrNull = (v) => {
-    if (v === null || v === undefined || v === '') return null;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  };
   const variables = {
-    BPS: numberOrNull(metrics.bps),
-    EPS: numberOrNull(metrics.eps),
-    DPS: numberOrNull(metrics.dps ?? item.trailingDps),
+    BPS: toFiniteNumber(metrics.bps),
+    EPS: toFiniteNumber(metrics.eps),
+    DPS: toFiniteNumber(metrics.dps ?? item.trailingDps),
   };
   variables['\ubcf4\uc720\uc9c0\ubd84'] = _holdingValueForItem(item, allItems);
   variables['\ubcf8\uc8fc\uac00\uaca9'] = _isPreferredStock(item.stock_code) ? _preferredCommonPriceForItem(item, allItems) : null;
-  variables['\ub9e4\uc785\uac00'] = numberOrNull(item.avgPriceKrw ?? item.avg_price_krw ?? item.avg_price);
+  variables['\ub9e4\uc785\uac00'] = toFiniteNumber(item.avgPriceKrw ?? item.avg_price_krw ?? item.avg_price);
   return variables;
 }
 

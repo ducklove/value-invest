@@ -5,9 +5,7 @@
   const DEFAULT_GRID = { left: 56, right: 14, top: 16, bottom: 52 };
 
   function toNumber(value) {
-    if (value === null || value === undefined || value === '' || value === '-') return null;
-    const n = Number(value);
-    return Number.isFinite(n) ? n : null;
+    return value === '-' ? null : toFiniteNumber(value);
   }
 
   function colorWithAlpha(color, alpha) {
@@ -29,10 +27,6 @@
     const parts = label.split('-');
     if (parts.length >= 2 && parts[0].length === 4) return `${parts[0]}-${parts[1]}`;
     return label;
-  }
-
-  function resolveThemeColor(name, fallback) {
-    return cssToken(name, fallback);  // utils.js 단일 소스(D-07)
   }
 
   class PortfolioCanvasChart {
@@ -323,8 +317,8 @@
       const plot = this._plotArea();
       const { startIdx, endIdx } = this._window();
       const { min, max } = this._axisRange(seriesList, startIdx, endIdx);
-      const textColor = resolveThemeColor('--text-secondary', '#64748b');
-      const gridColor = resolveThemeColor('--border', '#e5e7eb');
+      const textColor = cssToken('--text-secondary', '#64748b');
+      const gridColor = cssToken('--border', '#e5e7eb');
       const stackedIndexes = new Set();
 
       ctx.save();

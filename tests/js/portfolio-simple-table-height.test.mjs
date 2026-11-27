@@ -16,6 +16,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..", "..");
 const read = (...parts) => readFileSync(join(root, ...parts), "utf8");
 
+const UTILS_SRC = read("static", "js", "utils.js");
 const STORE_SRC = read("static", "js", "portfolio-store.js");
 const SHELL_SRC = read("static", "js", "portfolio-shell.js");
 
@@ -42,6 +43,7 @@ function buildWindow({ innerHeight = 812, tabbarHeight = 53 } = {}) {
   </body></html>`, { runScripts: "dangerously", url: "https://app.example.com/portfolio" });
   const { window: w } = dom;
   w.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} });
+  appendScript(w, UTILS_SRC);
   appendScript(w, STORE_SRC);
   appendScript(w, SHELL_SRC);
   Object.defineProperty(w, "innerHeight", { value: innerHeight, configurable: true });

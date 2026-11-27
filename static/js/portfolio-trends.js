@@ -246,8 +246,8 @@ async function renderNavChart(data) {
 
   const hasBench = Object.keys(_benchRatios).length > 0;
   const legendData = ['NAV', ...benchCodes.filter(c => _benchRatios[c]).map(c => _BENCH_LABELS[c] || c)];
-  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#888';
-  const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--border').trim() || '#333';
+  const textColor = cssToken('--text-secondary', '#888');
+  const gridColor = cssToken('--border', '#333');
   const yZero = mobileChartMode ? false : document.getElementById('pfNavYZero')?.checked;
 
   // Let the tab display style settle before the lightweight renderer
@@ -375,52 +375,42 @@ async function renderNavChart(data) {
   }
 }
 
-function onNavYZeroToggle() {
-  if (_isMobileChartMode()) return;
-  if (_navChartInstance) {
-    const yZero = document.getElementById('pfNavYZero')?.checked;
-    if (typeof _navChartInstance.setOption !== 'function') {
-      void renderNavChart(_navChartData);
-      return;
-    }
-    const { startIdx, endIdx } = _chartWindowFromInstance(_navChartInstance, _navChartData.length);
-    _applyVisibleYAxis(_navChartInstance, _navChartSeriesForAxis, startIdx, endIdx, !!yZero);
+function _toggleChartYZero(instance, checkboxId, data, seriesForAxis, rerender) {
+  if (_isMobileChartMode() || !instance) return;
+  const yZero = document.getElementById(checkboxId)?.checked;
+  if (typeof instance.setOption !== 'function') {
+    void rerender(data);
+    return;
   }
+  const { startIdx, endIdx } = _chartWindowFromInstance(instance, data.length);
+  _applyVisibleYAxis(instance, seriesForAxis, startIdx, endIdx, !!yZero);
+}
+
+function onNavYZeroToggle() {
+  _toggleChartYZero(_navChartInstance, 'pfNavYZero', _navChartData, _navChartSeriesForAxis, renderNavChart);
 }
 
 function onValueYZeroToggle() {
+  _toggleChartYZero(_valueChartInstance, 'pfValueYZero', _valueChartData, _valueChartSeriesForAxis, renderValueChart);
+}
+
+function _zoomChartToDays(instance, data, days) {
   if (_isMobileChartMode()) return;
-  if (_valueChartInstance) {
-    const yZero = document.getElementById('pfValueYZero')?.checked;
-    if (typeof _valueChartInstance.setOption !== 'function') {
-      void renderValueChart(_valueChartData);
-      return;
-    }
-    const { startIdx, endIdx } = _chartWindowFromInstance(_valueChartInstance, _valueChartData.length);
-    _applyVisibleYAxis(_valueChartInstance, _valueChartSeriesForAxis, startIdx, endIdx, !!yZero);
-  }
+  if (!instance || !data.length || typeof instance.dispatchAction !== 'function') return;
+  const total = data.length;
+  const startIdx = _findLookbackIndexByDays(data, days);
+  const fallbackIdx = Math.max(0, total - days - 1);
+  const resolvedIdx = startIdx >= 0 ? startIdx : fallbackIdx;
+  const startPct = total > 1 ? Math.max(0, Math.min(100, (resolvedIdx / (total - 1)) * 100)) : 0;
+  instance.dispatchAction({ type: 'dataZoom', start: startPct, end: 100 });
 }
 
 function _navZoomToDays(days) {
-  if (_isMobileChartMode()) return;
-  if (!_navChartInstance || !_navChartData.length || typeof _navChartInstance.dispatchAction !== 'function') return;
-  const total = _navChartData.length;
-  const startIdx = _findLookbackIndexByDays(_navChartData, days);
-  const fallbackIdx = Math.max(0, total - days - 1);
-  const resolvedIdx = startIdx >= 0 ? startIdx : fallbackIdx;
-  const startPct = total > 1 ? Math.max(0, Math.min(100, (resolvedIdx / (total - 1)) * 100)) : 0;
-  _navChartInstance.dispatchAction({ type: 'dataZoom', start: startPct, end: 100 });
+  _zoomChartToDays(_navChartInstance, _navChartData, days);
 }
 
 function _valueZoomToDays(days) {
-  if (_isMobileChartMode()) return;
-  if (!_valueChartInstance || !_valueChartData.length || typeof _valueChartInstance.dispatchAction !== 'function') return;
-  const total = _valueChartData.length;
-  const startIdx = _findLookbackIndexByDays(_valueChartData, days);
-  const fallbackIdx = Math.max(0, total - days - 1);
-  const resolvedIdx = startIdx >= 0 ? startIdx : fallbackIdx;
-  const startPct = total > 1 ? Math.max(0, Math.min(100, (resolvedIdx / (total - 1)) * 100)) : 0;
-  _valueChartInstance.dispatchAction({ type: 'dataZoom', start: startPct, end: 100 });
+  _zoomChartToDays(_valueChartInstance, _valueChartData, days);
 }
 
 let _valueChartInstance = null;

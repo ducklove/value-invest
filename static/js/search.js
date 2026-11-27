@@ -9,7 +9,7 @@ function _themeFromUrl() {
   try { return _themeValid(new URLSearchParams(window.location.search).get('theme')); } catch (e) { return null; }
 }
 function _themeStored() {
-  try { return _themeValid(localStorage.getItem('theme')); } catch (e) { return null; }
+  return _themeValid(safeStorageGet('theme'));
 }
 function _themeSystemQuery() {
   return window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
@@ -22,7 +22,7 @@ let _themeSyncedFor = null;
 // 테마가 실제로 바뀐 경우에만 차트·임베드 iframe·생태계 링크를 한 번 동기화한다
 // (토글·OS 변경·vc:themechange 가 같은 변경을 겹쳐 알려도 iframe 을 두 번 다시 받지 않는다).
 function _syncThemeDependents() {
-  const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  const theme = currentTheme();
   if (theme === _themeSyncedFor) return;
   _themeSyncedFor = theme;
   if (typeof charts !== 'undefined') Object.values(charts).forEach(c => { if (c && c.resize) c.resize(); });
@@ -51,8 +51,8 @@ function _dropThemeParam() {
   } catch (e) { /* URL 정리는 부가 기능 */ }
 }
 function toggleTheme() {
-  const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-  try { localStorage.setItem('theme', next); } catch (e) { /* 사생활 보호 모드: 이 페이지에만 적용 */ }
+  const next = isDarkTheme() ? 'light' : 'dark';
+  safeStorageSet('theme', next);
   _dropThemeParam();
   applyTheme(next);
   trackEvent('theme_toggle', { theme: next });

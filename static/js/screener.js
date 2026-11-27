@@ -61,17 +61,17 @@ const SCREENER_COLUMNS = [
 ];
 
 function _scIsNum(n) {
-  return n !== null && n !== undefined && n !== '' && !Number.isNaN(Number(n));
+  return toFiniteNumber(n) !== null;
 }
 
 function _scFmtNum(n, decimals = 2) {
-  if (!_scIsNum(n)) return '-';
-  return Number(n).toLocaleString(undefined, { maximumFractionDigits: decimals });
+  const v = toFiniteNumber(n);
+  return v === null ? '-' : fmtNum(v, { maxDecimals: decimals });
 }
 
 function _scFmtPct(n) {
-  if (!_scIsNum(n)) return '-';
-  return Number(n).toFixed(2) + '%';
+  const v = toFiniteNumber(n);
+  return v === null ? '-' : fmtPct(v, false, 2);
 }
 
 function _scFmtMarketCap(n) {

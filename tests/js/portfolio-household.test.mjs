@@ -7,6 +7,7 @@ import { JSDOM } from 'jsdom';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..', '..');
+const utilsSrc = readFileSync(join(root, 'static', 'js', 'utils.js'), 'utf8');
 const householdSrc = readFileSync(join(root, 'static', 'js', 'portfolio-household.js'), 'utf8');
 const performanceSrc = readFileSync(join(root, 'static', 'js', 'portfolio-performance.js'), 'utf8');
 const indexSrc = readFileSync(join(root, 'static', 'index.html'), 'utf8');
@@ -36,7 +37,7 @@ function householdWindow() {
     runScripts: 'dangerously',
     url: 'https://app.example.com/portfolio',
   });
-  dom.window.escapeHtml = value => String(value);
+  appendScript(dom.window, utilsSrc);
   appendScript(dom.window, householdSrc);
   return dom.window;
 }

@@ -401,7 +401,7 @@ async function renderResult(data) {
   Object.values(charts).forEach(c => c.dispose());
   charts = {};
 
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const isDark = isDarkTheme();
   const gridColor = isDark ? 'rgba(148,163,184,0.15)' : 'rgba(0,0,0,0.06)';
   const tickColor = isDark ? '#94a3b8' : '#666';
 

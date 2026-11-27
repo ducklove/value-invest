@@ -96,7 +96,7 @@ let _pfCashflowSaving = false;
 function pfOpenCashflow() {
   if (_pfCashflowSaving) return;
   const date = document.getElementById('pfCfDate');
-  const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(new Date());
+  const today = kstTodayYmd();
   date.max = today;
   if (!date.value) date.value = today;
   document.getElementById('pfCfStatus').textContent = '';

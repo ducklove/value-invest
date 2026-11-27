@@ -16,6 +16,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..", "..");
 const read = (...parts) => readFileSync(join(root, ...parts), "utf8");
 
+const UTILS_SRC = read("static", "js", "utils.js");
 const STORE_SRC = read("static", "js", "portfolio-store.js");
 const SHELL_SRC = read("static", "js", "portfolio-shell.js");
 
@@ -48,6 +49,7 @@ function buildDom(startUrl) {
   // jsdom has no matchMedia implementation; portfolio-shell.js's simple-mode-viewport
   // detection calls it at load time (an IIFE), so stub it before the script runs.
   w.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} });
+  appendScript(w, UTILS_SRC);
   appendScript(w, STORE_SRC);
   appendScript(w, SHELL_SRC);
   // switchView calls these unconditionally for some views; stub to isolate the
@@ -134,7 +136,7 @@ test('switchView("analysis") keeps the stock being viewed in the URL (/analysis?
     w.switchView('analysis');
     assert.equal(w.location.pathname + w.location.search, '/analysis', 'no stock yet → bare path');
     w.switchView('portfolio');
-    appendScript(w, "var activeStockCode = '005930';");
+    appendScript(w, "activeStockCode = '005930';");
     const before = w.history.length;
     w.switchView('analysis');
     assert.equal(w.location.pathname + w.location.search, '/analysis?code=005930');

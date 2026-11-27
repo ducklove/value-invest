@@ -3,12 +3,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 
+const utilsScript = readFileSync(new URL('../../static/js/utils.js', import.meta.url), 'utf8');
 const script = readFileSync(new URL('../../static/js/portfolio-cashflows.js', import.meta.url), 'utf8');
 const html = readFileSync(new URL('../../static/index.html', import.meta.url), 'utf8');
 
 function setupForm(handler) {
   const dom = new JSDOM(html.match(/<dialog id="pfCfDialog"[\s\S]*?<\/dialog>/)[0], { runScripts: 'outside-only' });
   const w = dom.window;
+  w.eval(utilsScript);
   const calls = [];
   w.apiFetchJson = async (path, options) => { calls.push(JSON.parse(options.body)); return handler?.(); };
   w.showToast = () => {};

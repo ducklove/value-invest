@@ -24,20 +24,16 @@ const _MASTERS_ASSET_FALLBACK_COLOR = '#64748b';
 
 // 자산색은 dashboard.css 의 --masters-asset-* 토큰에서 소싱하고, 토큰이 비어
 // 있으면(jsdom·CSS 미로드) 위 상수를 폴백으로 쓴다(폴백=토큰 정의값).
-function _maCssColor(varName, fallback) {
-  return cssToken(varName, fallback);  // utils.js 단일 소스(D-07)
-}
-
 function _mastersAssetColor(asset) {
   const fallback = _MASTERS_ASSET_COLORS[asset] || _MASTERS_ASSET_FALLBACK_COLOR;
-  return _maCssColor('--masters-asset-' + asset, fallback);
+  return cssToken('--masters-asset-' + asset, fallback);
 }
 
 // 정확한 원화 금액(억/조 스케일링 없이 전액 표기) — 반올림 정수를 공용 fmtNum 으로
 // 자릿수 구분해 찍고 '원'을 붙인다.
 function _maFmtKrw(n) {
-  if (n === null || n === undefined || Number.isNaN(Number(n))) return '-';
-  return fmtNum(Math.round(Number(n))) + '원';
+  const num = toFiniteNumber(n);
+  return num === null ? '-' : fmtNum(Math.round(num)) + '원';
 }
 
 function _mastersRiskDots(level) {
