@@ -459,7 +459,7 @@ class ScreenerWatchlistRouteTests(TempDbMixin):
 
     def _as(self, user):
         return patch.object(screener_route, "get_current_user", AsyncMock(return_value=user)), patch(
-            "deps.get_current_user", AsyncMock(return_value=user)
+            "core.deps.get_current_user", AsyncMock(return_value=user)
         )
 
     async def test_anonymous_gets_empty_watchlist_and_cannot_write(self):

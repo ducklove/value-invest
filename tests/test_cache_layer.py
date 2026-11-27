@@ -3,7 +3,7 @@ import unittest
 
 from _harness import TempDbMixin
 
-from cache_layer import MemoryTTLCache
+from core.cache import MemoryTTLCache
 from repositories import cache_values
 
 

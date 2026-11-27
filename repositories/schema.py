@@ -17,7 +17,7 @@ import re
 
 import aiosqlite
 
-from cache_layer import CACHE_NS_LATEST_REPORT, CACHE_NS_REPORT_LIST
+from core.cache import CACHE_NS_LATEST_REPORT, CACHE_NS_REPORT_LIST
 
 ColumnSpec = tuple[str, str, str]
 

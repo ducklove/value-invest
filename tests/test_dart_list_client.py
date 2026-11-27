@@ -92,7 +92,7 @@ async def test_status_errors_are_typed_and_not_cached():
 
 async def test_status_020_blocks_list_calls_until_kst_midnight():
     fake = FakeDart(lambda params: httpx.Response(200, json={"status": "020", "message": "요청 제한을 초과"}))
-    with _use(fake), patch("observability.record_event", new=AsyncMock()) as record:
+    with _use(fake), patch("core.observability.record_event", new=AsyncMock()) as record:
         with pytest.raises(dart_client.DartQuotaError):
             await dart_client.fetch_filing_list("0001", "20260930", "20260930")
         await asyncio.sleep(0)

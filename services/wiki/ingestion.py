@@ -26,13 +26,13 @@ import os
 import re
 from datetime import datetime
 
-import ai_config
-import observability
+from core import observability
 from core.config import PROJECT_ROOT
 from core.http import get_http_client
 from repositories import cache_values, corp_codes
 from repositories import wiki as wiki_repo
 from services import ai_client
+from services.ai import config as ai_config
 from services.market.sources import naver_research as report_client
 from services.report_url_policy import is_allowed_report_pdf_url
 

@@ -10,26 +10,26 @@
 | 위치 | 역할 |
 |---|---|
 | `routes/` | HTTP/WS 핸들러. 기존 파일에 `@router.get` 추가는 그걸로 끝. **새 라우터 파일**을 만들면 `core/app_factory.py`에 include_router 등록 |
-| `services/` | 도메인 로직 — `portfolio/*`(NAV 정산 `nav_snapshot`·장중 `intraday_snapshot`·`benchmark_history` 포함), `market/*`(`indicators`·`daily`·`movers`·`economic_calendar`·`news`·`sessions`), `market/sources/*`(외부 provider: `finance_pi`·`close_price`·`kis_proxy`·`yahoo`·`yfinance_runner` — **새 외부 소스는 여기**), `ecosystem/*`(형제 도구: summary 로더 `siblings`·링크 `links`·`external_tools`·신호 정규화 `signals`·기회 보드/360° `opportunities`·`integrations`·`linked_admin`), `dart/client`, `dividends/*`, `notifications/*`, `stock_price`·`stock_quotes` |
+| `services/` | 도메인 로직 — `portfolio/*`(NAV 정산 `nav_snapshot`·장중 `intraday_snapshot`·`benchmark_history` 포함), `market/*`(`indicators`·`daily`·`movers`·`economic_calendar`·`news`·`sessions`), `market/sources/*`(외부 provider: `finance_pi`·`close_price`·`kis_proxy`·`yahoo`·`yfinance_runner` — **새 외부 소스는 여기**), `ecosystem/*`(형제 도구: summary 로더 `siblings`·링크 `links`·`external_tools`·신호 정규화 `signals`·기회 보드/360° `opportunities`·`integrations`·`linked_admin`), `ai/config`(모델·사용량 정책), `dart/client`, `dividends/*`, `notifications/*`, `stock_price`·`stock_quotes` |
 | `repositories/` | 테이블별 SQLite 접근. `db.py`=커넥션 싱글톤+`transaction()`, `schema.py`=스키마·마이그레이션, `bootstrap.py`=`init_db()`/`close_db()` |
-| `core/` | config(env 프로파일)·app_factory·lifespan·정적 라우트·http 클라이언트·errors·`ecosystem`(레지스트리 로더)·`logging_setup`(로그 비밀 마스킹) |
+| `core/` | config(env 프로파일)·app_factory·lifespan·정적 라우트·http 클라이언트·errors·`cache`(TTL·single-flight)·`deps`(요청 의존성)·`auth`(인증·세션)·`observability`(시스템 이벤트)·`ecosystem`(레지스트리 로더)·`logging_setup`(로그 비밀 마스킹) |
 | `config/ecosystem.json` | **생태계 도구 레지스트리 정본**(21개, 공개 15). URL·딥링크 템플릿·데이터 URL·벤더링 경로. 파생: integrations 기본 URL, handoff 목록, `APP_CONFIG.ecosystem`, `/go/{tool}`, `/api/ecosystem`, vc-shell 인라인 블록 |
 | `config/schemas/` | 형제 `summary.json` 계약(envelope + 도구별) — [docs/ecosystem/data-contract.md](docs/ecosystem/data-contract.md) |
 | `static/ecosystem/` + `scripts/sync-ecosystem.mjs` | 공용 셸 `vc-shell.js`·토큰 `vc-tokens.css`·`vc-theme-boot.js` 정본. 스크립트가 허브 블록을 생성하고 형제 저장소(`../<도구 id>`)에 바이트 동일 사본을 쓴다/검증한다 |
 | `ecosystem/python`, `ecosystem/js` | 형제에 벤더링되는 발행 헬퍼 정본(`vc_publish.py`, `vc-publish.mjs`) |
 | `domain/` | 순수 규칙 — `market_calendar`(KRX 휴장일·수능), `timeutil`(`KST`·`now_kst`), `numbers`(`parse_number`) … |
 | `static/` | 프론트엔드 — 아래 "프론트엔드 계약" 필독 |
-| 루트 `*.py` 7개 | `main.py`(ASGI 진입점) + [레거시] `ai_config`·`auth_service`·`cache_layer`·`deps`·`observability` — services/core로 이전 중, **새 코드를 여기 만들지 말 것**. `snapshot_nav.py`는 deploy/repairs 용 호환 shim(정본 `services/portfolio/nav_snapshot`). 옮긴 모듈의 옛 이름 import 는 `tests/test_legacy_root_modules.py`가 막는다 |
+| 루트 `*.py` 2개 | `main.py`(ASGI 진입점)와 `snapshot_nav.py`(deploy/repairs용 호환 shim, 정본 `services/portfolio/nav_snapshot.py`). **새 코드를 여기 만들지 말 것**. 옮긴 모듈의 옛 이름 import는 `tests/test_legacy_root_modules.py`가 막는다 |
 
-`cache.py`는 2026-07 삭제됐다. 오래된 문서·커밋에서 `cache.get_db` 류를 보면
+루트 `cache.py`는 2026-07 삭제됐다. 오래된 문서·커밋에서 `cache.get_db` 류를 보면
 `repositories/{db,bootstrap,corp_codes,cache_values}`가 현재 위치다.
 
 ## 철칙
 
 - DB 쓰기는 단문이라도 `async with transaction() as db:` ([repositories/db.py](repositories/db.py)) — 공유 커넥션에서 직접 `db.commit()` 금지.
 - 외부 HTTP는 `core/http.get_http_client("이름")` 공유 클라이언트 (+`_TIMEOUT_PROFILES`에 타임아웃 등록).
-- 캐시: 인메모리 TTL은 `cache_layer.MemoryTTLCache`(+ fetch는 `cached_fetch` — single-flight·stale 허용), DB 영속은 `repositories/cache_values`.
-- KST는 `domain.timeutil`, 로그인 가드는 `deps.require_user`/`require_user_id`. 형제 URL·링크는 하드코딩하지 말고 레지스트리(`core.ecosystem`, `services/ecosystem/links`)에서.
+- 캐시: 인메모리 TTL은 `core.cache.MemoryTTLCache`(+ fetch는 `cached_fetch` — single-flight·stale 허용), DB 영속은 `repositories/cache_values`.
+- KST는 `domain.timeutil`, 로그인 가드는 `core.deps.require_user`/`core.deps.require_user_id`. 형제 URL·링크는 하드코딩하지 말고 레지스트리(`core.ecosystem`, `services/ecosystem/links`)에서.
 - 예외는 `core/errors.py` 계층 사용. 광역 `except Exception` 신설 금지 (기존 281곳은 점진 교체 중).
 
 ## 프론트엔드 계약 (빌드 시스템 없음 — 중요)

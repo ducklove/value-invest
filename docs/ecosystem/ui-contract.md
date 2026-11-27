@@ -54,7 +54,7 @@
 | `/portfolio?focus=CODE` | 보유 행으로 한 번 스크롤하고 4초 강조. 보유하지 않은 코드면 조용히 포기 | `app-main.js`, `portfolio-render.js` `pfFocusHolding` |
 | `/go/{tool}?code=&view=&asset=&theme=&embed=` | 레지스트리 템플릿으로만 목적지를 만들어 303. `theme`은 light/dark만. handoff 도구는 `#vc-held` 스냅샷을 붙인다. 알 수 없는·내부 도구는 404, 잘못된 기본 URL은 503. `private, no-store`, `no-referrer` | [routes/ecosystem.py](../../routes/ecosystem.py), [services/ecosystem/links.py](../../services/ecosystem/links.py) |
 | `/api/portfolio/open/{integrationKey}?code=&stock=&theme=` | `/go` handoff 경로의 별칭(옛 링크 호환) | `routes/portfolio.py` |
-| `/login?return_to=<URL>` | 로그인 후 `TRUSTED_RETURN_ORIGINS`에 있는 origin으로만 복귀 | `routes/auth.py`, `deps.py` |
+| `/login?return_to=<URL>` | 로그인 후 `TRUSTED_RETURN_ORIGINS`에 있는 origin으로만 복귀 | `routes/auth.py`, `core/deps.py` |
 
 `/go`는 **허브에서 나가는 링크 전용**이다. 형제끼리의 링크는 허브를 거치지 않는다(`VCShell.linkTo`).
 

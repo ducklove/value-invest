@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from deps import (
+from core.deps import (
     ANALYSIS_SEMAPHORE,
     analysis_snapshot_is_stale,
     default_user_preference,

@@ -210,7 +210,7 @@ kis-proxy를 쓴다([ecosystem/external-data.md](ecosystem/external-data.md)).
 ## 기타 허브 제공 표면
 
 - `GET /api/device/portfolio` — `X-Device-Token`(`DEVICE_API_TOKEN`, 사용자 `DEVICE_USER_EMAIL`). portfolio-epaper가 쓴다.
-- `/login?return_to=<URL>` — `deps.TRUSTED_RETURN_ORIGINS`에 있는 origin으로만 복귀.
+- `/login?return_to=<URL>` — `core.deps.TRUSTED_RETURN_ORIGINS`에 있는 origin으로만 복귀.
 - `/go/{tool}` — 레지스트리 딥링크 303([ecosystem/ui-contract.md](ecosystem/ui-contract.md)).
 - research 카탈로그 흐름: cps·eiayn이 `data/research/v1/`을 발행 → finance-pi가 검증·소비 → 허브 quant가 finance-pi에서 받는다.
 

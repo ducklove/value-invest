@@ -24,9 +24,9 @@ import logging
 import os
 from typing import Any
 
-import ai_config
 from repositories import portfolio as portfolio_repo
 from services import ai_client, investment_masters, stock_quotes
+from services.ai import config as ai_config
 from services.portfolio import quote_service, special_assets
 from services.portfolio.ai_analysis import fmt_krw
 from services.portfolio.identifiers import is_cash_asset, is_korean_stock

@@ -190,7 +190,7 @@ async def test_afternoon_batch_uses_only_the_matching_close_window(hour, deliver
          patch.object(daily_briefing.channels, "dispatch", AsyncMock(return_value=1)) as dispatch, \
          patch.object(daily_briefing.snapshots_repo, "get_snapshot_by_date", AsyncMock(return_value={"price_basis": regular_close.BASIS})), \
          patch.object(daily_briefing, "generate_briefing", AsyncMock(return_value={"text": "확정 성과", "source": "template", "stats": {"ok": True}})), \
-         patch("observability.record_event", AsyncMock()):
+         patch("core.observability.record_event", AsyncMock()):
         result = await daily_briefing.send_briefings("market_close")
     assert result["sent"] == int(delivered)
     assert dispatch.await_count == int(delivered)
@@ -204,7 +204,7 @@ async def test_afternoon_batch_does_not_send_unsettled_performance():
          patch.object(daily_briefing.channels, "has_active_channel", AsyncMock(return_value=True)), \
          patch.object(daily_briefing.channels, "dispatch", AsyncMock()) as dispatch, \
          patch.object(daily_briefing.snapshots_repo, "get_snapshot_by_date", AsyncMock(return_value=None)), \
-         patch("observability.record_event", AsyncMock()):
+         patch("core.observability.record_event", AsyncMock()):
         result = await daily_briefing.send_briefings("market_close")
     assert result["failed"] == 1
     dispatch.assert_not_awaited()

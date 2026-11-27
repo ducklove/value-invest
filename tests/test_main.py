@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 from starlette.requests import Request
 
-import deps
+from core import deps
 from routes import admin, auth, cache_mgmt, internal, portfolio
 
 
@@ -60,7 +60,7 @@ class MainRouteTests(unittest.IsolatedAsyncioTestCase):
     async def test_login_page_redirects_authenticated_user(self):
         request = _request("/login")
         with patch("routes.auth.get_current_user", new=AsyncMock(return_value={"google_sub": "u1"})), \
-             patch("routes.auth.auth_service.is_enabled", return_value=True):
+             patch("core.auth.is_enabled", return_value=True):
             response = await auth.login_page(request)
         self.assertEqual(response.status_code, 303)
 

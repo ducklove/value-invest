@@ -18,8 +18,8 @@ import pytest
 from _harness import TempDbMixin, seed_user
 from starlette.requests import Request
 
-import cache_layer
 import repositories.db
+from core import cache as cache_module
 from domain.portfolio_codes import is_plain_us_ticker
 from repositories import ticker_map as ticker_map_repo
 from routes import portfolio as portfolio_routes
@@ -286,7 +286,7 @@ async def test_naver_fallback_trusts_a_fresh_chart_404_as_us_absence():
         return {"stockName": "x", "reutersCode": code} if code.endswith(".HM") else None
 
     async with _yahoo_client({}) as client:
-        with patch.object(cache_layer, "_monotonic", clock), \
+        with patch.object(cache_module, "_monotonic", clock), \
              patch.object(yahoo, "get_http_client", AsyncMock(return_value=client)), \
              patch.object(foreign, "yfinance_find_ticker", AsyncMock(return_value=None)), \
              patch.object(foreign, "fetch_naver_world_stock", new=naver):
@@ -350,7 +350,7 @@ class TickerMapHealTests(TempDbMixin):
         self.kis_calls: list[str] = []
         self.client = _yahoo_client(self.chart_routes, self.chart_calls)
         self.patches = [
-            patch.object(cache_layer, "_monotonic", self.clock),
+            patch.object(cache_module, "_monotonic", self.clock),
             patch.dict(foreign._ticker_map, {}, clear=True),
             patch.object(foreign, "_ticker_map_loaded", False),
             patch.object(yahoo, "get_http_client", AsyncMock(return_value=self.client)),

@@ -9,8 +9,8 @@ from typing import Any
 
 import httpx
 
-from cache_layer import MemoryTTLCache
 from core import config as app_config
+from core.cache import MemoryTTLCache
 from core.errors import ExternalServiceError
 from core.http import get_http_client, register_timeout_profile
 from services.market.sources import close_price as close_price_client

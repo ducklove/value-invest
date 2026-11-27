@@ -7,8 +7,8 @@ from typing import Any, AsyncIterator, Callable
 
 import httpx
 
-import ai_config
 from core.http import get_http_client
+from services.ai import config as ai_config
 
 OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
 

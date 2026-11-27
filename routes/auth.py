@@ -8,9 +8,8 @@ from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlunparse
 from fastapi import APIRouter, Body, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 
-import auth_service
-from core.rate_limit import client_identity as _client_rate_identity
-from deps import (
+from core import auth as auth_service
+from core.deps import (
     SESSION_COOKIE_NAME,
     TRUSTED_RETURN_ORIGINS,
     clear_session_cookie,
@@ -18,6 +17,7 @@ from deps import (
     serialize_user,
     set_session_cookie,
 )
+from core.rate_limit import client_identity as _client_rate_identity
 from repositories import users as users_repo
 
 logger = logging.getLogger(__name__)

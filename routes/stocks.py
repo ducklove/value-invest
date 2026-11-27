@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
-from deps import get_current_user
+from core.deps import get_current_user
 from repositories import corp_codes
 from repositories import user_settings as user_settings_repo
 from repositories import user_stocks as user_stocks_repo

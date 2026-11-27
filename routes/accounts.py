@@ -19,9 +19,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
+from core.deps import get_current_user
+from core.deps import require_user as _require_user
 from core.errors import AppError
-from deps import get_current_user
-from deps import require_user as _require_user
 from repositories import accounts as accounts_repo
 
 router = APIRouter(prefix="/api/portfolio/accounts", tags=["accounts"])

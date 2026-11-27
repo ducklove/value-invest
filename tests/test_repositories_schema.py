@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cache_layer import CACHE_NS_LATEST_REPORT, CACHE_NS_REPORT_LIST
+from core.cache import CACHE_NS_LATEST_REPORT, CACHE_NS_REPORT_LIST
 from repositories import schema as schema_mod
 
 

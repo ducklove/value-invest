@@ -10,8 +10,8 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-import cache_layer
-from cache_layer import FetchResult, MemoryTTLCache, SingleFlight, cached_fetch, cached_fetch_result
+from core import cache as cache_module
+from core.cache import FetchResult, MemoryTTLCache, SingleFlight, cached_fetch, cached_fetch_result
 
 # ---------------------------------------------------------------------------
 # Copy semantics
@@ -47,7 +47,7 @@ def test_get_entry_and_getitem_are_isolated():
 def test_each_operation_deep_copies_at_most_once():
     cache = MemoryTTLCache("t.copy", 60)
     payload = {"rows": list(range(10))}
-    with patch.object(cache_layer, "_deepcopy", wraps=copy_module.deepcopy) as spy:
+    with patch.object(cache_module, "_deepcopy", wraps=copy_module.deepcopy) as spy:
         cache.set("k", payload)
         assert spy.call_count == 1
         spy.reset_mock()
@@ -78,7 +78,7 @@ def test_copy_false_set_stores_caller_object():
 def test_expired_entry_is_not_copied_for_non_stale_read():
     cache = MemoryTTLCache("t.copy", 0)
     cache.set("k", {"x": 1})
-    with patch.object(cache_layer, "_deepcopy") as spy:
+    with patch.object(cache_module, "_deepcopy") as spy:
         assert cache.get("k") is None
         spy.assert_not_called()
 

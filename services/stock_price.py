@@ -18,7 +18,7 @@ except ImportError:  # pragma: no cover - optional dependency
 
 import httpx
 
-from cache_layer import MemoryTTLCache, cached_fetch
+from core.cache import MemoryTTLCache, cached_fetch
 from core.http import get_http_client
 from domain.numbers import parse_number
 from services import stock_valuation

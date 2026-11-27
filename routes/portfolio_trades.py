@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
 
-from deps import require_user_id as _user_id
+from core.deps import require_user_id as _user_id
 from domain.portfolio_exchanges import ExchangeCreate, ExchangeInput, ExchangePreview, ExchangeRecord
 from domain.portfolio_trades import TradeCreate, TradeInput, TradePreview, TradeRecord
 from repositories import portfolio_exchanges as exchanges

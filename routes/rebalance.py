@@ -15,8 +15,8 @@ import logging
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
-from deps import get_current_user
-from deps import require_user as _require_user
+from core.deps import get_current_user
+from core.deps import require_user as _require_user
 from repositories import rebalance_targets as targets_repo
 from services.portfolio import rebalance as rebalance_service
 

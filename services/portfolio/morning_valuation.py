@@ -163,7 +163,7 @@ async def capture_enabled() -> dict:
             logger.error("morning valuation failed user=%s: %s", user[:8], result)
         elif result.get("missing"):
             logger.warning("morning valuation missing user=%s: %s", user[:8], result["missing"])
-    import observability
+    from core import observability
 
     await observability.record_event(
         "morning_valuation", "capture_partial" if failed else "capture_ok",

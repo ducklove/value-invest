@@ -15,7 +15,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from cache_layer import MemoryTTLCache, parse_iso
+from core.cache import MemoryTTLCache, parse_iso
 from core.errors import ExternalServiceError
 
 logger = logging.getLogger(__name__)

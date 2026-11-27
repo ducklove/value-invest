@@ -16,9 +16,9 @@ import re
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from cache_layer import MemoryTTLCache
-from deps import get_current_user
-from deps import require_user as _require_user
+from core.cache import MemoryTTLCache
+from core.deps import get_current_user
+from core.deps import require_user as _require_user
 from repositories import benchmark_daily as benchmark_daily_repo
 from services.portfolio import benchmark_history, benchmarks, nav_link, risk
 

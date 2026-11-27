@@ -46,17 +46,16 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
     """
     load_environment(settings.project_root)
 
-    import ai_config
-    import observability
-
     # 공유 httpx 클라이언트 매니저 — ``async with httpx.AsyncClient()`` 패턴을
     # 쓰던 외부 호출이 core/http.get_http_client() 로 전환한다. kis_proxy·
     # close_price(finance-pi)도 공유 클라이언트('kis_proxy'·'finance_pi')를 쓰고
     # 자체 rate-limit·쿨다운 회로만 유지한다. 둘의 init/close 훅은 호환용이다.
     from core import http as http_manager
+    from core import observability
     from repositories import bootstrap, corp_codes
     from repositories import users as users_repo
     from services import screener_history
+    from services.ai import config as ai_config
     from services.dart import client as dart_client
     from services.market.sources import close_price as close_price_client
     from services.market.sources import kis_keys as kis_key_manager

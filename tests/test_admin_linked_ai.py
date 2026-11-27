@@ -6,9 +6,9 @@ from unittest.mock import patch
 
 from _harness import TempDbMixin
 
-import ai_config
 from repositories import app_settings as app_settings_repo
 from repositories import portfolio as portfolio_repo
+from services.ai import config as ai_config
 from services.ecosystem import linked_admin as linked_project_admin
 
 

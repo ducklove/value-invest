@@ -12,7 +12,7 @@ from datetime import datetime
 
 import aiosqlite
 
-from cache_layer import (
+from core.cache import (
     CACHE_NS_LATEST_REPORT,
     CACHE_NS_REPORT_LIST,
     CacheEntry,

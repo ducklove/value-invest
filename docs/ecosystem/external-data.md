@@ -114,7 +114,7 @@ GA4(`analytics.js`)를 쓴다.
 | 항목 | 위치 | 내용 |
 |---|---|---|
 | provider 계층 | [services/market/sources/](../../services/market/sources/) | `yahoo.py`(chart 파서·호스트 동시성·429 쿨다운, `YahooRateLimitedError`), `yfinance_runner.py`(실행기 하나), `finance_pi.py`(base URL·토큰·공유 클라이언트·쿨다운), `close_price.py`(엔드포인트·파싱), `kis_proxy.py`(공유 `kis_proxy` 클라이언트, 응답 캐시) |
-| single-flight 캐시 | [cache_layer.py](../../cache_layer.py) `cached_fetch` / `cached_fetch_result` | 키마다 로드 1회, 실패 시 `stale_ttl` 안의 마지막 값. market-summary·지표·테이프·DART·뉴스·형제 JSON이 사용. `MemoryTTLCache`는 연산당 deepcopy 1회, `copy=False` 읽기, opt-in 만료 정리 |
+| single-flight 캐시 | [core/cache.py](../../core/cache.py) `cached_fetch` / `cached_fetch_result` | 키마다 로드 1회, 실패 시 `stale_ttl` 안의 마지막 값. market-summary·지표·테이프·DART·뉴스·형제 JSON이 사용. `MemoryTTLCache`는 연산당 deepcopy 1회, `copy=False` 읽기, opt-in 만료 정리 |
 | 소스별 TTL | `services/market/indicators.py` `SOURCE_GROUP_TTL` | 장중 60초 · 일 단위 1800초 · 월 단위 21600초. 실패·stale 항목은 60초 뒤 재시도 |
 | DART list 단일 클라이언트 | [services/dart/client.py](../../services/dart/client.py) `fetch_filing_list` | 10분 캐시(`OPENDART_LIST_CACHE_TTL_S`), 동일 요청 병합, KST 일일 카운트, 비필수 호출은 16,000에서 중단(`OPENDART_NONESSENTIAL_BUDGET`), status `020`이면 KST 자정까지 차단 + `system_events`(dart/quota_exhausted). 테이프는 07~20시에만 공시 조회 |
 | DART corpCode 기동 보호 | `services/dart/client.py` | zip이 아닌 응답(오류 본문)은 도메인 오류로 처리해 앱 기동이 죽지 않는다 |

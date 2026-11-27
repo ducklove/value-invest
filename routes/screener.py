@@ -23,7 +23,7 @@ import re
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
-from deps import get_current_user, require_user_id
+from core.deps import get_current_user, require_user_id
 from repositories import user_stocks as user_stocks_repo
 from services import screener as screener_service
 

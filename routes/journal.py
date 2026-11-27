@@ -29,8 +29,8 @@ import re
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from deps import get_current_user
-from deps import require_user as _require_user
+from core.deps import get_current_user
+from core.deps import require_user as _require_user
 from repositories import journal as journal_repo
 from services import stock_quotes
 

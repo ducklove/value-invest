@@ -7,10 +7,10 @@ import httpx
 import pytest
 from starlette.requests import Request
 
-import auth_service
+from core import auth as auth_service
 from core.app_factory import create_app
 from core.config import get_settings
-from deps import is_secure_request
+from core.deps import is_secure_request
 from repositories import users
 
 
@@ -27,7 +27,7 @@ from repositories import users
     ({"X-Requested-With": "fetch"}, 200),
 ])
 async def test_logout_requires_a_trusted_browser_request(temp_db, headers, expected):
-    with patch("auth_service.session_secret", return_value="request-test-secret"):
+    with patch("core.auth.session_secret", return_value="request-test-secret"):
         user = await users.create_local_user(email="request@example.test", name="검증", password_hash="unused")
         token = "request-test-token"
         digest = auth_service.hash_session_token(token)
@@ -53,7 +53,7 @@ async def test_preflight_and_cookie_free_internal_clients_are_preserved():
         assert response.headers["access-control-allow-origin"] == "https://app.example"
         assert (await client.post("/api/auth/logout")).status_code == 200
         # 독립 CSRF 검증을 수행하는 Google 콜백까지 공통 검사로 차단하지 않는다.
-        with patch("auth_service.is_google_enabled", return_value=True):
+        with patch("core.auth.is_google_enabled", return_value=True):
             callback = await client.post("/api/auth/google/callback", headers={"Origin": "https://accounts.google.com"})
         assert callback.status_code == 303
         assert "auth_error=csrf" in callback.headers["location"]

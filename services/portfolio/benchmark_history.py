@@ -200,7 +200,7 @@ async def update_benchmark_today(codes: list[str] | None = None) -> dict[str, in
     # Observability: aggregate tick so dashboard shows last benchmark
     # refresh. Keep the details payload compact — one counts dict.
     try:
-        import observability
+        from core import observability
         await observability.record_event(
             "benchmark_history",
             "increment_ok" if any(written.values()) else "increment_noop",

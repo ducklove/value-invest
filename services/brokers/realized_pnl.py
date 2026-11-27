@@ -14,7 +14,7 @@ from decimal import Decimal
 import aiosqlite
 import httpx
 
-from cache_layer import FETCH_ERRORS
+from core.cache import FETCH_ERRORS
 from core.errors import AppError
 from domain.timeutil import KST
 from repositories import brokers

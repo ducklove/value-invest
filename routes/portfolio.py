@@ -9,9 +9,9 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse, StreamingResponse
 
+from core.deps import get_current_user
+from core.deps import require_user as _require_user
 from core.rate_limit import enforce_rate_limit
-from deps import get_current_user
-from deps import require_user as _require_user
 from domain.broker_assets import is_futures_contract
 from domain.portfolio_inputs import CashflowInput, HoldingInput, HoldingMetadataInput, validate_input
 from repositories import benchmark_daily as benchmark_repo

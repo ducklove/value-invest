@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import cache_layer
-from cache_layer import MemoryTTLCache
+from core import cache as cache_module
+from core.cache import MemoryTTLCache
 
 
 class _Clock:
@@ -19,7 +19,7 @@ class _Clock:
 def test_default_cache_keeps_expired_records_for_stale_reads():
     clock = _Clock()
     cache = MemoryTTLCache("t.keep", 10)
-    with patch.object(cache_layer, "_monotonic", clock):
+    with patch.object(cache_module, "_monotonic", clock):
         cache.set("old", {"v": 1})
         clock.now += 60
         for i in range(MemoryTTLCache.PRUNE_EVERY_SETS * 2):
@@ -32,7 +32,7 @@ def test_opted_in_cache_prunes_expired_records_every_n_sets():
     clock = _Clock()
     cache = MemoryTTLCache("t.prune", 10, evict_expired_after=0)
     every = MemoryTTLCache.PRUNE_EVERY_SETS
-    with patch.object(cache_layer, "_monotonic", clock):
+    with patch.object(cache_module, "_monotonic", clock):
         cache.set("expired", 1)
         cache.set("default_ttl", 2, ttl_seconds=None)  # 기본 TTL(10s) 적용
         cache._data["no_ttl"] = cache._data["default_ttl"].__class__(
@@ -54,7 +54,7 @@ def test_opted_in_cache_prunes_expired_records_every_n_sets():
 def test_prune_grace_keeps_recently_expired_records():
     clock = _Clock()
     cache = MemoryTTLCache("t.grace", 10, evict_expired_after=30)
-    with patch.object(cache_layer, "_monotonic", clock):
+    with patch.object(cache_module, "_monotonic", clock):
         cache.set("a", 1)
         clock.now += 20  # 만료 10초 경과 — 유예(30s) 이내
         assert cache.prune_expired() == 0
@@ -67,7 +67,7 @@ def test_prune_grace_keeps_recently_expired_records():
 def test_prune_expired_on_demand_for_default_cache():
     clock = _Clock()
     cache = MemoryTTLCache("t.manual", 5)
-    with patch.object(cache_layer, "_monotonic", clock):
+    with patch.object(cache_module, "_monotonic", clock):
         cache.set("a", 1)
         cache.set("b", 2, ttl_seconds=50)
         clock.now += 5

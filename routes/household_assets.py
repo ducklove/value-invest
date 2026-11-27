@@ -8,8 +8,8 @@ import uuid
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
-from deps import get_current_user
-from deps import require_user as _require_user
+from core.deps import get_current_user
+from core.deps import require_user as _require_user
 from repositories import household_assets as household_repo
 from services.household_assets import (
     ASSET_CATEGORIES,

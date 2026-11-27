@@ -223,7 +223,7 @@ class _RequestLatencyMiddleware:
         threshold = getattr(state, "slow_request_ms", 1000.0)
         if not (is_error or elapsed_ms >= threshold):
             return
-        import observability
+        from core import observability
 
         await observability.record_event(
             source="http",

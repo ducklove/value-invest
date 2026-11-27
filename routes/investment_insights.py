@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, StrictBool, field_validator, model_validator
 
-from deps import get_current_user
+from core.deps import get_current_user
 from repositories import investment_insights as repo
 from repositories import journal
 from routes.response_models import AttributionResponse, RealizedTaxResponse, ThesesResponse

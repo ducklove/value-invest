@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-import cache_layer
+from core import cache as cache_module
 from services.market import indicator_health, naver_indicators
 from services.market import indicators as mi
 
@@ -38,7 +38,7 @@ def _clear_caches():
 @pytest.fixture
 def clock():
     fake = FakeClock()
-    with patch.object(cache_layer, "_monotonic", fake):
+    with patch.object(cache_module, "_monotonic", fake):
         yield fake
 
 

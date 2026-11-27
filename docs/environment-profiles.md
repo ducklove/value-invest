@@ -62,4 +62,4 @@ sudo systemctl restart value-invest.service
 - 새 모듈은 `core.config.get_settings()`를 통해 app-level 설정을 읽는다.
 - 시크릿은 import 시점에 고정하지 말고 **호출 시점에** `os.getenv`로 읽는다.
   `main.py`가 앱 팩토리를 먼저 import 하므로 모듈 전역에 굳히면 `.env` 값이
-  반영되지 않는다(`auth_service.session_secret()`, `dart_client.api_key()` 참고).
+  반영되지 않는다(`core.auth.session_secret()`, `dart_client.api_key()` 참고).

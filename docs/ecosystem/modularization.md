@@ -50,7 +50,7 @@
 
 | # | 중복 | 상태 |
 |---|---|---|
-| H1 | 로그인 가드 16개(호출 93곳) | **완료** — `deps.require_user` / `require_user_id` |
+| H1 | 로그인 가드 16개(호출 93곳) | **완료** — `core.deps.require_user` / `core.deps.require_user_id` |
 | H2 | KST 정의 27곳 | **완료** — `domain/timeutil.py`(`KST`, `now_kst`, `today_kst`) |
 | H3 | 숫자 파서 23개 | 1단계 완료 — `domain/numbers.parse_number`(본문이 같은 사본만). 의미가 다른 파서는 남음 |
 | H4 | Yahoo chart 준동일 2개 + 호출 5곳 | **완료** — `services/market/sources/yahoo.py` |
@@ -66,7 +66,7 @@
 | H14 | iframe 임베드 코드 2벌(NPS·bonds) | 부분 — 메시지 브리지는 `ecosystem-links.js`로 모임. 프레임 생성 코드는 2벌 |
 | H15 | market-summary 이중 캐시(시장 바 ↔ 대시보드) | 남음 |
 | H16 | Python KRW 포매터 4벌 | 남음(문구가 바뀌므로 골든 출력 합의 필요) |
-| H17 | fetch → TTL → stale 보일러플레이트 | **완료** — `cache_layer.cached_fetch`(뉴스·지표·테이프·DART·형제). movers·economic_calendar 등 일부 남음 |
+| H17 | fetch → TTL → stale 보일러플레이트 | **완료** — `core.cache.cached_fetch`(뉴스·지표·테이프·DART·형제). movers·economic_calendar 등 일부 남음 |
 | H18 | 스케줄러 이중(lifespan 루프 ↔ timer) | 남음 |
 | H19 | 복구 CLI 스캐폴딩 | 남음 |
 | — | 폴링 타이머 | **완료** — `utils.js` `schedulePoll`/`cancelPoll`(숨김 탭 정지, 중복 실행 방지) |
@@ -85,13 +85,13 @@
 | 공용 셸 | [static/ecosystem/](../../static/ecosystem/) `vc-shell.js`, `vc-tokens.css`, `vc-theme-boot.js` | 형제 10개의 허브 링크 마크업, 테마 부트 7종, 레거시 테마 키 |
 | 동기화기 | [scripts/sync-ecosystem.mjs](../../scripts/sync-ecosystem.mjs) | 손 복사 |
 | 외부 provider | [services/market/sources/](../../services/market/sources/) `yahoo`, `yfinance_runner`, `finance_pi`, `close_price`, `kis_proxy` | 루트 `close_price_client.py`, `kis_proxy_client.py`, Yahoo 파서 5벌, yfinance 실행기 3종 |
-| 캐시 | [cache_layer.py](../../cache_layer.py) `cached_fetch`, `SingleFlight` | 모듈별 try/set/stale 보일러플레이트 |
+| 캐시 | [core/cache.py](../../core/cache.py) `cached_fetch`, `SingleFlight` | 모듈별 try/set/stale 보일러플레이트 |
 | DART | [services/dart/client.py](../../services/dart/client.py) `fetch_filing_list` | `list.json` 조립 4곳 |
-| 도메인 헬퍼 | [domain/timeutil.py](../../domain/timeutil.py), [domain/numbers.py](../../domain/numbers.py), [deps.py](../../deps.py) | KST 27곳, 동일 파서, 로그인 가드 16개 |
+| 도메인 헬퍼 | [domain/timeutil.py](../../domain/timeutil.py), [domain/numbers.py](../../domain/numbers.py), [core/deps.py](../../core/deps.py) | KST 27곳, 동일 파서, 로그인 가드 16개 |
 | 프런트 헬퍼 | `static/js/utils.js`, `static/js/ecosystem-links.js` | CSS 토큰 리더 5벌, 폴링 `setInterval`, storage 직접 접근, iframe 메시지 처리 |
-| 레거시 루트 모듈 16개 | `services/` 아래(아래 표) | 루트 `*.py` 32 → 15 |
+| 레거시 루트 모듈 이전 | 아래 표의 `core/`·`services/` | 루트 `*.py` 32 → 2 |
 
-레거시 루트 모듈 이동(각 커밋은 `git mv`, 호출부는 옛 이름을 alias로 import):
+레거시 루트 모듈의 정본은 다음과 같다.
 
 | 옛 루트 모듈 | 새 위치 |
 |---|---|
@@ -111,12 +111,24 @@
 | `snapshot_nav` | `services/portfolio/nav_snapshot.py`(루트 `snapshot_nav.py`는 `deploy/repairs/`용 shim) |
 | `benchmark_history` | `services/portfolio/benchmark_history.py` |
 | `stock_price` | `services/stock_price.py` |
+| `cache_layer` | `core/cache.py` |
+| `deps` | `core/deps.py` |
+| `observability` | `core/observability.py` |
+| `auth_service` | `core/auth.py` |
+| `ai_config` | `services/ai/config.py` |
+| `analyzer` | `services/analysis/analyzer.py` |
+| `asset_insights` | `services/portfolio/asset_insights.py` |
+| `dart_report_review` | `services/dart/report_review.py` |
+| `dr_registry` | `services/market/dr_registry.py` |
+| `kis_key_manager` | `services/market/sources/kis_keys.py` |
+| `kis_ws_manager` | `services/market/sources/kis_ws.py` |
+| `report_client` | `services/market/sources/naver_research.py` |
+| `wiki_ingestion` | `services/wiki/ingestion.py` |
 
 `tests/test_legacy_root_modules.py`가 옮긴 모듈이 루트에 다시 생기거나 옛 이름으로 import되면 실패한다.
-로거 이름은 모듈 경로를 따르므로 로그에는 `services.market.movers` 같은 새 이름이 찍힌다.
+로거가 `__name__`을 사용하면 로그에 `core.observability` 같은 새 모듈 경로가 찍힌다.
 
-남은 루트 모듈 13개: `ai_config`, `analyzer`, `asset_insights`, `auth_service`, `cache_layer`, `dart_report_review`, `deps`,
-`dr_registry`, `kis_key_manager`, `kis_ws_manager`, `observability`, `report_client`, `wiki_ingestion`(+ `main.py`, `snapshot_nav.py` shim).
+루트에는 ASGI 진입점 `main.py`와 복구 스크립트용 `snapshot_nav.py` shim이 남아 있다.
 
 ---
 
@@ -130,7 +142,7 @@
 | 4 | 일봉 폴백 한 곳으로(H7) | 미스 한 번에 finance-pi 최대 3회 왕복 | 중 | `finance-pi → kis-proxy → yahoo` 체인 하나 |
 | 5 | 데이터 계약·테스트 벡터(X10, X11, X8) | SPAC·지주사 비율·우선주 DPS를 여러 곳에서 계산 | 중 | 방식 B |
 | 6 | KIS 접근을 kis-proxy로 수렴(X3) | 토큰 5개가 같은 앱키로 서로 무효화 가능 | 중상 | kis-proxy 토큰 버킷 선행 |
-| 7 | 남은 루트 모듈 이전 | 신규 코드 위치 혼동 | 중 | 쉬운 것: `analyzer`, `dr_registry`, `kis_key_manager`, `asset_insights`, `dart_report_review`, `report_client`, `wiki_ingestion`. `cache_layer`·`observability`·`deps`·`auth_service`는 core/services 결정 먼저 |
+| 7 | 루트 모듈 이전 | 신규 코드 위치 혼동 | 중 | **완료** — 정본은 위 표 참고 |
 | 8 | `services/stock_price.py`(약 1,330줄)·`services/market/indicators.py`(약 1,460줄) 분할 | 관심사 혼재, 다른 모듈이 private 헬퍼 약 15개 import | 중 | 공개 API 승격 먼저 |
 | 9 | `integrations._base_url` → `core.ecosystem.resolved_url`, JS 하드코딩 폴백 제거 | 레지스트리 잔재 | 낮음 | `APP_CONFIG.ecosystem`이 항상 있다는 전제 |
 | 10 | 숫자 파서 2단계, fmtNum 래퍼(H3, H11) | 의미가 다른 파서 약 20개 | 낮음 | 옵션을 명시해 이전 |

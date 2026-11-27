@@ -1,6 +1,6 @@
-"""레거시 루트 모듈 → services 추출(D-18) 회귀 방지.
+"""레거시 루트 모듈 → core/services 추출(D-18) 회귀 방지.
 
-services/ 로 옮긴 루트 모듈은 (1) 루트에 다시 생기지 않고, (2) 저장소 코드가
+core/ 또는 services/로 옮긴 루트 모듈은 (1) 루트에 다시 생기지 않고, (2) 저장소 코드가
 옛 최상위 이름으로 import 하지 않아야 한다. 경로로 import 하는 외부 사용처
 (deploy/repairs 의 1회성 복구 스크립트 등)가 있어 호환 shim 을 남긴 모듈은
 ``SHIMMED`` 에 두고, shim 이 정본을 그대로 가리키는지만 확인한다.
@@ -18,6 +18,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # 옛 루트 모듈 이름 → 새 정본 모듈.
 MOVED: dict[str, str] = {
+    "cache_layer": "core.cache",
+    "deps": "core.deps",
+    "observability": "core.observability",
+    "auth_service": "core.auth",
+    "ai_config": "services.ai.config",
     "linked_project_admin": "services.ecosystem.linked_admin",
     "market_movers": "services.market.movers",
     "market_news": "services.market.news",

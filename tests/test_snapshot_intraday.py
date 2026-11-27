@@ -176,7 +176,7 @@ async def _run_tick(*, bulk, fetch_quote, trading_day=True):
          patch.object(snapshot_intraday.portfolio_quotes, "kr_trading_day", return_value=trading_day), \
          patch.object(snapshot_intraday.portfolio_quotes, "fetch_bulk_kr_quotes", new=bulk), \
          patch.object(snapshot_intraday.portfolio_quotes, "fetch_quote", new=fetch_quote), \
-         patch("observability.record_event", new=AsyncMock()):
+         patch("core.observability.record_event", new=AsyncMock()):
         await snapshot_intraday.run(manage_db=False)
     return saved, get_portfolio
 

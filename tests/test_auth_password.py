@@ -5,7 +5,7 @@ from _harness import TempDbMixin
 from fastapi import HTTPException, Response
 from starlette.requests import Request
 
-import auth_service
+from core import auth as auth_service
 from repositories import users as users_repo
 from routes import auth as auth_route
 
@@ -33,7 +33,7 @@ class PasswordAuthTests(TempDbMixin):
         await super().asyncTearDown()
 
     async def test_register_and_login_with_email_password(self):
-        with patch("auth_service.session_secret", return_value="test-secret"):
+        with patch("core.auth.session_secret", return_value="test-secret"):
             response = Response()
             registered = await auth_route.auth_register(
                 _request(),
@@ -57,7 +57,7 @@ class PasswordAuthTests(TempDbMixin):
         self.assertIn(auth_service.SESSION_COOKIE_NAME, login_response.headers.get("set-cookie", ""))
 
     async def test_google_user_can_register_password_and_login_both_ways(self):
-        with patch("auth_service.session_secret", return_value="test-secret"):
+        with patch("core.auth.session_secret", return_value="test-secret"):
             google_user = await users_repo.upsert_user({
                 "google_sub": "google-sub-1",
                 "email": "google@example.com",
@@ -85,7 +85,7 @@ class PasswordAuthTests(TempDbMixin):
         self.assertEqual(logged_in["user"]["google_sub"], google_user["google_sub"])
 
     async def test_password_change_requires_current_password_when_already_set(self):
-        with patch("auth_service.session_secret", return_value="test-secret"):
+        with patch("core.auth.session_secret", return_value="test-secret"):
             user = await users_repo.create_local_user(
                 email="change@example.com",
                 name="Change Me",
@@ -123,7 +123,7 @@ class PasswordAuthTests(TempDbMixin):
         self.assertEqual(logged_in["user"]["google_sub"], user["google_sub"])
 
     async def test_password_login_rate_limits_repeated_failures(self):
-        with patch("auth_service.session_secret", return_value="test-secret"):
+        with patch("core.auth.session_secret", return_value="test-secret"):
             await users_repo.create_local_user(
                 email="limited@example.com",
                 name="Limited User",
@@ -148,7 +148,7 @@ class PasswordAuthTests(TempDbMixin):
             self.assertEqual(exc_info.exception.status_code, 429)
 
     async def test_signup_cannot_claim_existing_google_email(self):
-        with patch("auth_service.session_secret", return_value="test-secret"):
+        with patch("core.auth.session_secret", return_value="test-secret"):
             await users_repo.upsert_user({
                 "google_sub": "google-sub-2",
                 "email": "claimed@example.com",

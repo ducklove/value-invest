@@ -15,17 +15,17 @@ import httpx
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-import ai_config
-from cache_layer import MemoryTTLCache
+from core.cache import MemoryTTLCache
+from core.deps import get_current_user
+from core.deps import require_user as _require_user
 from core.http import get_http_client, shared_http_client
 from core.rate_limit import enforce_rate_limit
-from deps import get_current_user
-from deps import require_user as _require_user
 from repositories import corp_codes
 from repositories import dart_review as dart_review_repo
 from repositories import db as db_repo
 from repositories import wiki as wiki_repo
 from services import ai_client
+from services.ai import config as ai_config
 from services.portfolio import runtime_quotes as portfolio_quotes
 
 logger = logging.getLogger(__name__)

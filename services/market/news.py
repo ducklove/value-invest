@@ -16,7 +16,7 @@ import logging
 
 from bs4 import BeautifulSoup, ParserRejectedMarkup
 
-from cache_layer import FETCH_ERRORS, MemoryTTLCache, cached_fetch_result
+from core.cache import FETCH_ERRORS, MemoryTTLCache, cached_fetch_result
 from core.http import get_http_client
 
 logger = logging.getLogger(__name__)

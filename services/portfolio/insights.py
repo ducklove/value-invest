@@ -20,7 +20,7 @@ import logging
 import os
 import time
 
-from cache_layer import MemoryTTLCache
+from core.cache import MemoryTTLCache
 from services.ecosystem import integrations, links
 from services.market import indicators as market_indicators
 from services.portfolio import asset_insights, benchmarks, foreign, quote_service

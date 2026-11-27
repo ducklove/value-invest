@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from cache_layer import MemoryTTLCache
+from core.cache import MemoryTTLCache
 from services.ecosystem import envelope, fetch, siblings
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "ecosystem"

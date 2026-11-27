@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime, timedelta, timezone
 
-from cache_layer import MemoryTTLCache, cached_fetch
+from core.cache import MemoryTTLCache, cached_fetch
 from core.errors import ExternalServiceError, RateLimitError
 from core.http import get_http_client
 from domain.timeutil import KST
@@ -457,7 +457,7 @@ class _QuotaGuard:
         self.exhausted_day = today
         if first:
             logger.error("OpenDART daily quota exhausted (status 020) after %s calls today", self.calls)
-            import observability  # 지연 import — dart_client 는 여러 leaf 모듈이 import 한다
+            from core import observability  # 지연 import — dart_client 는 여러 leaf 모듈이 import 한다
 
             # record_event 는 기본(wait=False)으로 DB 쓰기를 분리 task 로 띄우고 곧바로 반환한다.
             await observability.record_event(

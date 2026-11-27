@@ -40,9 +40,11 @@ python3 -m pytest --cov=. -q  # 커버리지 측정 (게이트 아님)
 ```
 main.py               ASGI 진입점 (조립은 core.app_factory)
 core/                 config(env 프로파일)·app factory·lifespan·정적 라우트·http 클라이언트·
+                      cache(TTL·single-flight)·deps(요청 의존성)·auth(인증·세션)·observability(시스템 이벤트)·
                       ecosystem(레지스트리 로더)·logging_setup(비밀 마스킹)
 routes/               HTTP/WS 핸들러 (포트폴리오·분석·알림·관리자·위키·ecosystem(/go, /api/ecosystem) …)
 services/             도메인 로직
+  ai/config.py        AI 모델 설정·사용량 정책
   portfolio/          NAV 정산(nav_snapshot)·장중 스냅샷·벤치마크·시세·리포트 …
   market/             시장 지표(indicators)·브리프/테이프(daily)·등락(movers)·경제캘린더·뉴스
   market/sources/     외부 provider (finance_pi·close_price·kis_proxy·yahoo·yfinance_runner)
@@ -55,8 +57,7 @@ repositories/         SQLite 접근 (테이블별 모듈; db=커넥션/transacti
 domain/               순수 도메인 규칙 (market_calendar·timeutil·numbers …)
 config/               ecosystem.json(도구 레지스트리 정본)·schemas/(summary.json 계약)·analytics-projects.json
 ecosystem/            형제에 벤더링되는 발행 헬퍼 정본 (python/vc_publish.py, js/vc-publish.mjs)
-루트 *.py (main 외)   [레거시] ai_config·cache_layer·observability·wiki_ingestion 등 —
-                      services/core로 이전 중. snapshot_nav.py 는 복구 스크립트용 shim
+snapshot_nav.py       복구 스크립트용 호환 shim (정본 services/portfolio/nav_snapshot.py)
 static/               빌드 없는 vanilla JS SPA (로드 순서가 계약). static/ecosystem/ = 공용 셸·토큰·theme-boot 정본
 scripts/, deploy/     운영 스크립트(sync-ecosystem.mjs 등), 배포 스크립트, systemd 유닛(저장소 루트)
 ```
@@ -102,7 +103,7 @@ Markdown 라이브러리는 `package-lock.json`과 일치하는 파일을 `stati
 - 공개 주소는 `https://ducklove.duckdns.org:3691`(DuckDNS). uvicorn 이 직접 TLS 를
   종단하며 인증서는 certbot webroot(`/srv/acme`, Caddy 가 80 포트 챌린지 경로 서빙)로
   자동 갱신된다. 도메인을 옮기면 새 인증서 발급 → `.env` 의 `TLS_CERT_NAME` 변경 →
-  `core/config.py`·`deps.py`·`static/app-config.js` 등의 기본 origin 을 함께 바꾼다
+  `core/config.py`·`core/deps.py`·`static/app-config.js` 등의 기본 origin 을 함께 바꾼다
   (`git grep -n duckdns` 로 목록 확인). Google 로그인은 GIS 팝업 모드라 Google Cloud
   콘솔의 "승인된 JavaScript 원본"에 새 origin(포트 포함)을 등록해야 한다.
 - `/healthz`는 프로세스 응답, `/readyz`는 필수 DB 테이블 조회 가능 여부를 확인한다.

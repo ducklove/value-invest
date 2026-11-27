@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
-from deps import attach_quote_snapshots, get_current_user
+from core.deps import attach_quote_snapshots, get_current_user
 from repositories import user_stocks as user_stocks_repo
 
 router = APIRouter()

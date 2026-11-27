@@ -13,7 +13,7 @@ from _harness import TempDbMixin
 from fastapi import HTTPException
 from starlette.requests import Request
 
-import observability
+from core import observability
 from core.errors import AppError
 from repositories import benchmark_daily as benchmark_repo
 from repositories import db as db_repo

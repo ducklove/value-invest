@@ -6,7 +6,7 @@ from starlette.datastructures import Headers
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from auth_service import SESSION_COOKIE_NAME
+from core.auth import SESSION_COOKIE_NAME
 
 
 def normalize_origin(value: str) -> str:

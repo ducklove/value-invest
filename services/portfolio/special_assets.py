@@ -12,7 +12,7 @@ from datetime import datetime
 
 import httpx
 
-from cache_layer import MemoryTTLCache, cached_fetch
+from core.cache import MemoryTTLCache, cached_fetch
 from core.http import get_http_client
 
 logger = logging.getLogger(__name__)

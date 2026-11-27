@@ -22,7 +22,7 @@ from urllib.parse import urljoin
 
 import httpx
 
-from cache_layer import MemoryTTLCache, cached_fetch
+from core.cache import MemoryTTLCache, cached_fetch
 from core.http import get_http_client
 from services.ecosystem import siblings
 from services.market import naver_indicators

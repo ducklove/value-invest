@@ -19,8 +19,8 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import Response
 
-from deps import get_current_user
-from deps import require_user as _require_user
+from core.deps import get_current_user
+from core.deps import require_user as _require_user
 from repositories import calendar_rules as calendar_rules_repo
 from repositories import notifications as notifications_repo
 from repositories import portfolio as portfolio_repo

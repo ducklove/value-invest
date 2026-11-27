@@ -8,7 +8,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime
 
-import auth_service
+from core import auth as auth_service
 from repositories.db import get_db, transaction
 
 _USER_COLUMNS = """

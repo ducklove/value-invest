@@ -13,11 +13,11 @@ from typing import Any, AsyncIterator
 
 import httpx
 
-import ai_config
-from cache_layer import MemoryTTLCache, cached_fetch_result
+from core.cache import MemoryTTLCache, cached_fetch_result
 from core.http import get_http_client
 from repositories import corp_codes
 from services import ai_client
+from services.ai import config as ai_config
 from services.dart import client as dart_client
 from services.market import indicators as market_indicators
 from services.market import movers as market_movers

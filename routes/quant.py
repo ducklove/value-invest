@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Body, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from deps import require_user_id as user_id
+from core.deps import require_user_id as user_id
 from repositories import quant, quant_basis, quant_forward, quant_scanner
 from services.quant import basis, scanner, service
 from services.quant import paper_service as quant_paper

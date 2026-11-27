@@ -14,8 +14,8 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from deps import get_current_user
-from deps import require_user as _require_user
+from core.deps import get_current_user
+from core.deps import require_user as _require_user
 from services import dividend_calendar
 
 logger = logging.getLogger(__name__)

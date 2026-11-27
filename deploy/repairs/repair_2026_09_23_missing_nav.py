@@ -118,7 +118,7 @@ async def run(candidate_path: Path, *, apply: bool):
             if view["date"] != DAY:
                 raise ValueError("Today baseline verification failed")
             report["today_baseline"] = view["date"]
-            import observability
+            from core import observability
             await observability.record_event("snapshot_nav", "recovered", level="info", details=report, wait=True)
         (candidate_path.parent / ("applied.json" if apply else "validation.json")).write_text(json.dumps(report, indent=2))
         print(json.dumps(report, indent=2))

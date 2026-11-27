@@ -4,8 +4,8 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
+from core.deps import LATEST_REPORT_CACHE_TTL_MINUTES, REPORT_LIST_CACHE_TTL_MINUTES
 from core.http import get_http_client
-from deps import LATEST_REPORT_CACHE_TTL_MINUTES, REPORT_LIST_CACHE_TTL_MINUTES
 from repositories import cache_values
 from services.market.sources import naver_research as report_client
 from services.report_url_policy import is_allowed_report_pdf_url

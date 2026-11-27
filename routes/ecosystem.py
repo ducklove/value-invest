@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 
 from core import ecosystem
-from deps import get_current_user
+from core.deps import get_current_user
 from repositories import portfolio as portfolio_repo
 from services.ecosystem import links, siblings
 

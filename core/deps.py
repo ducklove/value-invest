@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 from fastapi import HTTPException, Request, Response
 
-import auth_service
+from core import auth as auth_service
 from repositories import users as users_repo
 from services import stock_quotes
 

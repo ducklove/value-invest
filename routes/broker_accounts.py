@@ -9,7 +9,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Body, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from deps import require_user_id as user_id
+from core.deps import require_user_id as user_id
 from repositories import account_holdings, broker_activity, broker_cash_reviews, brokers
 from repositories.broker_secrets import BrokerError, decrypt, encrypt
 from services.brokers import realtime

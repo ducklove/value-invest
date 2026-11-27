@@ -7,7 +7,7 @@ from datetime import datetime, time, timedelta, timezone
 
 import httpx
 
-import observability
+from core import observability
 from domain.market_calendar import is_trading_day
 from domain.timeutil import KST
 from repositories import cache_values, users

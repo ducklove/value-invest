@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
 
-from deps import require_user_id as _user_id
+from core.deps import require_user_id as _user_id
 from domain.dividend_receipts import DividendRecord
 from repositories import dividend_receipts as repo
 

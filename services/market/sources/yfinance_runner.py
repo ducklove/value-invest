@@ -23,7 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from typing import Any, Callable, TypeVar
 
-from cache_layer import MemoryTTLCache
+from core.cache import MemoryTTLCache
 
 T = TypeVar("T")
 

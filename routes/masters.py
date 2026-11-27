@@ -24,8 +24,8 @@ import os
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
+from core.deps import get_current_user
 from core.rate_limit import enforce_rate_limit
-from deps import get_current_user
 from services import ai_client, investment_masters
 from services.portfolio import masters_review
 

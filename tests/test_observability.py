@@ -1,4 +1,4 @@
-"""Tests for observability.py + cache system_events helpers + admin routes.
+"""Tests for core.observability, the system_events repository, and admin routes.
 
 These three layers are tested together because they only make sense as a
 stack: record_event writes through cache, admin endpoints read through
@@ -14,7 +14,7 @@ from _harness import TempDbMixin
 from fastapi import HTTPException
 from starlette.requests import Request
 
-import observability
+from core import observability
 from repositories import db as db_repo
 from repositories import system_events as system_events_repo
 from repositories import wiki as wiki_repo

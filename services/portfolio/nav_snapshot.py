@@ -448,7 +448,7 @@ async def run_all_snapshots(snap_date: str | None = None, manage_db: bool = True
     # yesterday reads as a healthy settlement. Degrade to tick_partial/warning
     # whenever any holding was fallback-priced, and expose the breakdown.
     degraded = bool(failed_users) or bool(fallback_users)
-    import observability
+    from core import observability
     await observability.record_event(
         "snapshot_nav",
         "tick_ok" if not degraded else "tick_partial",

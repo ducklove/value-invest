@@ -236,13 +236,13 @@ class DividendReceiptTests(TempDbMixin):
         source = f"005930:estimated:{self.today}"
         await self.receive(source_key=source)
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-            with patch("deps.get_current_user", AsyncMock(return_value=None)):
+            with patch("core.deps.get_current_user", AsyncMock(return_value=None)):
                 for path in ['/api/portfolio/dividend-receipts', '/api/portfolio/distributions', '/api/portfolio/distributions/balances']:
                     self.assertEqual((await client.get(path)).status_code, 401)
-            with patch("deps.get_current_user", AsyncMock(return_value={"google_sub": "u2"})):
+            with patch("core.deps.get_current_user", AsyncMock(return_value={"google_sub": "u2"})):
                 self.assertEqual((await client.get('/api/portfolio/distributions/balances')).json(), [])
                 self.assertEqual((await client.get('/api/portfolio/dividend-receipts')).json(), [])
-            with patch("deps.get_current_user", AsyncMock(return_value={"google_sub": "u1"})):
+            with patch("core.deps.get_current_user", AsyncMock(return_value={"google_sub": "u1"})):
                 for endpoint, method, expected in (("", "POST", 405), ("/preview", "POST", 404), ("/candidates", "GET", 404)):
                     response = await client.request(method, '/api/portfolio/dividend-receipts' + endpoint)
                     self.assertEqual(response.status_code, expected)

@@ -172,7 +172,7 @@ async def run(manage_db: bool = True):
     # Dashboard signal — "last intraday tick" with user counts. wait=True
     # because this script closes its own DB handle right after.
     try:
-        import observability
+        from core import observability
         await observability.record_event(
             "snapshot_intraday",
             "tick_ok" if not failed else "tick_partial",

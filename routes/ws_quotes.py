@@ -8,7 +8,7 @@ import json
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 
 from core.config import get_settings
-from deps import get_current_user
+from core.deps import get_current_user
 from services.realtime.allocation import sanitize
 from services.realtime.hub import get_hub
 

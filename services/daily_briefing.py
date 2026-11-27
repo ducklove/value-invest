@@ -27,7 +27,6 @@ import re
 from datetime import timedelta
 from math import copysign, isfinite
 
-import ai_config
 from domain.numbers import parse_number as _safe_float
 from repositories import dart_review as dart_review_repo
 from repositories import notifications as notifications_repo
@@ -36,6 +35,7 @@ from repositories import snapshots as snapshots_repo
 from repositories import user_settings as user_settings_repo
 from repositories import wiki as wiki_repo
 from services import ai_client
+from services.ai import config as ai_config
 from services.market import indicators as market_indicators
 from services.market import movers as market_movers
 from services.market.formatting import format_indicator_change as _indicator_change_text
@@ -1247,7 +1247,7 @@ async def send_briefings(briefing_type: object = None) -> dict:
     """옵트인 사용자 전체에 브리핑 생성·발송. 사용자별 결과는 system_events
     (source='daily_briefing')에 남고, 한 사용자의 실패가 다음 사용자를 막지
     않는다."""
-    import observability
+    from core import observability
 
     profile = briefing_profile(briefing_type)
     users = await opted_in_users(profile["kind"])

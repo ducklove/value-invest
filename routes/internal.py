@@ -349,7 +349,7 @@ async def run_dart_review_ingest(request: Request, payload: dict = Body(default=
             target_limit=target_limit,
             force=force,
         )
-        import observability
+        from core import observability
         failed = int(result.get("failed") or 0)
         await observability.record_event(
             "dart_report_review",

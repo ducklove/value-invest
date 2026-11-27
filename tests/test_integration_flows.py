@@ -29,9 +29,8 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-import observability
 import repositories.db
-from core import app_factory
+from core import app_factory, observability
 from core.app_factory import create_app
 from core.config import PROJECT_ROOT, AppSettings
 from repositories import bootstrap

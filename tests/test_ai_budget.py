@@ -14,8 +14,8 @@ from unittest.mock import patch
 
 from _harness import TempDbMixin
 
-import ai_config
 from repositories import ai_usage as ai_usage_repo
+from services.ai import config as ai_config
 
 
 class BudgetCapTests(TempDbMixin):

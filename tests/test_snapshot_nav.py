@@ -490,7 +490,7 @@ async def test_run_all_snapshots_degrades_tick_when_holdings_fall_back():
         snapshot_nav,
         "_update_benchmark_history",
         new=AsyncMock(),
-    ), patch("observability.record_event", new=_record):
+    ), patch("core.observability.record_event", new=_record):
         await snapshot_nav.run_all_snapshots("2026-07-13", manage_db=False)
 
     tick = next(e for e in recorded if e["source"] == "snapshot_nav" and e["kind"] in ("tick_ok", "tick_partial"))
@@ -525,7 +525,7 @@ async def test_run_all_snapshots_reports_tick_ok_when_all_fresh():
         snapshot_nav,
         "_update_benchmark_history",
         new=AsyncMock(),
-    ), patch("observability.record_event", new=_record):
+    ), patch("core.observability.record_event", new=_record):
         await snapshot_nav.run_all_snapshots("2026-07-13", manage_db=False)
 
     tick = next(e for e in recorded if e["source"] == "snapshot_nav" and e["kind"] in ("tick_ok", "tick_partial"))
@@ -547,7 +547,7 @@ async def test_run_all_snapshots_propagates_missing_settlement_after_other_users
         patch.object(snapshot_nav, "_update_benchmark_history", new=AsyncMock()),
         patch.object(snapshot_nav.bootstrap, "init_db", new=AsyncMock()) as init_db,
         patch.object(snapshot_nav.bootstrap, "close_db", new=AsyncMock()) as close_db,
-        patch("observability.record_event", new=record),
+        patch("core.observability.record_event", new=record),
     ):
         with pytest.raises(snapshot_nav.SnapshotIncomplete, match="2026-09-23: 1/2 users failed"):
             await snapshot_nav.run_all_snapshots("2026-09-23", manage_db=manage_db)
@@ -600,7 +600,7 @@ async def test_retry_only_values_missing_users_and_preserves_completed_settlemen
         patch.object(snapshot_nav, "take_snapshot", new=AsyncMock(return_value=0)) as take,
         patch.object(snapshot_nav, "_fetch_fx_usdkrw", new=AsyncMock()),
         patch.object(snapshot_nav, "_update_benchmark_history", new=AsyncMock()),
-        patch("observability.record_event", new=AsyncMock()),
+        patch("core.observability.record_event", new=AsyncMock()),
     ):
         await snapshot_nav.run_all_snapshots("2026-09-23", manage_db=False, only_missing=True)
     take.assert_awaited_once_with("missing", "2026-09-23", require_fresh=True, regular=True)

@@ -7,12 +7,11 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-import ai_config
-import observability
-from core import http, lifespan
+from core import http, lifespan, observability
 from core.app_factory import create_app
 from core.config import AppSettings
 from repositories import bootstrap, corp_codes, db
+from services.ai import config as ai_config
 from services.dart import client as dart_client
 from services.dart import report_review as dart_report_review
 from services.market.sources import close_price as close_price_client

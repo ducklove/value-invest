@@ -29,11 +29,11 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, AsyncIterator, Awaitable, Callable
 
-import ai_config
 from core.http import get_http_client, shared_http_client
 from repositories import portfolio as portfolio_repo
 from repositories import wiki as wiki_repo
 from services import ai_client
+from services.ai import config as ai_config
 from services.market import indicators as market_indicators
 from services.market.formatting import format_indicator_change as _market_summary_change
 from services.portfolio import nav_link, quote_service

@@ -16,7 +16,7 @@ import time
 
 import httpx
 
-from cache_layer import MemoryTTLCache
+from core.cache import MemoryTTLCache
 from core.errors import ExternalServiceError
 from core.http import get_http_client
 from services.market.quote_policy import trade_timestamp

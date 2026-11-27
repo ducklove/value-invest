@@ -18,12 +18,12 @@ os.environ["KIS_PROXY_BASE_URL"] = "http://127.0.0.1:1"
 os.environ["CLOSE_PRICE_API_ENABLED"] = "0"
 os.environ["CORS_ALLOWED_ORIGINS"] = "http://127.0.0.1:18765"
 
-import auth_service
+from core import auth as auth_service
 from core.config import PROJECT_ROOT, AppSettings
+from core.deps import get_current_user, require_user
 from core.errors import register_exception_handlers
 from core.request_security import MutationOriginMiddleware
 from core.static_routes import register_static_routes
-from deps import get_current_user, require_user
 from repositories import bootstrap, db, financial, snapshots, users
 from repositories import notifications as notification_channels
 from repositories import portfolio as holdings

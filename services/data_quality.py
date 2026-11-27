@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta
 
-import observability
+from core import observability
 from repositories import benchmark_daily as benchmark_repo
 from repositories import system_events as system_events_repo
 from repositories.db import get_db

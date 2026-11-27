@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query, Request
 
-from deps import get_current_user
-from deps import require_user as _require_user
+from core.deps import get_current_user
+from core.deps import require_user as _require_user
 from services.portfolio import exposure_service
 
 router = APIRouter()

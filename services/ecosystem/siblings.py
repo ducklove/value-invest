@@ -27,8 +27,8 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from cache_layer import MemoryTTLCache, now_iso
 from core import ecosystem
+from core.cache import MemoryTTLCache, now_iso
 from core.http import get_http_client
 from services.ecosystem.envelope import SummaryRejected, summary_tool_ids, validate_summary
 from services.ecosystem.fetch import FETCH_ERRORS, entry_age_seconds, single_flight

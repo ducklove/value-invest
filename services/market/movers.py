@@ -19,7 +19,7 @@ from datetime import datetime
 import httpx
 from bs4 import BeautifulSoup
 
-from cache_layer import MemoryTTLCache
+from core.cache import MemoryTTLCache
 from core.http import get_http_client
 from domain.timeutil import KST
 
