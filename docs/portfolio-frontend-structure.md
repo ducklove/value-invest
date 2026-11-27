@@ -105,6 +105,8 @@ CSS: 생태계 공통 토큰 `./static/ecosystem/vc-tokens.css`가 분할 CSS �
     `portfolio-memo.js`는 수정 모드 없이 메모를 고치는 팝오버(메모 칸·종목명 옆 📝
     배지)와 투자 인사이트 모달의 메모 섹션을 담당한다. 팝오버는 body 에 붙어 시세
     tick 재렌더에도 입력이 유지되고, 저장은 `PUT /api/portfolio/{code}/metadata {memo}`.
+    종목분석의 `analysis-position.js`(내 포지션 바)와 `analysis-timeline.js`(최근 뉴스+DART
+    공시, `GET /api/stocks/{code}/timeline`, 소스별 상태 표시)는 `analysis.js` 앞에 로드된다.
     `등락액`은 등락률 뒤, `당일손익`은 평가금액 뒤에 위치하며 둘 다 기본 숨김이다.
     등락액은 현재가 − 전일종가, 당일손익은 등락액 × 부호 있는 보유 수량이다.
     합산 손익은 부호 있는 수량 × (현재가 − 전일종가), 합산등락률 분모는

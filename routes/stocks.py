@@ -155,6 +155,14 @@ async def external_stock_links(code: str):
     return await external_tools.fetch_stock_links(code)
 
 
+@router.get("/api/stocks/{code}/timeline")
+async def stock_timeline(code: str, limit: int = Query(12, ge=1, le=40)):
+    """Public — 종목 타임라인: 최근 뉴스 + DART 공시를 날짜순으로. 소스별 상태 포함."""
+    from services.market import stock_timeline as timeline
+
+    return await timeline.get_stock_timeline(code, limit)
+
+
 @router.get("/api/external/opportunities")
 async def external_opportunities(request: Request):
     """Public — 형제 도구 신호 기회 보드. 순위는 보유와 무관하고, 로그인하면 보유 표시용 코드를 함께 준다."""

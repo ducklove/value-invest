@@ -219,6 +219,8 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
     <div class="coverage" id="coverageNote"></div>
     <!-- 종목 360°: 형제 도구 신호의 수치·기준일. 해당 도구가 없으면 숨는다(analysis-360.js). -->
     <section class="stock360" id="stock360Panel" aria-labelledby="stock360Title" hidden></section>
+    <!-- 최근 소식: 뉴스 + DART 공시 타임라인, 입력 없이 자동(analysis-timeline.js). -->
+    <section class="stock-timeline" id="stockTimelinePanel" aria-labelledby="stockTimelineTitle" hidden></section>
 
     <!-- 위키 Q&A·투자 일지는 매번 쓰는 요소가 아니라 밸류에이션 차트보다 아래로
          우선순위를 낮췄다(UX 감사 P2⑦) — <details> 는 JS 없이도 접힘 상태로 시작하고,
@@ -1341,6 +1343,7 @@ const IS_LOCALHOST = ['localhost', '127.0.0.1', '[::1]'].includes(window.locatio
 <script src="./js/analysis-valuation.js" defer></script>
 <script src="./js/analysis-360.js" defer></script>
 <script src="./js/analysis-position.js" defer></script>
+<script src="./js/analysis-timeline.js" defer></script>
 <script src="./js/analysis.js" defer></script>
 <script src="./js/stock-alerts.js" defer></script>
 <script src="./js/market-bond-mate.js" defer></script>

@@ -674,3 +674,54 @@
   cursor: pointer;
 }
 .ap-btn:hover, .ap-btn:focus-visible { border-color: var(--primary); color: var(--primary); outline: none; }
+
+/* 종목 타임라인 — 최근 뉴스 + DART 공시 (analysis-timeline.js) */
+.stock-timeline {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.stock-timeline[hidden] { display: none; }
+.stl-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.stl-head h3 { margin: 0; font-size: 15px; }
+.stl-chips { display: flex; gap: 4px; }
+.stl-chip {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.stl-chip.active { border-color: var(--primary); background: var(--primary); color: #fff; }
+.stl-note { margin: 6px 0 0; color: var(--warning, var(--text-secondary)); font-size: 12px; }
+.stl-list { margin: 8px 0 0; padding: 0; list-style: none; }
+.stl-row {
+  display: grid;
+  grid-template-columns: 44px 36px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+.stl-row:first-child { border-top: 0; }
+.stl-date { color: var(--text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.stl-type {
+  justify-self: start;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.stl-disclosure .stl-type { background: var(--warning-tint, var(--surface-muted)); color: var(--text); }
+.stl-main { min-width: 0; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+.stl-main a { color: inherit; text-decoration: none; }
+.stl-main a:hover, .stl-main a:focus-visible { color: var(--primary); text-decoration: underline; }
+.stl-main small { display: block; color: var(--text-secondary); font-size: 11px; }
+.stl-empty { margin: 8px 0 0; color: var(--text-secondary); font-size: 13px; }
+.stl-more { display: inline-block; margin-top: 8px; color: var(--primary); font-size: 12px; text-decoration: none; }
+.stl-more:hover { text-decoration: underline; }

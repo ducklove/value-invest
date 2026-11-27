@@ -426,6 +426,8 @@ async function renderResult(data) {
   if (typeof loadStock360 === 'function') loadStock360(data.stock_code);
   // 보유 종목이면 내 포지션·보유 메모·포트폴리오 바로가기(analysis-position.js).
   if (typeof renderAnalysisPosition === 'function') renderAnalysisPosition(data.stock_code);
+  // 최근 뉴스 + DART 공시 타임라인(analysis-timeline.js).
+  if (typeof loadStockTimeline === 'function') loadStockTimeline(data.stock_code);
   // 해외 DR(예탁증서) 환산가 — 해당 종목에 DR 이 매핑돼 있으면 카드로 표시.
   loadStockDr(data.stock_code);
   // 투자 일지 — 이 종목의 판단 기록 폼/타임라인(portfolio-journal.js).
