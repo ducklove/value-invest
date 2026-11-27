@@ -74,12 +74,22 @@ def _share_number(mapping: dict, *keys: str) -> float | None:
     return None
 
 
+def _per_share_flag(fundamental: dict, key: str, flag: str) -> bool | None:
+    per_share = fundamental.get("per_share") if isinstance(fundamental, dict) else None
+    entry = per_share.get(key) if isinstance(per_share, dict) else None
+    if isinstance(entry, dict) and isinstance(entry.get(flag), bool):
+        return entry[flag]
+    return None
+
+
 def treasury_share_basis(fundamental: dict) -> dict:
     per_share = fundamental.get("per_share") if isinstance(fundamental, dict) else None
     if not isinstance(per_share, dict):
         return {}
 
     entries = []
+    from_components = False
+    single_kind = ""
     for key in ("bps", "eps_ttm", "eps_annual"):
         entry = per_share.get(key)
         if not isinstance(entry, dict):
@@ -87,9 +97,11 @@ def treasury_share_basis(fundamental: dict) -> dict:
         components = entry.get("components")
         if isinstance(components, list) and components:
             entries = [component for component in components if isinstance(component, dict)]
+            from_components = True
             break
         if _share_number(entry, "issued_shares", "istc_totqy") is not None:
             entries = [entry]
+            single_kind = str(entry.get("stock_kind") or "").strip()
             break
     if not entries:
         return {}
@@ -97,6 +109,8 @@ def treasury_share_basis(fundamental: dict) -> dict:
     issued_total = 0.0
     treasury_total = 0.0
     outstanding_total = 0.0
+    common_seen = False
+    non_common_shares = 0.0
     for entry in entries:
         issued = _share_number(entry, "issued_shares", "istc_totqy")
         treasury = _share_number(
@@ -119,14 +133,31 @@ def treasury_share_basis(fundamental: dict) -> dict:
             treasury_total += treasury
         if outstanding is not None and outstanding > 0:
             outstanding_total += outstanding
+        kind = str(entry.get("stock_kind") or "").strip()
+        if kind:
+            if "보통" in kind and "우선" not in kind and "종류" not in kind:
+                common_seen = True
+            elif (issued or 0.0) > 0 or (outstanding or 0.0) > 0:
+                non_common_shares += (issued or outstanding or 0.0)
 
     if issued_total <= 0:
         return {}
+    if from_components:
+        share_composition = "common_only" if (common_seen and non_common_shares == 0.0) else "mixed"
+    elif single_kind:
+        share_composition = (
+            "common_only"
+            if ("보통" in single_kind and "우선" not in single_kind and "종류" not in single_kind)
+            else "mixed"
+        )
+    else:
+        share_composition = "single_unspecified"
     return {
         "treasuryShareRatioPct": round(treasury_total / issued_total * 100, 2),
         "treasuryShares": round(treasury_total),
         "issuedShares": round(issued_total),
         "outstandingShares": round(outstanding_total) if outstanding_total > 0 else None,
+        "shareComposition": share_composition,
     }
 
 
@@ -202,10 +233,14 @@ def _basis_from_fundamental(source_code: str, raw: dict | None) -> dict:
         basis["asOf"] = fundamental.get("as_of") or fundamental.get("available_date")
 
     metrics = fundamental.get("metrics") if isinstance(fundamental.get("metrics"), dict) else {}
+    eps_ttm = per_share_value(fundamental, "eps_ttm")
+    eps_key = "eps_ttm" if eps_ttm is not None else "eps_annual"
     basis.update(
         {
-            "eps": _first_present(per_share_value(fundamental, "eps_ttm"), per_share_value(fundamental, "eps_annual")),
+            "eps": _first_present(eps_ttm, per_share_value(fundamental, "eps_annual")),
             "bps": per_share_value(fundamental, "bps"),
+            "bpsTreasuryExcluded": _per_share_flag(fundamental, "bps", "treasury_shares_excluded"),
+            "epsTreasuryExcluded": _per_share_flag(fundamental, eps_key, "treasury_shares_excluded"),
             "netIncome": metric_amount(metrics, "net_income"),
             "equity": metric_amount(metrics, "equity"),
         }

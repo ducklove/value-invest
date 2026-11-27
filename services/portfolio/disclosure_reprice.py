@@ -1,16 +1,23 @@
 """공시 → 목표가 재가격(Pro-forma) & 주가 반응 시차 계산기 (기능id: reprice).
 
-MVP 범위(정형 공시 2종, LLM 호출 없음):
-1. ``주식소각결정``(자사주 소각): 소각 주식 수 → 기준 유통(또는 발행)주식수 차감 →
-   Pro-forma BPS·EPS 상향률 및 수식 목표가 재평가.
-2. ``현금ㆍ현물배당결정``: 1주당 현금배당금(결산배당 기준) → Pro-forma DPS 및 수식 목표가 재평가.
-
-수치 출처:
-- OpenDART 주요사항보고서 정형 JSON API 에는 ``주식소각결정``·``현금ㆍ현물배당결정`` 전용
-  엔드포인트가 개방되어 있지 않으므로, ``list.json``(``essential=False``)으로 최근 90일
-  대상 공시를 찾고 ``document.xml``(``essential=False``) 원문 ZIP 의 정형 표를 파싱한다.
-- 파싱 결과는 ``rcept_no`` 단위로 인메모리(``MemoryTTLCache``)와 DB(``cache_values``)에
-  캐시해 동일 공시 원문을 중복 다운로드하지 않는다.
+설계 원칙 ("틀린 숫자보다 미계산이 낫다"):
+1. ``주식소각결정``:
+   - finance-pi ``per_share`` 의 분모(발행주식수 vs 유통주식수)와 보통주 단독 구성이
+     코드·데이터로 확정될 때만 계산한다.
+   - 분모가 유통주식수이고 기취득/보유 자기주식 소각(``treasuryShares >= 소각수``)이면
+     이미 분모에서 차감돼 있으므로 ``no_impact`` 로 처리한다.
+   - 분모를 확정할 수 없거나 종류주식 혼합·신규취득 예정이면 ``uncalculable`` 로 두되,
+     소각 주식 수·발행주식총수 대비 %·소각예정금액·소각예정일·주가 반응 등 사실은 표시한다.
+2. ``현금ㆍ현물배당결정``:
+   - ``배당구분`` 이 명시적으로 ``결산배당`` 일 때만 연간 DPS Pro-forma 및 푸시 줄을 계산한다.
+3. 시점 신선도·정정 공시:
+   - ``rcept_dt`` 가 최근 7일 이내이고 소각예정일/배당기준일이 아직 도래하지 않았을 때만
+     Pro-forma·목표가 Δ 를 계산하고, 지났으면 ``stale``("이미 반영됐을 수 있음 — 주가 반응만")로 표시한다.
+   - 후속 ``[기재정정]`` 이 존재하면 원본 공시는 ``정정됨`` 으로 표시하고 정정본만 계산한다.
+4. 예산·보안·격리:
+   - 비로그인 요청은 캐시된 원문 결과만 읽고 ``document.xml`` 을 새로 내려받지 않는다.
+   - ``parse_status == "ok"`` 만 SQLite ``cache_values``(``v2``)에 영속 캐시하고 실패는 메모리 단기 캐시(1시간)만 둔다.
+   - ZIP 엔트리 수(50개)·압축 해제 크기(20MB) 상한을 강제하고, 모든 파싱·계산 오류는 본 알림/응답을 막지 않게 격리한다.
 """
 
 from __future__ import annotations
@@ -23,6 +30,7 @@ import re
 import sqlite3
 import warnings
 import zipfile
+import zlib
 from datetime import date, timedelta
 from html import unescape
 from typing import Any
@@ -47,11 +55,15 @@ from services.portfolio.valuation import fetch_valuation_basis
 logger = logging.getLogger(__name__)
 
 DART_VIEWER_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}"
-CACHE_NS_REPRICE_DOC = "dart.reprice_doc.v1"
+CACHE_NS_REPRICE_DOC = "dart.reprice_doc.v2"
 DOC_DB_TTL_SECONDS = 90 * 86400.0
 DOC_MEM_TTL_SECONDS = 24 * 3600.0
+DOC_FAILURE_TTL_SECONDS = 3600.0
 FILING_LIST_TTL_SECONDS = 600.0
-MAX_REPRICE_DOCS = 5
+MAX_REPRICE_DOCS = 8
+PRO_FORMA_FRESH_DAYS = 7
+MAX_ZIP_ENTRIES = 50
+MAX_ZIP_UNCOMPRESSED_BYTES = 20 * 1024 * 1024
 GAP_VERDICT_THRESHOLD_PCT_P = 2.0
 NOTIFICATION_REPRICE_TIMEOUT_S = 4.0
 
@@ -61,6 +73,10 @@ DISCLOSURE_LABELS = {
     STOCK_RETIREMENT: "주식소각결정",
     CASH_DIVIDEND: "현금ㆍ현물배당결정",
 }
+
+PRICE_REACTION_BASIS_LABEL = "접수일 직전 거래일 종가 기준"
+STALE_REASON = "이미 반영됐을 수 있음 — 주가 반응만"
+UNCALCULABLE_TREASURY_REASON = "기취득 자사주 소각 — 주당가치 분모에 이미 반영됐을 수 있어 계산하지 않음"
 
 _STOCK_CODE_RE = re.compile(r"^[0-9][0-9A-Z]{5}$")
 _FOOTNOTE_RE = re.compile(r"\((?:주|註)\s*\d+\)|\[(?:주|註)\s*\d+\]|\*\d+")
@@ -80,8 +96,25 @@ _EXCLUDED_TITLE_HINTS = (
     "예고",
     "안내공시",
 )
+_EXISTING_TREASURY_HINTS = (
+    "기취득",
+    "기보유",
+    "보유자기주식",
+    "보유중인자기주식",
+    "보유자사주",
+    "배당가능이익범위내취득한자기주식",
+)
+_NEW_ACQUISITION_HINTS = (
+    "장내직접취득",
+    "장내취득",
+    "장내매수",
+    "신규취득",
+    "향후취득",
+    "신탁계약에의한취득",
+    "신탁계약체결",
+)
 
-_doc_mem_cache = MemoryTTLCache("dart.reprice_doc", DOC_MEM_TTL_SECONDS, evict_expired_after=DOC_MEM_TTL_SECONDS)
+_doc_mem_cache = MemoryTTLCache("dart.reprice_doc.v2", DOC_MEM_TTL_SECONDS, evict_expired_after=DOC_MEM_TTL_SECONDS)
 _doc_sem = asyncio.Semaphore(2)
 
 _DART_ERRORS = (dart_client.DartListError, httpx.HTTPError, TimeoutError, OSError)
@@ -96,6 +129,27 @@ _REPRICE_DATA_ERRORS = (
     TypeError,
     KeyError,
 )
+_ZIP_OPEN_ERRORS = (
+    zipfile.BadZipFile,
+    zlib.error,
+    EOFError,
+    RuntimeError,
+    NotImplementedError,
+    OSError,
+    ValueError,
+)
+_XML_PARSE_ERRORS = (
+    IndexError,
+    AttributeError,
+    RecursionError,
+    ValueError,
+    TypeError,
+    KeyError,
+)
+
+
+class _ZipLimitExceededError(ValueError):
+    """DART 원문 ZIP 엔트리 수 또는 압축 해제 용량 상한 초과."""
 
 
 def is_supported_stock_code(code: str) -> bool:
@@ -111,11 +165,13 @@ def _compact_label(text: str | None) -> str:
     return cleaned.lower()
 
 
-def classify_reprice_disclosure(report_nm: str | None) -> str | None:
-    """보고서명이 재가격 대상 정형 공시 2종인지 판별한다.
+def is_amendment_disclosure(report_nm: str | None) -> bool:
+    compact = re.sub(r"\s+", "", unescape(str(report_nm or "")))
+    return any(tag in compact for tag in ("[기재정정]", "[정정]", "[첨부정정]", "기재정정"))
 
-    자회사·종속회사 공시나 철회·취소·예고 공시는 발행사 확정 수치가 아니므로 제외한다.
-    """
+
+def classify_reprice_disclosure(report_nm: str | None) -> str | None:
+    """보고서명이 재가격 대상 정형 공시 2종인지 판별한다."""
     raw = unescape(str(report_nm or "")).strip()
     if not raw:
         return None
@@ -127,6 +183,36 @@ def classify_reprice_disclosure(report_nm: str | None) -> str | None:
     if "현금현물배당결정" in compact or "현금배당결정" in compact:
         return CASH_DIVIDEND
     return None
+
+
+def mark_superseded_disclosures(filings: list[dict[str, Any]]) -> dict[str, str]:
+    """같은 공시 유형에서 후속 ``[기재정정]`` 이 있으면 이전 공시 ``rcept_no → 정정본 rcept_no`` 맵을 반환한다."""
+    ordered = sorted(
+        (f for f in filings if isinstance(f, dict) and f.get("rcept_no")),
+        key=lambda f: (
+            _iso_rcept_dt(f.get("rcept_dt")),
+            str(f.get("rcept_no") or "").strip(),
+        ),
+        reverse=True,
+    )
+    active_amendment_by_type: dict[str, str] = {}
+    superseded_by: dict[str, str] = {}
+    for item in ordered:
+        rcept_no = str(item.get("rcept_no") or "").strip()
+        report_nm = str(item.get("report_nm") or "").strip()
+        disc_type = item.get("disclosure_type") or classify_reprice_disclosure(report_nm)
+        if not rcept_no or not disc_type:
+            continue
+        amended = is_amendment_disclosure(report_nm)
+        newer_amendment = active_amendment_by_type.get(disc_type)
+        if newer_amendment:
+            superseded_by[rcept_no] = newer_amendment
+            if not amended:
+                # 해당 정정 체인의 최초 원본까지 도달했으므로 체인을 닫는다.
+                active_amendment_by_type.pop(disc_type, None)
+        elif amended:
+            active_amendment_by_type[disc_type] = rcept_no
+    return superseded_by
 
 
 def _iso_rcept_dt(raw: str | None) -> str:
@@ -147,18 +233,43 @@ def _decode_bytes(raw: bytes) -> str:
     return raw.decode("utf-8", errors="ignore")
 
 
-def extract_xml_documents_from_zip(content: bytes, rcept_no: str = "") -> list[str]:
-    """``document.xml`` ZIP 에서 본문 XML/HTML 텍스트 목록을 추출한다(주 문서 우선)."""
+def extract_xml_documents_from_zip(
+    content: bytes,
+    rcept_no: str = "",
+    *,
+    max_entries: int | None = None,
+    max_uncompressed_bytes: int | None = None,
+) -> list[str]:
+    """``document.xml`` ZIP 에서 엔트리 수·해제 용량 상한을 검증하며 XML/HTML 본문을 추출한다."""
+    entry_limit = MAX_ZIP_ENTRIES if max_entries is None else max_entries
+    byte_limit = MAX_ZIP_UNCOMPRESSED_BYTES if max_uncompressed_bytes is None else max_uncompressed_bytes
+    if len(content) > byte_limit:
+        raise _ZipLimitExceededError("원문 압축 파일 크기가 상한을 초과합니다.")
     with zipfile.ZipFile(io.BytesIO(content)) as zf:
+        infos = zf.infolist()
+        if len(infos) > entry_limit:
+            raise _ZipLimitExceededError("원문 압축 내 엔트리 수가 상한을 초과합니다.")
+        declared_total = sum(max(0, int(info.file_size or 0)) for info in infos)
+        if declared_total > byte_limit:
+            raise _ZipLimitExceededError("원문 압축 해제 예정 용량이 상한을 초과합니다.")
+
         names = [
-            name for name in zf.namelist()
-            if name.lower().endswith((".xml", ".html", ".htm"))
+            info.filename for info in infos
+            if not info.is_dir() and info.filename.lower().endswith((".xml", ".html", ".htm"))
         ]
         prefix = str(rcept_no or "").strip()
         names.sort(key=lambda n: (0 if prefix and n.startswith(prefix) else 1, len(n), n))
+
         docs: list[str] = []
+        total_read = 0
         for name in names:
-            docs.append(_decode_bytes(zf.read(name)))
+            remaining = byte_limit - total_read
+            with zf.open(name) as member:
+                chunk = member.read(remaining + 1)
+            total_read += len(chunk)
+            if total_read > byte_limit:
+                raise _ZipLimitExceededError("원문 압축 해제 실제 용량이 상한을 초과합니다.")
+            docs.append(_decode_bytes(chunk))
         return docs
 
 
@@ -212,7 +323,6 @@ def _expand_table_grid(table: Any) -> list[list[str]]:
 
 
 def _is_amendment_diff_table(grid: list[list[str]]) -> bool:
-    """기재정정 상단의 '정정전 / 정정후' 비교표인지 판별."""
     header_blob = " ".join(" ".join(row) for row in grid[:3])
     compact = re.sub(r"\s+", "", header_blob)
     return "정정전" in compact and "정정후" in compact
@@ -252,11 +362,6 @@ def _parse_single_number(
     integer_only: bool = False,
     forbid_percent: bool = True,
 ) -> tuple[float | None, bool]:
-    """단일 수치 셀 파싱. 반환: ``(value, is_ambiguous)``.
-
-    '-'·'해당없음'은 ``(None, False)``(결측), 한 셀에 서로 다른 숫자가 여럿이면
-    ``(None, True)``(모호함 — 추정 금지)를 돌려준다.
-    """
     cleaned = _FOOTNOTE_RE.sub("", str(raw_text or "")).strip()
     compact = re.sub(r"\s+", "", cleaned).lower()
     if compact in _EMPTY_CELL_VALUES:
@@ -310,7 +415,6 @@ def _share_class_of(text: str) -> str | None:
 
 
 def _extract_inline_class_numbers(text: str, *, integer_only: bool) -> tuple[dict[str, float], bool]:
-    """'보통주 1,000,000주, 종류주 50,000주' 처럼 한 칸에 병기된 수치를 분리한다."""
     cleaned = _FOOTNOTE_RE.sub("", str(text or ""))
     found: dict[str, float] = {}
     ambiguous = False
@@ -332,7 +436,6 @@ def _extract_inline_class_numbers(text: str, *, integer_only: bool) -> tuple[dic
 
 
 def _record_field(store: dict[str, Any], key: str, value: float | None) -> bool:
-    """같은 필드에 상충하는 양수 값이 두 번 나오면 모호함(True)으로 표시한다."""
     if value is None:
         return False
     prev = store.get(key)
@@ -352,7 +455,7 @@ def _value_cells_after(cells: list[str], start_idx: int) -> str:
 
 
 def parse_stock_retirement_xml(xml_texts: list[str]) -> dict[str, Any]:
-    """``주식소각결정`` 원문(``document.xml``)에서 소각 주식 수·발행주식총수를 추출한다."""
+    """``주식소각결정`` 원문(``document.xml``)에서 소각 주식 수·발행주식총수·예정일·취득방법을 추출한다."""
     extracted: dict[str, Any] = {
         "retired_shares_common": None,
         "retired_shares_preferred": None,
@@ -365,13 +468,16 @@ def parse_stock_retirement_xml(xml_texts: list[str]) -> dict[str, Any]:
     ambiguous = False
 
     for grid in _iter_candidate_grids(xml_texts):
-        # 1) 열 헤더형 표 지원 (예: [구분/주식의종류 | 소각할 주식의 수 | 발행주식총수])
         header_map: dict[str, int] = {}
         header_row_idx = -1
         for r_idx, raw_row in enumerate(grid[:3]):
             labels = [_compact_label(c) for c in raw_row]
             col_ret = next(
-                (i for i, lb in enumerate(labels) if ("소각할주식" in lb or "소각예정주식" in lb or lb == "소각주식수") and "금액" not in lb and "기간" not in lb and "방법" not in lb),
+                (
+                    i for i, lb in enumerate(labels)
+                    if ("소각할주식" in lb or "소각예정주식" in lb or lb == "소각주식수")
+                    and "금액" not in lb and "기간" not in lb and "방법" not in lb
+                ),
                 None,
             )
             col_class = next((i for i, lb in enumerate(labels) if "주식의종류" in lb or "주식종류" in lb or lb == "구분"), None)
@@ -397,7 +503,6 @@ def parse_stock_retirement_xml(xml_texts: list[str]) -> dict[str, Any]:
                     ambiguous = ambiguous or amb or _record_field(extracted, f"issued_shares_{s_cls}", val)
             continue
 
-        # 2) 표준 KRX/DART 항목형 표 (행 제목 + 보통주식/종류주식 세부행)
         for raw_row in grid:
             cells = _dedupe_consecutive(raw_row)
             if len(cells) < 2:
@@ -459,7 +564,6 @@ def parse_stock_retirement_xml(xml_texts: list[str]) -> dict[str, Any]:
                 if method and _compact_label(method) not in _EMPTY_CELL_VALUES:
                     extracted["acquisition_method"] = method[:80]
             elif "소각할주식" in sub:
-                # 3단 표에서 바깥 묶음칸 아래에 '소각할 주식의 수'가 두 번째 열에 오는 변형 방어
                 s_cls = _share_class_of(cells[2]) if len(cells) >= 4 else None
                 if s_cls:
                     val, amb = _parse_single_number(_value_cells_after(cells, 3), allow_zero=True, integer_only=True)
@@ -492,7 +596,7 @@ def parse_stock_retirement_xml(xml_texts: list[str]) -> dict[str, Any]:
 
 
 def parse_cash_dividend_xml(xml_texts: list[str]) -> dict[str, Any]:
-    """``현금ㆍ현물배당결정`` 원문(``document.xml``)에서 1주당 배당금·배당구분을 추출한다."""
+    """``현금ㆍ현물배당결정`` 원문(``document.xml``)에서 1주당 배당금·배당구분·배당기준일을 추출한다."""
     extracted: dict[str, Any] = {
         "dividend_category": None,
         "dividend_kind": None,
@@ -507,7 +611,6 @@ def parse_cash_dividend_xml(xml_texts: list[str]) -> dict[str, Any]:
     ambiguous = False
 
     for grid in _iter_candidate_grids(xml_texts):
-        # 1) 열 헤더형 표 (예: [배당구분 | 배당종류 | 주식종류 | 1주당 배당금 | 시가배당률])
         header_map: dict[str, int] = {}
         header_row_idx = -1
         for r_idx, raw_row in enumerate(grid[:3]):
@@ -545,7 +648,6 @@ def parse_cash_dividend_xml(xml_texts: list[str]) -> dict[str, Any]:
                         extracted[f"yield_{s_cls}_pct"] = y_val
             continue
 
-        # 2) 표준 KRX/DART 항목형 표
         for raw_row in grid:
             cells = _dedupe_consecutive(raw_row)
             if len(cells) < 2:
@@ -626,9 +728,16 @@ def parse_cash_dividend_xml(xml_texts: list[str]) -> dict[str, Any]:
 
 
 def parse_reprice_document_zip(content: bytes, disclosure_type: str, rcept_no: str = "") -> dict[str, Any]:
+    """원문 ZIP 바이트를 안전하게 파싱한다. 손상·용량초과·내부 파싱 예외 모두 ``unparseable`` 로 변환."""
     try:
         xml_texts = extract_xml_documents_from_zip(content, rcept_no=rcept_no)
-    except (zipfile.BadZipFile, OSError, ValueError):
+    except _ZipLimitExceededError as exc:
+        return {
+            "parse_status": "unparseable",
+            "parse_message": f"수치 확인 불가 ({exc})",
+            "extracted": {},
+        }
+    except _ZIP_OPEN_ERRORS:
         return {
             "parse_status": "unparseable",
             "parse_message": "수치 확인 불가 (원문 압축 파일을 열지 못함)",
@@ -640,15 +749,34 @@ def parse_reprice_document_zip(content: bytes, disclosure_type: str, rcept_no: s
             "parse_message": "수치 확인 불가 (원문 XML 문서 없음)",
             "extracted": {},
         }
-    if disclosure_type == STOCK_RETIREMENT:
-        return parse_stock_retirement_xml(xml_texts)
-    if disclosure_type == CASH_DIVIDEND:
-        return parse_cash_dividend_xml(xml_texts)
+    try:
+        if disclosure_type == STOCK_RETIREMENT:
+            return parse_stock_retirement_xml(xml_texts)
+        if disclosure_type == CASH_DIVIDEND:
+            return parse_cash_dividend_xml(xml_texts)
+    except _XML_PARSE_ERRORS as exc:
+        logger.warning("reprice xml parse error (%s %s): %s", disclosure_type, rcept_no, exc)
+        return {
+            "parse_status": "unparseable",
+            "parse_message": "수치 확인 불가 (원문 표 구조 해석 실패)",
+            "extracted": {},
+        }
     return {"parse_status": "unparseable", "parse_message": "지원하지 않는 공시 유형", "extracted": {}}
 
 
-async def _fetch_and_parse_document(rcept_no: str, disclosure_type: str, *, essential: bool = False) -> dict[str, Any]:
-    """``rcept_no`` 별 원문 파싱 결과를 인메모리 + SQLite ``cache_values`` 로 캐시한다."""
+async def _fetch_and_parse_document(
+    rcept_no: str,
+    disclosure_type: str,
+    *,
+    allow_download: bool = True,
+    essential: bool = False,
+) -> dict[str, Any]:
+    """``rcept_no`` 별 원문 파싱 결과 조회.
+
+    - ``parse_status == "ok"`` 만 SQLite ``cache_values``(v2, 90일)에 영속 저장하고,
+      실패 결과는 인메모리 단기 캐시(1시간)에만 둔다.
+    - ``allow_download=False``(비로그인 요청)이면 캐시에 없을 때 upstream 원문을 받지 않는다.
+    """
     cache_key = f"{disclosure_type}:{rcept_no}"
     mem_hit = _doc_mem_cache.get(cache_key)
     if mem_hit is not None:
@@ -658,24 +786,35 @@ async def _fetch_and_parse_document(rcept_no: str, disclosure_type: str, *, esse
         db_entry = await cache_values.get_cache_value_entry(CACHE_NS_REPRICE_DOC, cache_key)
     except _DB_CACHE_ERRORS:
         db_entry = None
-    if db_entry is not None and isinstance(db_entry.value, dict):
+    if db_entry is not None and isinstance(db_entry.value, dict) and db_entry.value.get("parse_status") == "ok":
         _doc_mem_cache.set(cache_key, db_entry.value)
         return db_entry.value
+
+    if not allow_download:
+        return {
+            "parse_status": "cache_miss",
+            "parse_message": "로그인 시 공시 원문 수치를 분석합니다",
+            "extracted": {},
+        }
 
     async def _load() -> dict[str, Any]:
         async with _doc_sem:
             raw_zip = await dart_client.fetch_document_xml_bytes(rcept_no, essential=essential)
         parsed = parse_reprice_document_zip(raw_zip, disclosure_type, rcept_no=rcept_no)
-        try:
-            await cache_values.set_cache_value(
-                CACHE_NS_REPRICE_DOC, cache_key, parsed, ttl_seconds=DOC_DB_TTL_SECONDS
-            )
-        except _DB_CACHE_ERRORS as exc:
-            logger.debug("reprice doc db cache write skipped (%s): %s", cache_key, exc)
+        if parsed.get("parse_status") == "ok":
+            try:
+                await cache_values.set_cache_value(
+                    CACHE_NS_REPRICE_DOC, cache_key, parsed, ttl_seconds=DOC_DB_TTL_SECONDS
+                )
+            except _DB_CACHE_ERRORS as exc:
+                logger.debug("reprice doc db cache write skipped (%s): %s", cache_key, exc)
         return parsed
 
+    def _ttl_for(parsed: dict[str, Any]) -> float:
+        return DOC_MEM_TTL_SECONDS if parsed.get("parse_status") == "ok" else DOC_FAILURE_TTL_SECONDS
+
     try:
-        return await cached_fetch(_doc_mem_cache, cache_key, _load)
+        return await cached_fetch(_doc_mem_cache, cache_key, _load, ttl=_ttl_for)
     except dart_client.DartQuotaError:
         return {
             "parse_status": "quota",
@@ -701,57 +840,134 @@ def _safe_num(value: Any) -> float | None:
     return num if math.isfinite(num) else None
 
 
-def _select_retirement_shares_and_base(
-    extracted: dict[str, Any],
-    basis: dict[str, Any],
-    *,
-    preferred_stock: bool,
-) -> tuple[int | None, int | None, str | None, str | None]:
-    """소각 주식 수와 분모 기준 주식수(유통주식수 우선 → 발행주식수 폴백)를 고른다."""
+def _fmt_krw_compact(amount: float | None) -> str | None:
+    val = _safe_num(amount)
+    if val is None or val <= 0:
+        return None
+    if val >= 1e8:
+        return f"{val / 1e8:,.1f}억원"
+    return f"{round(val):,}원"
+
+
+def _build_retirement_facts(extracted: dict[str, Any]) -> tuple[dict[str, Any], str]:
     ret_common = int(extracted.get("retired_shares_common") or 0)
     ret_pref = int(extracted.get("retired_shares_preferred") or 0)
     iss_common = int(extracted.get("issued_shares_common") or 0)
     iss_pref = int(extracted.get("issued_shares_preferred") or 0)
+    planned = _safe_num(extracted.get("planned_amount_krw"))
+    sched = extracted.get("scheduled_date")
+    method = extracted.get("acquisition_method")
 
-    basis_outstanding = int(round(_safe_num(basis.get("outstandingShares")) or 0))
-    basis_issued = int(round(_safe_num(basis.get("issuedShares")) or 0))
+    common_ratio_pct = round(ret_common / iss_common * 100.0, 2) if (ret_common > 0 and iss_common > 0) else None
+    pref_ratio_pct = round(ret_pref / iss_pref * 100.0, 2) if (ret_pref > 0 and iss_pref > 0) else None
 
-    # valuation.py 의 treasury_share_basis 는 보통+우선 합계일 수도, 보통주 단독일 수도 있다.
-    if basis_outstanding > 0:
-        if iss_pref > 0 and iss_common > 0 and basis_issued > 0 and abs(basis_issued - iss_common) < abs(basis_issued - (iss_common + iss_pref)):
-            retired = ret_common
-            label = "유통주식수(보통주)"
-        else:
-            retired = ret_common + ret_pref
-            label = "유통주식수(자사주 차감)"
-        if retired <= 0:
-            return None, basis_outstanding, label, "해당 주식 종류의 소각 수량이 없습니다."
-        if retired >= basis_outstanding:
-            return retired, basis_outstanding, label, "소각 주식 수가 기준 유통주식수 이상이라 계산할 수 없습니다."
-        return retired, basis_outstanding, label, None
+    parts: list[str] = []
+    if ret_common > 0:
+        ratio_txt = f"(발행보통주 대비 {common_ratio_pct:.2f}%)" if common_ratio_pct is not None else ""
+        parts.append(f"보통주 소각 {ret_common:,}주{ratio_txt}")
+    if ret_pref > 0:
+        ratio_txt = f"(발행종류주 대비 {pref_ratio_pct:.2f}%)" if pref_ratio_pct is not None else ""
+        parts.append(f"종류주 소각 {ret_pref:,}주{ratio_txt}")
+    amt_txt = _fmt_krw_compact(planned)
+    if amt_txt:
+        parts.append(f"소각예정금액 {amt_txt}")
+    if sched:
+        parts.append(f"소각예정일 {sched}")
 
-    if basis_issued > 0:
-        retired = (ret_common + ret_pref) if (iss_pref > 0 and abs(basis_issued - (iss_common + iss_pref)) <= abs(basis_issued - iss_common)) else (ret_common or ret_pref)
-        if retired <= 0:
-            return None, basis_issued, "발행주식수", "소각 주식 수를 확인할 수 없습니다."
-        if retired >= basis_issued:
-            return retired, basis_issued, "발행주식수", "소각 주식 수가 기준 발행주식수 이상이라 계산할 수 없습니다."
-        return retired, basis_issued, "발행주식수", None
+    facts = {
+        "retired_shares_common": ret_common or None,
+        "retired_shares_preferred": ret_pref or None,
+        "issued_shares_common": iss_common or None,
+        "issued_shares_preferred": iss_pref or None,
+        "issued_common_ratio_pct": common_ratio_pct,
+        "issued_preferred_ratio_pct": pref_ratio_pct,
+        "planned_amount_krw": planned,
+        "scheduled_date": sched,
+        "acquisition_method": method,
+    }
+    return facts, " · ".join(parts)
 
-    # 재무 provider 에 주식수가 없으면 공시 본문의 발행주식총수를 분모로 쓴다.
-    if preferred_stock and iss_pref > 0 and ret_pref > 0 and ret_common == 0:
-        if ret_pref >= iss_pref:
-            return ret_pref, iss_pref, "공시 발행주식총수(종류주)", "소각 주식 수가 발행주식총수 이상입니다."
-        return ret_pref, iss_pref, "공시 발행주식총수(종류주)", None
 
-    filing_total = iss_common + iss_pref if (ret_pref > 0 and iss_pref > 0 and iss_common > 0) else iss_common
-    retired = (ret_common + ret_pref) if (ret_pref > 0 and iss_pref > 0 and iss_common > 0) else ret_common
-    if filing_total > 0 and retired > 0:
-        if retired >= filing_total:
-            return retired, filing_total, "공시 발행주식총수", "소각 주식 수가 공시 발행주식총수 이상입니다."
-        return retired, filing_total, "공시 발행주식총수", None
+def _classify_acquisition_method(method_raw: str | None) -> str:
+    compact = _compact_label(method_raw)
+    if not compact:
+        return "unknown"
+    has_existing = any(h in compact for h in _EXISTING_TREASURY_HINTS)
+    has_new = any(h in compact for h in _NEW_ACQUISITION_HINTS)
+    if has_existing and not has_new:
+        return "existing_treasury"
+    if has_new and not has_existing:
+        return "new_acquisition"
+    return "unknown"
 
-    return (ret_common or ret_pref or None), None, None, "기준 유통·발행주식수를 확인하지 못해 미계산"
+
+def _confirmed_basis_denominator(basis: dict[str, Any], extracted: dict[str, Any]) -> tuple[str | None, str | None]:
+    """finance-pi 기초재무에서 보통주 단독 구성 및 분모(발행 vs 유통) 확정 여부를 검증한다.
+
+    반환: ``(denominator_kind, uncalculable_reason)`` — ``denominator_kind`` 는 ``"outstanding"`` | ``"issued"`` | ``None``.
+    """
+    if basis.get("source") != "internal_fundamentals":
+        return None, UNCALCULABLE_TREASURY_REASON
+
+    bps_excl = basis.get("bpsTreasuryExcluded")
+    eps_excl = basis.get("epsTreasuryExcluded")
+    has_bps = _safe_num(basis.get("bps")) is not None
+    has_eps = _safe_num(basis.get("eps")) is not None
+    if not has_bps and not has_eps:
+        return None, UNCALCULABLE_TREASURY_REASON
+
+    bps_flag = bps_excl if (has_bps and isinstance(bps_excl, bool)) else None
+    eps_flag = eps_excl if (has_eps and isinstance(eps_excl, bool)) else None
+    if bps_flag is None and eps_flag is None:
+        return None, UNCALCULABLE_TREASURY_REASON
+    if bps_flag is not None and eps_flag is not None and bps_flag != eps_flag:
+        return None, "BPS와 EPS의 자기주식 차감 기준이 서로 달라 계산하지 않음"
+    effective_flag = bps_flag if bps_flag is not None else eps_flag
+
+    comp = basis.get("shareComposition")
+    iss_pref_filing = int(extracted.get("issued_shares_preferred") or 0)
+    iss_common_filing = int(extracted.get("issued_shares_common") or 0)
+    if comp == "mixed":
+        return None, "보통주·종류주 혼합 기준이라 주당가치 분모 구성을 확정할 수 없어 미계산"
+    if comp == "single_unspecified":
+        # components 분해가 없을 때는 공시상 종류주식 미발행(0)이고 보통주 발행주식수가 일치할 때만 보통주 단독으로 인정
+        basis_issued = int(round(_safe_num(basis.get("issuedShares")) or 0))
+        if iss_pref_filing > 0 or iss_common_filing <= 0 or basis_issued != iss_common_filing:
+            return None, "기준 주식수 구성(보통주·종류주 분리 여부)이 확정되지 않아 미계산"
+    elif comp != "common_only":
+        return None, "기준 주식수 구성이 확정되지 않아 미계산"
+
+    return ("outstanding" if effective_flag else "issued"), None
+
+
+def _check_freshness(
+    disclosure_type: str,
+    rcept_dt_iso: str,
+    extracted: dict[str, Any],
+    *,
+    as_of: date,
+) -> tuple[bool, str | None]:
+    """``rcept_dt`` 가 최근 7일 이내이고 소각예정일/배당기준일이 아직 오지 않았는지 확인."""
+    if not rcept_dt_iso:
+        return False, STALE_REASON
+    try:
+        filing_day = date.fromisoformat(rcept_dt_iso)
+    except ValueError:
+        return False, STALE_REASON
+    age_days = (as_of - filing_day).days
+    if age_days > PRO_FORMA_FRESH_DAYS or age_days < -1:
+        return False, STALE_REASON
+
+    eff_raw = extracted.get("scheduled_date") if disclosure_type == STOCK_RETIREMENT else extracted.get("record_date")
+    if not eff_raw:
+        return False, STALE_REASON
+    try:
+        eff_day = date.fromisoformat(str(eff_raw))
+    except ValueError:
+        return False, STALE_REASON
+    if eff_day <= as_of:
+        return False, STALE_REASON
+    return True, None
 
 
 def compute_pro_forma(
@@ -761,60 +977,160 @@ def compute_pro_forma(
     stock_code: str,
     basis: dict[str, Any],
     trailing_dps: float | None,
+    rcept_dt: str = "",
+    as_of: date | None = None,
 ) -> dict[str, Any]:
-    """공시 추출값과 현재 주당 기초지표(BPS·EPS·DPS)로 Pro-forma 수치를 계산한다."""
-    if parsed.get("parse_status") != "ok":
+    """공시 추출값과 현재 주당 기초지표로 Pro-forma 수치를 계산한다."""
+    p_status = parsed.get("parse_status")
+    if p_status == "superseded":
+        reason = "정정됨 — 후속 기재정정 공시에서 계산"
+        return {"status": "superseded", "reason": reason, "summary": reason, "assumption": None}
+    if p_status != "ok":
         reason = parsed.get("parse_message") or "수치 확인 불가"
         return {
-            "status": "unavailable",
+            "status": "cache_miss" if p_status == "cache_miss" else "unavailable",
             "reason": reason,
             "summary": reason,
             "assumption": None,
         }
 
+    today = as_of or today_kst()
     extracted = parsed.get("extracted") or {}
     preferred = is_preferred_stock(stock_code)
 
     if disclosure_type == STOCK_RETIREMENT:
-        retired, base_shares, base_label, err = _select_retirement_shares_and_base(
-            extracted, basis, preferred_stock=preferred
-        )
-        if err or not retired or not base_shares:
-            reason = err or "기준 주식수 부족으로 미계산"
+        facts, facts_summary = _build_retirement_facts(extracted)
+        is_fresh, stale_reason = _check_freshness(STOCK_RETIREMENT, rcept_dt, extracted, as_of=today)
+        if not is_fresh:
+            reason = stale_reason or STALE_REASON
+            summary = f"{facts_summary} · {reason}" if facts_summary else reason
+            return {
+                "status": "stale",
+                "reason": reason,
+                "facts": facts,
+                "facts_summary": facts_summary,
+                "summary": summary,
+                "assumption": None,
+            }
+
+        ret_common = int(extracted.get("retired_shares_common") or 0)
+        ret_pref = int(extracted.get("retired_shares_preferred") or 0)
+        if preferred or (ret_common <= 0 and ret_pref > 0):
+            reason = "종류주식 소각 — 보통주 기준 주당가치(BPS·EPS)에 반영하지 않음"
             return {
                 "status": "uncalculable",
                 "reason": reason,
-                "retired_shares": retired,
-                "base_shares": base_shares,
-                "summary": f"미계산 — {reason}",
+                "facts": facts,
+                "facts_summary": facts_summary,
+                "summary": f"{facts_summary} · {reason}" if facts_summary else reason,
                 "assumption": None,
             }
-        post_shares = base_shares - retired
-        multiplier = base_shares / post_shares
-        retired_pct = round(retired / base_shares * 100.0, 2)
-        uplift_pct = round((multiplier - 1.0) * 100.0, 2)
+        if ret_common > 0 and ret_pref > 0:
+            reason = "보통주·종류주 동시 소각 — 주당가치 귀속 구성을 확정할 수 없어 미계산"
+            return {
+                "status": "uncalculable",
+                "reason": reason,
+                "facts": facts,
+                "facts_summary": facts_summary,
+                "summary": f"{facts_summary} · {reason}" if facts_summary else reason,
+                "assumption": None,
+            }
 
-        pre_bps = _safe_num(basis.get("bps"))
-        pre_eps = _safe_num(basis.get("eps"))
+        acq_type = _classify_acquisition_method(extracted.get("acquisition_method"))
+        denom_kind, denom_err = _confirmed_basis_denominator(basis, extracted)
+        if denom_kind is None:
+            reason = UNCALCULABLE_TREASURY_REASON if acq_type != "new_acquisition" else (denom_err or UNCALCULABLE_TREASURY_REASON)
+            if denom_err and acq_type == "existing_treasury" and "혼합" in denom_err:
+                reason = denom_err
+            elif denom_err and "구성" in denom_err:
+                reason = denom_err
+            return {
+                "status": "uncalculable",
+                "reason": reason,
+                "facts": facts,
+                "facts_summary": facts_summary,
+                "summary": f"{facts_summary} · {reason}" if facts_summary else reason,
+                "assumption": None,
+            }
+
+        if acq_type == "new_acquisition":
+            reason = "신규 취득 예정 자사주 소각 — 취득금액만큼 자본총계가 함께 변동하므로 미계산"
+            return {
+                "status": "uncalculable",
+                "reason": reason,
+                "facts": facts,
+                "facts_summary": facts_summary,
+                "summary": f"{facts_summary} · {reason}" if facts_summary else reason,
+                "assumption": None,
+            }
+        if acq_type != "existing_treasury":
+            reason = UNCALCULABLE_TREASURY_REASON
+            return {
+                "status": "uncalculable",
+                "reason": reason,
+                "facts": facts,
+                "facts_summary": facts_summary,
+                "summary": f"{facts_summary} · {reason}" if facts_summary else reason,
+                "assumption": None,
+            }
+
+        # 이제 acq_type == "existing_treasury" 이고 보통주 단독 구성 + 분모 종류가 확정됨.
+        if denom_kind == "outstanding":
+            treasury_shares = _safe_num(basis.get("treasuryShares"))
+            if treasury_shares is not None and round(treasury_shares) >= ret_common:
+                reason = "기취득 자사주 소각 — 유통주식수 기준 주당가치 분모에 이미 차감돼 영향 없음"
+                return {
+                    "status": "no_impact",
+                    "reason": reason,
+                    "facts": facts,
+                    "facts_summary": facts_summary,
+                    "summary": f"{facts_summary} · {reason}" if facts_summary else reason,
+                    "assumption": None,
+                }
+            return {
+                "status": "uncalculable",
+                "reason": UNCALCULABLE_TREASURY_REASON,
+                "facts": facts,
+                "facts_summary": facts_summary,
+                "summary": f"{facts_summary} · {UNCALCULABLE_TREASURY_REASON}" if facts_summary else UNCALCULABLE_TREASURY_REASON,
+                "assumption": None,
+            }
+
+        # denom_kind == "issued": 기존 BPS·EPS 가 발행주식총수 분모이고 기취득 자사주를 소각하는 경우
+        base_shares = int(round(_safe_num(basis.get("issuedShares")) or 0))
+        if base_shares <= 0 or ret_common >= base_shares:
+            reason = "기준 발행주식수를 확정할 수 없어 미계산"
+            return {
+                "status": "uncalculable",
+                "reason": reason,
+                "facts": facts,
+                "facts_summary": facts_summary,
+                "summary": f"{facts_summary} · {reason}" if facts_summary else reason,
+                "assumption": None,
+            }
+
+        post_shares = base_shares - ret_common
+        multiplier = base_shares / post_shares
+        retired_pct = round(ret_common / base_shares * 100.0, 2)
+        uplift_pct = round((multiplier - 1.0) * 100.0, 2)
+        pre_bps = _safe_num(basis.get("bps")) if basis.get("bpsTreasuryExcluded") is False else None
+        pre_eps = _safe_num(basis.get("eps")) if basis.get("epsTreasuryExcluded") is False else None
         post_bps = round(pre_bps * multiplier, 2) if pre_bps is not None else None
         post_eps = round(pre_eps * multiplier, 2) if pre_eps is not None else None
 
-        parts = [f"소각 {retired:,}주({base_label} 대비 {retired_pct:.2f}%)"]
+        parts = [facts_summary] if facts_summary else [f"보통주 소각 {ret_common:,}주({retired_pct:.2f}%)"]
         if pre_bps is not None and post_bps is not None:
             parts.append(f"BPS {round(pre_bps):,}→{round(post_bps):,}원({uplift_pct:+.1f}%)")
         if pre_eps is not None and post_eps is not None:
             parts.append(f"EPS {round(pre_eps):,}→{round(post_eps):,}원({uplift_pct:+.1f}%)")
-        if pre_bps is None and pre_eps is None:
-            parts.append(f"주당가치 계수 {uplift_pct:+.2f}%")
-
-        method = extracted.get("acquisition_method")
-        method_note = f" (취득방법: {method})" if method else ""
         return {
             "status": "ok",
             "reason": None,
-            "retired_shares": retired,
+            "facts": facts,
+            "facts_summary": facts_summary,
+            "retired_shares": ret_common,
             "base_shares": base_shares,
-            "base_shares_label": base_label,
+            "base_shares_label": "발행주식수(보통주)",
             "post_shares": post_shares,
             "retired_pct": retired_pct,
             "per_share_uplift_pct": uplift_pct,
@@ -824,11 +1140,10 @@ def compute_pro_forma(
             "post_eps": post_eps,
             "pre_dps": None,
             "post_dps": None,
-            "summary": " · ".join(parts),
+            "summary": " · ".join(p for p in parts if p),
             "assumption": (
-                f"{base_label}({base_shares:,}주)에서 소각 {retired:,}주가 순감소하고 자본총계·순이익은 "
-                f"동일하다고 가정한 잠정(Pro-forma) 계산입니다{method_note}. 기취득 자사주가 기존 BPS·EPS 분모에서 "
-                "이미 차감된 경우 실제 추가 변동폭은 다를 수 있습니다."
+                f"기취득 자기주식 소각으로 자본총계·순이익 변동 없이 발행보통주 분모({base_shares:,}주)만 "
+                f"{post_shares:,}주로 감소하는 잠정(Pro-forma) 계산입니다(기존 DB 미변경)."
             ),
         }
 
@@ -846,34 +1161,71 @@ def compute_pro_forma(
 
     category = str(extracted.get("dividend_category") or "").strip()
     cat_compact = _compact_label(category)
-    if "분기" in cat_compact or "중간" in cat_compact:
-        cat_display = category or "중간·분기배당"
-        reason = f"{cat_display} 단건 공시(주당 {round(declared_dps):,}원)만으로는 연간 누적 DPS를 확정할 수 없어 미계산"
+    rec_date = extracted.get("record_date")
+    div_facts = {
+        "dividend_category": category or None,
+        "share_class": share_label,
+        "declared_dps": declared_dps,
+        "record_date": rec_date,
+    }
+    fact_bits = [f"{category + ' ' if category else ''}{share_label} 주당 {round(declared_dps):,}원"]
+    if rec_date:
+        fact_bits.append(f"배당기준일 {rec_date}")
+    facts_summary = " · ".join(fact_bits)
+
+    is_year_end_confirmed = ("결산" in cat_compact) and ("분기" not in cat_compact) and ("중간" not in cat_compact)
+    if not is_year_end_confirmed:
+        if "분기" in cat_compact or "중간" in cat_compact:
+            reason = f"{category} 단건 공시만으로는 연간 누적 DPS를 확정할 수 없어 미계산"
+        else:
+            reason = "배당구분(결산배당 여부)이 확인되지 않아 연간 DPS로 가정하지 않고 미계산"
         return {
             "status": "uncalculable",
             "reason": reason,
+            "facts": div_facts,
+            "facts_summary": facts_summary,
             "declared_dps": declared_dps,
-            "dividend_category": cat_display,
+            "dividend_category": category or None,
+            "dividend_category_confirmed": False,
             "pre_dps": trailing_dps,
             "post_dps": None,
-            "summary": f"{cat_display} 주당 {round(declared_dps):,}원 공시 · 연간 DPS 미계산",
-            "assumption": "목표가 수식의 DPS는 연간 기준이므로 분기·중간배당 단건 금액으로 연간 DPS를 치환하지 않습니다.",
+            "summary": f"{facts_summary} · {reason}",
+            "assumption": None,
+        }
+
+    is_fresh, stale_reason = _check_freshness(CASH_DIVIDEND, rcept_dt, extracted, as_of=today)
+    if not is_fresh:
+        reason = stale_reason or STALE_REASON
+        return {
+            "status": "stale",
+            "reason": reason,
+            "facts": div_facts,
+            "facts_summary": facts_summary,
+            "declared_dps": declared_dps,
+            "dividend_category": category,
+            "dividend_category_confirmed": True,
+            "summary": f"{facts_summary} · {reason}",
+            "assumption": None,
         }
 
     pre_dps = _safe_num(trailing_dps)
     post_dps = declared_dps
     dps_delta_krw = round(post_dps - pre_dps, 2) if pre_dps is not None else None
     dps_delta_pct = round((post_dps / pre_dps - 1.0) * 100.0, 2) if (pre_dps is not None and pre_dps > 0) else None
-    cat_prefix = f"{category} " if category else ""
     if pre_dps is not None and pre_dps > 0 and dps_delta_pct is not None:
-        summary = f"{cat_prefix}주당배당금 {round(pre_dps):,}→{round(post_dps):,}원({dps_delta_pct:+.1f}%)"
+        summary = f"{category} {share_label} 주당배당금 {round(pre_dps):,}→{round(post_dps):,}원({dps_delta_pct:+.1f}%)"
     else:
-        summary = f"{cat_prefix}Pro-forma 주당배당금 {round(post_dps):,}원"
+        summary = f"{category} {share_label} Pro-forma 주당배당금 {round(post_dps):,}원"
+    if rec_date:
+        summary += f" · 배당기준일 {rec_date}"
 
     return {
         "status": "ok",
         "reason": None,
-        "dividend_category": category or "결산배당",
+        "facts": div_facts,
+        "facts_summary": facts_summary,
+        "dividend_category": category,
+        "dividend_category_confirmed": True,
         "declared_dps": declared_dps,
         "pre_bps": None,
         "post_bps": None,
@@ -885,8 +1237,8 @@ def compute_pro_forma(
         "dps_delta_pct": dps_delta_pct,
         "summary": summary,
         "assumption": (
-            f"공시된 {share_label} 1주당 현금배당금({round(post_dps):,}원)을 연간 DPS로 대입한 잠정(Pro-forma) "
-            "계산입니다(중간·분기배당 병행 기업은 별도 합산 필요, 기존 DB 미변경)."
+            f"확인된 결산배당({share_label} 주당 {round(post_dps):,}원)을 연간 DPS로 대입한 잠정(Pro-forma) "
+            "계산입니다(중간·분기배당 병행 기업은 기지급 배당 별도 확인 필요, 기존 DB 미변경)."
         ),
     }
 
@@ -922,6 +1274,18 @@ def compute_target_reprice(
     """보유 종목의 목표가 수식을 공시 전 변수 vs Pro-forma 변수로 두 번 평가한다."""
     if not holding:
         return None
+    pf_status = pro_forma.get("status")
+    if pf_status in {"superseded", "stale"}:
+        return {
+            "status": pf_status,
+            "reason": pro_forma.get("reason"),
+            "formula": holding.get("target_price_formula"),
+            "pre_target": None,
+            "post_target": None,
+            "delta_krw": None,
+            "delta_pct": None,
+        }
+
     ctx = describe_holding_target_context(stock_code, holding)
     if ctx["status"] != "formula":
         return {
@@ -968,7 +1332,17 @@ def compute_target_reprice(
             "delta_pct": 0.0,
         }
 
-    if pro_forma.get("status") != "ok":
+    if pf_status == "no_impact":
+        return {
+            "status": "no_impact",
+            "reason": pro_forma.get("reason") or "영향 없음",
+            "formula": formula,
+            "pre_target": None,
+            "post_target": None,
+            "delta_krw": 0.0,
+            "delta_pct": 0.0,
+        }
+    if pf_status != "ok":
         return {
             "status": "uncalculable",
             "reason": pro_forma.get("reason") or "공시 수치를 확인하지 못해 미계산",
@@ -1042,16 +1416,18 @@ def compute_target_reprice(
 
 
 def compute_price_reaction(close_rows: list[dict[str, Any]], filing_date: str) -> dict[str, Any]:
-    """공시 접수일 직전 거래일 종가 대비 당일·5거래일·20거래일 수익률을 계산한다."""
+    """접수일 직전 거래일 종가 대비 공시일(당일)·공시일 포함 5거래일·공시일 포함 20거래일 수익률을 계산한다."""
+    empty_win = {"status": "unavailable", "date": None, "close": None, "return_pct": None}
     if not filing_date or not close_rows:
         return {
             "status": "unavailable",
             "reason": "종가 시계열 미확인",
+            "basis_label": PRICE_REACTION_BASIS_LABEL,
             "base_date": None,
             "base_close": None,
-            "day0": {"status": "unavailable", "date": None, "close": None, "return_pct": None},
-            "day5": {"status": "unavailable", "date": None, "close": None, "return_pct": None},
-            "day20": {"status": "unavailable", "date": None, "close": None, "return_pct": None},
+            "day0": {**empty_win, "label": "당일(공시일)"},
+            "day5": {**empty_win, "label": "공시일 포함 5거래일"},
+            "day20": {**empty_win, "label": "공시일 포함 20거래일"},
         }
 
     ordered = sorted(
@@ -1062,25 +1438,27 @@ def compute_price_reaction(close_rows: list[dict[str, Any]], filing_date: str) -
     if not prior:
         return {
             "status": "unavailable",
-            "reason": "공시 전일 종가 미확인",
+            "reason": "접수일 직전 거래일 종가 미확인",
+            "basis_label": PRICE_REACTION_BASIS_LABEL,
             "base_date": None,
             "base_close": None,
-            "day0": {"status": "unavailable", "date": None, "close": None, "return_pct": None},
-            "day5": {"status": "unavailable", "date": None, "close": None, "return_pct": None},
-            "day20": {"status": "unavailable", "date": None, "close": None, "return_pct": None},
+            "day0": {**empty_win, "label": "당일(공시일)"},
+            "day5": {**empty_win, "label": "공시일 포함 5거래일"},
+            "day20": {**empty_win, "label": "공시일 포함 20거래일"},
         }
 
     base = prior[-1]
     base_close = float(base["close"])
     after = [r for r in ordered if str(r["date"]) >= filing_date]
 
-    def _window(idx: int) -> dict[str, Any]:
+    def _window(idx: int, label: str) -> dict[str, Any]:
         if len(after) <= idx:
-            return {"status": "in_progress", "date": None, "close": None, "return_pct": None}
+            return {"status": "in_progress", "label": label, "date": None, "close": None, "return_pct": None}
         row = after[idx]
         close_val = float(row["close"])
         return {
             "status": "ok",
+            "label": label,
             "date": str(row["date"]),
             "close": close_val,
             "return_pct": round((close_val / base_close - 1.0) * 100.0, 2),
@@ -1089,11 +1467,12 @@ def compute_price_reaction(close_rows: list[dict[str, Any]], filing_date: str) -
     return {
         "status": "ok",
         "reason": None,
+        "basis_label": PRICE_REACTION_BASIS_LABEL,
         "base_date": str(base["date"]),
         "base_close": base_close,
-        "day0": _window(0),
-        "day5": _window(4),
-        "day20": _window(19),
+        "day0": _window(0, "당일(공시일)"),
+        "day5": _window(4, "공시일 포함 5거래일"),
+        "day20": _window(19, "공시일 포함 20거래일"),
     }
 
 
@@ -1113,7 +1492,11 @@ def compute_verdict(
     chosen_key = None
     chosen_label = None
     reaction_pct = None
-    for key, label in (("day20", "20거래일"), ("day5", "5거래일"), ("day0", "당일")):
+    for key, label in (
+        ("day20", "공시일 포함 20거래일"),
+        ("day5", "공시일 포함 5거래일"),
+        ("day0", "당일(공시일)"),
+    ):
         win = price_reaction.get(key) or {}
         if win.get("status") == "ok" and _safe_num(win.get("return_pct")) is not None:
             chosen_key = key
@@ -1174,6 +1557,7 @@ async def _load_formula_base_inputs(
     *,
     need_basis: bool,
     need_dps: bool,
+    as_of: date | None = None,
 ) -> tuple[dict[str, Any], float | None, dict[str, float | None]]:
     formula = str((holding or {}).get("target_price_formula") or "").strip()
     vars_used = extract_target_variables(formula) if formula else set()
@@ -1185,7 +1569,7 @@ async def _load_formula_base_inputs(
     if need_basis and is_korean_stock(stock_code):
         source = common_stock_code(stock_code) if is_preferred_stock(stock_code) else stock_code
         try:
-            basis = await fetch_valuation_basis(source, as_of=today_kst())
+            basis = await fetch_valuation_basis(source, as_of=as_of or today_kst())
         except _REPRICE_DATA_ERRORS as exc:
             logger.info("reprice valuation basis unavailable (%s): %s", source, exc)
             basis = {}
@@ -1232,6 +1616,7 @@ async def get_stock_reprice(
     *,
     google_sub: str | None = None,
     days: int = 90,
+    as_of: date | None = None,
 ) -> dict[str, Any]:
     """``GET /api/stocks/{code}/reprice`` 응답 생성 — 최근 ``days``일 정형 공시 2종 재가격."""
     code = str(stock_code or "").strip().upper()
@@ -1273,7 +1658,7 @@ async def get_stock_reprice(
             "items": [],
         }
 
-    today = today_kst()
+    today = as_of or today_kst()
     start_day = today - timedelta(days=max(1, min(int(days or 90), 180)))
     try:
         raw_filings = await dart_client.fetch_filing_list(
@@ -1310,7 +1695,7 @@ async def get_stock_reprice(
             "items": [],
         }
 
-    matched: list[dict[str, Any]] = []
+    all_matched: list[dict[str, Any]] = []
     seen_rcept: set[str] = set()
     for filing in raw_filings:
         rcept_no = str(filing.get("rcept_no") or "").strip()
@@ -1319,16 +1704,14 @@ async def get_stock_reprice(
         if not rcept_no or not disc_type or rcept_no in seen_rcept:
             continue
         seen_rcept.add(rcept_no)
-        matched.append({
+        all_matched.append({
             "rcept_no": rcept_no,
             "rcept_dt": _iso_rcept_dt(filing.get("rcept_dt")),
             "report_nm": report_nm,
             "disclosure_type": disc_type,
         })
-        if len(matched) >= MAX_REPRICE_DOCS:
-            break
 
-    if not matched:
+    if not all_matched:
         return {
             "stock_code": code,
             "authenticated": authenticated,
@@ -1339,12 +1722,30 @@ async def get_stock_reprice(
             "items": [],
         }
 
-    has_retirement = any(m["disclosure_type"] == STOCK_RETIREMENT for m in matched)
-    has_dividend = any(m["disclosure_type"] == CASH_DIVIDEND for m in matched)
+    superseded_map = mark_superseded_disclosures(all_matched)
+    matched = all_matched[:MAX_REPRICE_DOCS]
+    active_matched = [m for m in matched if m["rcept_no"] not in superseded_map]
+
+    has_retirement = any(m["disclosure_type"] == STOCK_RETIREMENT for m in active_matched)
+    has_dividend = any(m["disclosure_type"] == CASH_DIVIDEND for m in active_matched)
 
     valid_dates = [m["rcept_dt"] for m in matched if m["rcept_dt"]]
     earliest = date.fromisoformat(min(valid_dates)) if valid_dates else start_day
     close_since = (earliest - timedelta(days=15)).isoformat()
+
+    async def _load_one_doc(meta: dict[str, Any]) -> dict[str, Any]:
+        if meta["rcept_no"] in superseded_map:
+            return {
+                "parse_status": "superseded",
+                "parse_message": "정정됨 — 후속 기재정정 공시 기준 계산",
+                "extracted": {},
+            }
+        return await _fetch_and_parse_document(
+            meta["rcept_no"],
+            meta["disclosure_type"],
+            allow_download=authenticated,
+            essential=False,
+        )
 
     async def _load_closes() -> list[dict[str, Any]]:
         try:
@@ -1354,12 +1755,9 @@ async def get_stock_reprice(
             return []
 
     parsed_docs, (basis, trailing_dps, pre_vars), close_rows = await asyncio.gather(
-        asyncio.gather(*(
-            _fetch_and_parse_document(m["rcept_no"], m["disclosure_type"], essential=False)
-            for m in matched
-        )),
+        asyncio.gather(*(_load_one_doc(m) for m in matched)),
         _load_formula_base_inputs(
-            code, holding, need_basis=has_retirement, need_dps=has_dividend
+            code, holding, need_basis=has_retirement, need_dps=has_dividend, as_of=today
         ),
         _load_closes(),
     )
@@ -1367,33 +1765,52 @@ async def get_stock_reprice(
     items: list[dict[str, Any]] = []
     for meta, parsed in zip(matched, parsed_docs):
         disc_type = meta["disclosure_type"]
-        pro_forma = compute_pro_forma(
-            disc_type,
-            parsed,
-            stock_code=code,
-            basis=basis,
-            trailing_dps=trailing_dps,
-        )
-        target_reprice = (
-            compute_target_reprice(
-                code,
-                holding,
-                disclosure_type=disc_type,
-                pre_variables=pre_vars,
-                pro_forma=pro_forma,
+        superseded_by = superseded_map.get(meta["rcept_no"])
+        url = DART_VIEWER_URL.format(rcept_no=meta["rcept_no"])
+        try:
+            pro_forma = compute_pro_forma(
+                disc_type,
+                parsed,
+                stock_code=code,
+                basis=basis,
+                trailing_dps=trailing_dps,
+                rcept_dt=meta["rcept_dt"],
+                as_of=today,
             )
-            if authenticated and holding
-            else None
-        )
-        price_reaction = compute_price_reaction(close_rows, meta["rcept_dt"])
-        verdict = compute_verdict(target_reprice, price_reaction)
+            target_reprice = (
+                compute_target_reprice(
+                    code,
+                    holding,
+                    disclosure_type=disc_type,
+                    pre_variables=pre_vars,
+                    pro_forma=pro_forma,
+                )
+                if authenticated and holding
+                else None
+            )
+            price_reaction = compute_price_reaction(close_rows, meta["rcept_dt"])
+            verdict = compute_verdict(target_reprice, price_reaction)
+        except Exception as exc:  # noqa: BLE001 — 부가 정보 경계, 개별 공시 계산 오류가 응답 전체를 막지 않음
+            logger.warning("reprice item calculation failed (%s %s): %s", code, meta["rcept_no"], exc)
+            pro_forma = {"status": "uncalculable", "reason": "미계산 (계산 중 오류)", "summary": "미계산", "assumption": None}
+            target_reprice = (
+                {"status": "uncalculable", "reason": "미계산 (계산 중 오류)", "formula": None, "pre_target": None, "post_target": None, "delta_krw": None, "delta_pct": None}
+                if authenticated and holding
+                else None
+            )
+            price_reaction = compute_price_reaction(close_rows, meta["rcept_dt"])
+            verdict = None
+
         items.append({
             "rcept_no": meta["rcept_no"],
             "rcept_dt": meta["rcept_dt"],
             "report_nm": meta["report_nm"],
             "disclosure_type": disc_type,
             "disclosure_label": DISCLOSURE_LABELS[disc_type],
-            "url": DART_VIEWER_URL.format(rcept_no=meta["rcept_no"]),
+            "is_amendment": is_amendment_disclosure(meta["report_nm"]),
+            "superseded": bool(superseded_by),
+            "superseded_by": superseded_by,
+            "url": url,
             "parse_status": parsed.get("parse_status") or "unparseable",
             "parse_message": parsed.get("parse_message"),
             "extracted": parsed.get("extracted") or {},
@@ -1420,23 +1837,33 @@ async def format_notification_reprice_line(
     holding: dict[str, Any] | None = None,
     *,
     google_sub: str | None = None,
+    recent_disclosures: list[dict[str, Any]] | None = None,
     timeout: float = NOTIFICATION_REPRICE_TIMEOUT_S,
+    as_of: date | None = None,
 ) -> str:
     """신규 공시 푸시 알림에 덧붙일 목표가 재가격 한 줄(예: ``목표가 78,000→83,100원(+6.5%)``).
 
-    정형 2종이 아니거나, 비보유·비수식 종목이거나, 비필수 쿼터·시간제한·파싱에
-    실패하면 빈 문자열을 돌려 기존 공시 알림을 지연·방해하지 않는다.
+    정형 2종이 아니거나, 후속 기재정정으로 대체된 구본이거나, 결산배당/분모가 확정되지
+    않았거나, 예외·타임아웃 발생 시 빈 문자열을 반환해 본 공시 알림을 절대 막지 않는다.
     """
-    report_nm = str((disclosure or {}).get("report_nm") or "").strip()
-    disc_type = classify_reprice_disclosure(report_nm)
-    if not disc_type:
-        return ""
-    rcept_no = str((disclosure or {}).get("rcept_no") or "").strip()
-    code = str(stock_code or "").strip().upper()
-    if not rcept_no or not is_supported_stock_code(code):
-        return ""
-
     try:
+        report_nm = str((disclosure or {}).get("report_nm") or "").strip()
+        disc_type = classify_reprice_disclosure(report_nm)
+        if not disc_type:
+            return ""
+        rcept_no = str((disclosure or {}).get("rcept_no") or "").strip()
+        code = str(stock_code or "").strip().upper()
+        if not rcept_no or not is_supported_stock_code(code):
+            return ""
+
+        if recent_disclosures:
+            superseded = mark_superseded_disclosures(recent_disclosures)
+            if rcept_no in superseded:
+                return ""
+
+        today = as_of or today_kst()
+        rcept_dt = _iso_rcept_dt((disclosure or {}).get("rcept_dt"))
+
         async with asyncio.timeout(timeout):
             if holding is None and google_sub:
                 holding = await _load_user_holding(google_sub, code)
@@ -1447,12 +1874,13 @@ async def format_notification_reprice_line(
                 return ""
 
             parsed, (basis, trailing_dps, pre_vars) = await asyncio.gather(
-                _fetch_and_parse_document(rcept_no, disc_type, essential=False),
+                _fetch_and_parse_document(rcept_no, disc_type, allow_download=True, essential=False),
                 _load_formula_base_inputs(
                     code,
                     holding,
                     need_basis=(disc_type == STOCK_RETIREMENT),
                     need_dps=(disc_type == CASH_DIVIDEND),
+                    as_of=today,
                 ),
             )
             pro_forma = compute_pro_forma(
@@ -1461,7 +1889,11 @@ async def format_notification_reprice_line(
                 stock_code=code,
                 basis=basis,
                 trailing_dps=trailing_dps,
+                rcept_dt=rcept_dt,
+                as_of=today,
             )
+            if disc_type == CASH_DIVIDEND and not pro_forma.get("dividend_category_confirmed"):
+                return ""
             reprice = compute_target_reprice(
                 code,
                 holding,
@@ -1469,8 +1901,8 @@ async def format_notification_reprice_line(
                 pre_variables=pre_vars,
                 pro_forma=pro_forma,
             )
-    except (*_DART_ERRORS, *_REPRICE_DATA_ERRORS) as exc:
-        logger.info("notification reprice skipped (%s %s): %s", code, rcept_no, exc)
+    except Exception as exc:  # noqa: BLE001 — 부가 정보 경계, 본 공시 알림 발송을 막지 않음
+        logger.warning("notification reprice skipped (%s %s): %s", stock_code, (disclosure or {}).get("rcept_no"), exc)
         return ""
 
     if not reprice or reprice.get("status") != "ok":

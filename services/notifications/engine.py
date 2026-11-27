@@ -717,6 +717,20 @@ async def _cached_feed(kind: str, code: str, feed_cache: dict | None):
     return result
 
 
+async def _safe_disclosure_reprice_line(
+    code: str, item: dict, holding: dict | None, google_sub: str, recent: list[dict] | None
+) -> str:
+    from services.portfolio import disclosure_reprice
+
+    try:
+        return await disclosure_reprice.format_notification_reprice_line(
+            code, item, holding, google_sub=google_sub, recent_disclosures=recent
+        )
+    except Exception as exc:  # noqa: BLE001 — 부가 정보 경계, 본 공시 알림을 막지 않음
+        logger.warning("disclosure reprice line failed (%s): %s", code, exc)
+        return ""
+
+
 async def _eval_stock_feed(
     google_sub: str,
     rule: dict,
@@ -757,16 +771,13 @@ async def _eval_stock_feed(
             await notifications_repo.set_portfolio_alert_state_json(rule["id"], json.dumps({"baseline": ident}))
         return 0
     if alert_type == "disclosure_new":
-        from services.portfolio import disclosure_reprice
-
+        recent = latest.get("_recent")
         texts = [
             _format_disclosure_message(
                 rule,
                 name,
                 item,
-                await disclosure_reprice.format_notification_reprice_line(
-                    code, item, holding, google_sub=google_sub
-                ),
+                await _safe_disclosure_reprice_line(code, item, holding, google_sub, recent),
             )
             for item in _disclosures_since(latest, str(baseline), code)
         ]
@@ -817,16 +828,13 @@ async def _eval_blanket_feed(
             continue
         name = item.get("stock_name") or code
         if kind == "disc":
-            from services.portfolio import disclosure_reprice
-
+            recent = latest.get("_recent")
             texts = [
                 _format_disclosure_message(
                     rule,
                     name,
                     d,
-                    await disclosure_reprice.format_notification_reprice_line(
-                        code, d, item, google_sub=google_sub
-                    ),
+                    await _safe_disclosure_reprice_line(code, d, item, google_sub, recent),
                 )
                 for d in _disclosures_since(latest, str(baseline), code)
             ]

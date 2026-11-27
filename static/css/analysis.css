@@ -755,6 +755,11 @@
   background: color-mix(in srgb, var(--warning, #d97706) 15%, var(--surface));
   color: var(--warning, #d97706);
 }
+.stl-rp-badge.is-muted {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
 .stl-rp-line { color: var(--text); }
 .stl-rp-muted { color: var(--text-secondary); }
 .stl-rp-delta.up, .stl-rp-ret.up { color: var(--up); }

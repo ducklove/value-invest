@@ -104,14 +104,15 @@ test("'전체'는 뉴스가 많은 날에도 최근 공시를 섞어 보여 준�
   assert.equal(host.querySelectorAll(".stl-news").length, 20);
 });
 
-test("주식소각·현금배당 공시가 있으면 재가격 요약·목표가 변화·시차 판정을 붙이고 파싱 실패 시 원문 링크를 안내한다", async () => {
+test("주식소각·현금배당 공시가 있으면 재가격 요약·목표가 변화·시차 판정·정정됨을 표시하고 파싱 실패 시 원문 링크를 안내한다", async () => {
   const tlData = {
     stock_code: "005930",
     items: [
-      { type: "disclosure", id: "20261120000123", date: "2026-11-20", time: "", title: "주식소각결정", reprice_type: "stock_retirement", source: "DART", url: "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261120000123" },
+      { type: "disclosure", id: "20261124000200", date: "2026-11-24", time: "", title: "[기재정정]주식소각결정", reprice_type: "stock_retirement", source: "DART", url: "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261124000200" },
+      { type: "disclosure", id: "20261122000100", date: "2026-11-22", time: "", title: "주식소각결정", reprice_type: "stock_retirement", source: "DART", url: "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261122000100" },
       { type: "disclosure", id: "20261110000999", date: "2026-11-10", time: "", title: "현금ㆍ현물배당결정", reprice_type: "cash_dividend", source: "DART", url: "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261110000999" },
     ],
-    sources: { news: { status: "empty", count: 0 }, disclosure: { status: "ok", count: 2 } },
+    sources: { news: { status: "empty", count: 0 }, disclosure: { status: "ok", count: 3 } },
   };
   const rpData = {
     stock_code: "005930",
@@ -120,14 +121,14 @@ test("주식소각·현금배당 공시가 있으면 재가격 요약·목표가
     status: "ok",
     items: [
       {
-        rcept_no: "20261120000123",
+        rcept_no: "20261124000200",
         disclosure_type: "stock_retirement",
-        url: "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261120000123",
+        url: "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261124000200",
         parse_status: "ok",
         pro_forma: {
           status: "ok",
-          summary: "소각 620,000주(유통주식수 대비 6.20%) · BPS 100,000→106,610원(+6.6%)",
-          assumption: "유통주식수에서 소각 주식 수가 순감소한다고 가정한 잠정 계산입니다.",
+          summary: "보통주 소각 620,000주(발행보통주 대비 6.20%) · BPS 100,000→106,610원(+6.6%)",
+          assumption: "발행보통주 분모만 감소하는 잠정 계산입니다.",
         },
         target_reprice: {
           status: "ok",
@@ -138,11 +139,24 @@ test("주식소각·현금배당 공시가 있으면 재가격 요약·목표가
         },
         price_reaction: {
           status: "ok",
+          base_date: "2026-11-23",
           day0: { status: "ok", return_pct: 0.8 },
           day5: { status: "in_progress", return_pct: null },
           day20: { status: "in_progress", return_pct: null },
         },
         verdict: { code: "underreacted", text: "목표가 상향폭 대비 주가 반응이 작음" },
+      },
+      {
+        rcept_no: "20261122000100",
+        disclosure_type: "stock_retirement",
+        superseded: true,
+        superseded_by: "20261124000200",
+        url: "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261122000100",
+        parse_status: "superseded",
+        pro_forma: { status: "superseded", reason: "정정됨 — 후속 기재정정 공시에서 계산", assumption: null },
+        target_reprice: { status: "superseded", reason: "정정됨 — 후속 기재정정 공시에서 계산" },
+        price_reaction: { status: "unavailable" },
+        verdict: null,
       },
       {
         rcept_no: "20261110000999",
@@ -163,16 +177,19 @@ test("주식소각·현금배당 공시가 있으면 재가격 요약·목표가
   const host = w.document.getElementById("stockTimelinePanel");
   assert.deepEqual(w.__calls, ["/api/stocks/005930/timeline?limit=20", "/api/stocks/005930/reprice"]);
   const cards = host.querySelectorAll(".stl-reprice");
-  assert.equal(cards.length, 2);
+  assert.equal(cards.length, 3);
   assert.match(cards[0].textContent, /78,000→83,156원/);
   assert.match(cards[0].textContent, /\+5,156원, \+6\.6%/);
-  assert.match(cards[0].textContent, /당일 \+0\.8% · 5거래일 진행 중 · 20거래일 진행 중/);
+  assert.match(cards[0].textContent, /주가 반응\(접수일 직전 종가\(11\.23\) 대비\): 당일 \+0\.8% · 공시일 포함 5거래일 진행 중 · 공시일 포함 20거래일 진행 중/);
   assert.match(cards[0].textContent, /목표가 상향폭 대비 주가 반응이 작음/);
   assert.match(cards[0].textContent, /잠정 계산입니다/);
 
-  assert.match(cards[1].textContent, /수치 확인 불가/);
+  assert.match(cards[1].textContent, /정정됨/);
+  assert.doesNotMatch(cards[1].textContent, /내 목표가/);
+
+  assert.match(cards[2].textContent, /수치 확인 불가/);
   assert.equal(
-    cards[1].querySelector(".stl-rp-link").getAttribute("href"),
+    cards[2].querySelector(".stl-rp-link").getAttribute("href"),
     "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261110000999",
   );
 });

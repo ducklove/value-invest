@@ -40,22 +40,27 @@ function _stockTimelineRepriceHtml(row, repriceMap) {
   if (!rp) return '';
   const rawUrl = rp.url || row.url || '';
   const safeUrl = /^https:\/\//.test(rawUrl) ? rawUrl : '';
+  const link = safeUrl
+    ? ` <a class="stl-rp-link" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">원문 확인 →</a>`
+    : '';
   const lines = [];
 
-  if (rp.parse_status !== 'ok') {
-    const link = safeUrl
-      ? ` <a class="stl-rp-link" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">원문 확인 →</a>`
-      : '';
+  if (rp.superseded || rp.parse_status === 'superseded') {
+    lines.push(`<div class="stl-rp-head"><span class="stl-rp-badge is-muted">정정됨</span><span>${escapeHtml(rp.pro_forma?.reason || '후속 기재정정 공시에서 계산')}</span></div>`);
+  } else if (rp.parse_status === 'cache_miss') {
+    lines.push(`<div class="stl-rp-head"><span class="stl-rp-badge is-muted">원문 미캐시</span><span>${escapeHtml(rp.parse_message || '로그인 시 공시 원문 수치를 분석합니다')}${link}</span></div>`);
+  } else if (rp.parse_status !== 'ok') {
     lines.push(`<div class="stl-rp-head"><span class="stl-rp-badge is-warn">수치 확인 불가</span><span>${escapeHtml(rp.parse_message || '수치 확인 불가')}${link}</span></div>`);
   } else {
     const pf = rp.pro_forma || {};
-    const pfBadge = pf.status === 'ok'
-      ? '<span class="stl-rp-badge">Pro-forma 재가격</span>'
-      : '<span class="stl-rp-badge is-warn">미계산</span>';
+    let pfBadge = '<span class="stl-rp-badge is-warn">미계산</span>';
+    if (pf.status === 'ok') pfBadge = '<span class="stl-rp-badge">Pro-forma 재가격</span>';
+    else if (pf.status === 'no_impact') pfBadge = '<span class="stl-rp-badge is-muted">영향 없음</span>';
+    else if (pf.status === 'stale') pfBadge = '<span class="stl-rp-badge is-muted">기간 경과</span>';
     lines.push(`<div class="stl-rp-head">${pfBadge}<span>${escapeHtml(pf.summary || pf.reason || '')}</span></div>`);
 
     const tr = rp.target_reprice;
-    if (tr) {
+    if (tr && pf.status !== 'stale') {
       if (tr.status === 'ok' && Number.isFinite(Number(tr.pre_target)) && Number.isFinite(Number(tr.post_target))) {
         const dKrw = Number(tr.delta_krw) || 0;
         const dPct = Number(tr.delta_pct) || 0;
@@ -70,15 +75,16 @@ function _stockTimelineRepriceHtml(row, repriceMap) {
 
   const pr = rp.price_reaction;
   if (pr && pr.status === 'ok') {
+    const basisNote = pr.base_date ? `접수일 직전 종가(${escapeHtml(pr.base_date.slice(5).replace('-', '.'))}) 대비` : '접수일 직전 거래일 종가 대비';
     const windows = [
       _fmtTimelineReactionWin('당일', pr.day0),
-      _fmtTimelineReactionWin('5거래일', pr.day5),
-      _fmtTimelineReactionWin('20거래일', pr.day20),
+      _fmtTimelineReactionWin('공시일 포함 5거래일', pr.day5),
+      _fmtTimelineReactionWin('공시일 포함 20거래일', pr.day20),
     ].join(' · ');
     const verdict = rp.verdict?.text
       ? ` <span class="stl-rp-verdict is-${escapeHtml(rp.verdict.code || 'aligned')}">${escapeHtml(rp.verdict.text)}</span>`
       : '';
-    lines.push(`<div class="stl-rp-line">주가 반응: ${windows}${verdict}</div>`);
+    lines.push(`<div class="stl-rp-line">주가 반응(${basisNote}): ${windows}${verdict}</div>`);
   }
 
   const assume = rp.pro_forma?.assumption;
