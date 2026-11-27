@@ -178,6 +178,23 @@ async def app_lifespan(app: FastAPI, settings: AppSettings, runtime: RuntimeStat
             )
             tasks.append((notify_alert_task, notify_stop))
 
+        # 양방향 텔레그램 비서: 등록된 봇마다 getUpdates long polling (공개 인바운드 없음).
+        # TELEGRAM_BOT_POLL=0 이면 수신만 끈다(발송은 그대로).
+        if os.environ.get("TELEGRAM_BOT_POLL", "1") != "0":
+            from services.notifications import telegram_bot
+
+            telegram_bot_stop = asyncio.Event()
+            tasks.append((
+                asyncio.create_task(
+                    telegram_bot.run_loop(
+                        telegram_bot_stop,
+                        initial_delay_seconds=float(os.environ.get("TELEGRAM_BOT_POLL_INITIAL_DELAY_S", "20")),
+                    ),
+                    name="telegram-bot",
+                ),
+                telegram_bot_stop,
+            ))
+
         from services.market import indicator_health
 
         indicator_stop = asyncio.Event()

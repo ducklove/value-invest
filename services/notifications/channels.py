@@ -13,7 +13,7 @@ from datetime import datetime
 
 from core.errors import DBError
 from repositories import notifications as notifications_repo
-from services.notifications import kakao, telegram
+from services.notifications import kakao, telegram, telegram_refs
 
 logger = logging.getLogger(__name__)
 _DB_ERRORS = (DBError, sqlite3.Error, OSError)
@@ -70,9 +70,13 @@ async def _release_delivery(
 
 
 async def dispatch(
-    google_sub: str, text: str, *, dedupe_key: str | None = None, only_channel: str | None = None
+    google_sub: str, text: str, *, dedupe_key: str | None = None, only_channel: str | None = None,
+    stock_code: str | None = None,
 ) -> int:
     """Send ``text`` to every enabled+verified channel. Returns messages sent.
+
+    ``stock_code``(또는 ``telegram_refs.stock_context``)가 있으면 텔레그램 메시지의
+    message_id 를 종목에 매핑해, 사용자가 답장하면 그 종목 메모가 된다.
 
     Never raises — a failing channel is logged and skipped so one broken target
     can't block the others or the evaluation loop.
@@ -111,7 +115,9 @@ async def dispatch(
             if name == "telegram":
                 token = config.get("bot_token") or telegram.default_token()
                 chat_id = config.get("chat_id")
-                if token and chat_id and await telegram.send_message(token, chat_id, text):
+                if token and chat_id and await telegram_refs.send_message(
+                    google_sub, token, chat_id, text, stock_code=stock_code
+                ):
                     sent += 1
                 else:
                     await _release_delivery(str(name or ""), target_key, dedupe_key, sent_date)

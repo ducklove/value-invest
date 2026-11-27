@@ -66,6 +66,8 @@ _TIMEOUT_PROFILES: dict[str, float | httpx.Timeout] = {
     "report": 15.0,
     "kakao": 15.0,
     "telegram": 10.0,
+    # 텔레그램 수신 long polling(getUpdates timeout 25s) 전용 풀 — 발송 풀을 막지 않게 분리.
+    "telegram_poll": 40.0,
     "wiki": 60.0,
     "upbit": 5.0,
     "bithumb": 5.0,
