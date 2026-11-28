@@ -255,6 +255,10 @@ async def build_briefing(google_sub: str, code: str, name: str) -> str:
                 kind = "공시" if row.get("type") == "disclosure" else "뉴스"
                 date = str(row.get("date") or "")[5:]
                 lines.append(f"· {date} [{kind}] {clean_text(row.get('title'))[:80]}")
+                # 원문 링크 — 일반 텍스트의 URL 은 텔레그램이 링크로 바꾼다(미리보기는 꺼 둠).
+                link = str(row.get("url") or "").strip()
+                if link.startswith("https://") and not any(c.isspace() for c in link):
+                    lines.append(f"  {link}")
         elif timeline.get("error"):
             lines.append("📰 최근 소식: 조회 실패")
         else:

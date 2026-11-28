@@ -60,8 +60,10 @@ class TelegramBotTestBase(TempDbMixin):
             patch.object(telegram, "send_message_get_id", new=fake_send),
             patch.object(telegram_bot, "_quote", new=AsyncMock(return_value={"price": 72000.0, "change": 850.0, "change_pct": 1.19})),
             patch.object(telegram_bot, "_timeline", new=AsyncMock(return_value={"items": [
-                {"type": "disclosure", "date": "2026-11-27", "title": "주요사항보고서(자기주식취득결정)"},
-                {"type": "news", "date": "2026-11-27", "title": "삼성전자, 신제품 발표"},
+                {"type": "disclosure", "date": "2026-11-27", "title": "주요사항보고서(자기주식취득결정)",
+                 "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261127000001"},
+                {"type": "news", "date": "2026-11-27", "title": "삼성전자, 신제품 발표",
+                 "url": "javascript:alert(1)"},
                 {"type": "news", "date": "2026-11-26", "title": "세 번째 기사는 보이지 않음"},
             ]})),
             patch.object(telegram_bot, "now_kst", new=lambda: FIXED_NOW),
@@ -164,6 +166,11 @@ class BriefingTests(TelegramBotTestBase):
         self.assertIn("[공시] 주요사항보고서", text)
         self.assertIn("[뉴스] 삼성전자, 신제품 발표", text)
         self.assertNotIn("세 번째 기사", text)
+        # 원문 링크는 https 만, 해당 소식 바로 아래 줄에.
+        lines = text.splitlines()
+        disc = next(i for i, ln in enumerate(lines) if "[공시]" in ln)
+        self.assertEqual(lines[disc + 1].strip(), "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20261127000001")
+        self.assertNotIn("javascript:", text)
         self.assertIn("/analysis?code=005930", text)
         self.assertEqual(self.sent[0]["reply_to"], 10)
         # 브리핑 메시지에 답장하면 메모가 되도록 매핑 저장.
