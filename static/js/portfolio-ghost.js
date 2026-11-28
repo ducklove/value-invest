@@ -100,41 +100,51 @@ function _pfGhostHeadlineHtml(data, ghost) {
     return `<div class="pf-ghost-headline is-muted">${escapeHtml(ghost?.reason || '방치 평가액을 비교할 정산 데이터가 부족합니다.')}</div>`;
   }
   if (ghost.scope === 'uncalculated') {
-    return `<div class="pf-ghost-headline is-muted"><strong>${periodLabel} 매매 효과: 미계산</strong><span>${escapeHtml(ghost.reason || '기준일 보유 종목 가격·수량 미확인')}</span></div>`;
+    const reason = ghost.reason || '기준일 보유 종목 가격·수량 미확인';
+    return `<div class="pf-ghost-headline is-muted"><strong>${periodLabel} 매매 효과: 미계산</strong><span>${escapeHtml(reason)}</span></div>`;
   }
+  const calcPctRaw = Number(ghost.coverage?.calculable_weight_pct);
+  const scopeText = Number.isFinite(calcPctRaw)
+    ? `계산 범위(기준일 비중 ${calcPctRaw.toFixed(1)}%) 기준`
+    : '계산 범위 기준';
   const pctStr = pfGhostFmtPctPoint(ghost.effect_pct_p);
   const krwStr = pfGhostFmtSummaryKrw(ghost.effect_krw);
   const tone = _pfGhostToneClass(ghost.effect_krw);
-  const scopeBadge = ghost.scope === 'partial'
-    ? `<span class="pf-ghost-badge is-partial">일부 미계산 포함 · 계산 범위 ${Number(ghost.coverage?.calculable_weight_pct ?? 0).toFixed(1)}%</span>`
-    : `<span class="pf-ghost-badge">기준일 ${escapeHtml(data.baseline_date || '')} ~ ${escapeHtml(data.ending_date || '')}</span>`;
+  const badgeCls = ghost.scope === 'partial' ? 'pf-ghost-badge is-partial' : 'pf-ghost-badge';
+  const badgeLabel = ghost.scope === 'partial'
+    ? `일부 미계산 제외 · ${Number(ghost.coverage?.uncalculated_holdings || 0)}건`
+    : `${escapeHtml(data.baseline_date || '')} ~ ${escapeHtml(data.ending_date || '')}`;
   return `<div class="pf-ghost-headline">
     <div class="pf-ghost-headline-main">
-      <span class="pf-ghost-kicker">${periodLabel} 매매 효과</span>
+      <span class="pf-ghost-kicker">${periodLabel} 매매 효과 (${escapeHtml(scopeText)})</span>
       <strong class="pf-ghost-effect ${tone}">${escapeHtml(pctStr)} (${escapeHtml(krwStr)})</strong>
     </div>
-    ${scopeBadge}
+    <span class="${badgeCls}">${badgeLabel}</span>
   </div>`;
 }
 
 function _pfGhostSummaryTilesHtml(ghost) {
   if (!ghost || !ghost.available) return '';
   const cov = ghost.coverage || {};
-  const actualRet = ghost.actual_return_pct !== null && ghost.actual_return_pct !== undefined
+  const isPartial = ghost.scope === 'partial';
+  const isUncalc = ghost.scope === 'uncalculated';
+  const actualLabel = isPartial ? '실제 평가액 (계산 범위)' : '실제 평가액';
+  const ghostLabel = isPartial ? '방치 평가액 (계산 범위)' : '방치 평가액 (가만히 있었다면)';
+  const actualRet = !isUncalc && ghost.actual_return_pct !== null && ghost.actual_return_pct !== undefined
     ? fmtPct(Number(ghost.actual_return_pct))
     : '미계산';
-  const ghostRet = ghost.ghost_return_pct !== null && ghost.ghost_return_pct !== undefined
+  const ghostRet = !isUncalc && ghost.ghost_return_pct !== null && ghost.ghost_return_pct !== undefined
     ? fmtPct(Number(ghost.ghost_return_pct))
     : '미계산';
   const uncalcCnt = Number(cov.uncalculated_holdings || 0);
   const scopeSub = uncalcCnt > 0
-    ? `계산 ${Number(cov.calculable_weight_pct || 0).toFixed(1)}% · 미계산 ${uncalcCnt}종목(${Number(cov.uncalculated_weight_pct || 0).toFixed(1)}%)`
+    ? `계산 ${Number(cov.calculable_weight_pct || 0).toFixed(1)}% · 미계산 ${uncalcCnt}건(${Number(cov.uncalculated_weight_pct || 0).toFixed(1)}%)`
     : `전체 보유 ${Number(cov.total_holdings || 0)}종목 + 현금 ${Number(cov.cash_weight_pct || 0).toFixed(1)}%`;
 
   return `<div class="pf-insight-summary pf-ghost-tiles">
-    <div>실제 평가액<strong>${escapeHtml(pfGhostFmtExactKrw(ghost.actual_end_value))}</strong><small>수익률 ${escapeHtml(actualRet)}</small></div>
-    <div>방치 평가액 (가만히 있었다면)<strong>${escapeHtml(ghost.ghost_end_value !== null && ghost.ghost_end_value !== undefined ? pfGhostFmtExactKrw(ghost.ghost_end_value) : '미계산')}</strong><small>수익률 ${escapeHtml(ghostRet)}</small></div>
-    <div>매매 효과 (실제 − 방치)<strong class="${_pfGhostToneClass(ghost.effect_krw)}">${escapeHtml(ghost.effect_krw !== null && ghost.effect_krw !== undefined ? pfGhostFmtExactKrw(ghost.effect_krw, true) : '미계산')}</strong><small>${escapeHtml(pfGhostFmtPctPoint(ghost.effect_pct_p))}</small></div>
+    <div>${escapeHtml(actualLabel)}<strong>${escapeHtml(!isUncalc && ghost.actual_end_value !== null && ghost.actual_end_value !== undefined ? pfGhostFmtExactKrw(ghost.actual_end_value) : '미계산')}</strong><small>수익률 ${escapeHtml(actualRet)}</small></div>
+    <div>${escapeHtml(ghostLabel)}<strong>${escapeHtml(!isUncalc && ghost.ghost_end_value !== null && ghost.ghost_end_value !== undefined ? pfGhostFmtExactKrw(ghost.ghost_end_value) : '미계산')}</strong><small>수익률 ${escapeHtml(ghostRet)}</small></div>
+    <div>매매 효과 (실제 − 방치)<strong class="${_pfGhostToneClass(ghost.effect_krw)}">${escapeHtml(!isUncalc && ghost.effect_krw !== null && ghost.effect_krw !== undefined ? pfGhostFmtExactKrw(ghost.effect_krw, true) : '미계산')}</strong><small>${escapeHtml(pfGhostFmtPctPoint(ghost.effect_pct_p))}</small></div>
     <div>기간 순입출금 · 계산 범위<strong>${escapeHtml(pfGhostFmtExactKrw(ghost.net_cashflow_krw, true))}</strong><small>${escapeHtml(scopeSub)}</small></div>
   </div>`;
 }
@@ -158,7 +168,7 @@ function _pfGhostUncalculatedHtml(ghost) {
     </tr>`;
   }).join('');
   return `<div class="pf-ghost-uncalc-box" role="note">
-    <div class="pf-ghost-uncalc-title">미계산 종목 범위 안내 (${uncalc.length}건 · 기준일 비중 합계 ${Number(ghost.coverage?.uncalculated_weight_pct || 0).toFixed(2)}%)</div>
+    <div class="pf-ghost-uncalc-title">미계산 제외 범위 (${uncalc.length}건 · 기준일 비중 합계 ${Number(ghost.coverage?.uncalculated_weight_pct || 0).toFixed(2)}% — 실제·방치 양쪽에서 제외)</div>
     <div class="pf-insight-table-scroll">
       <table class="pf-insight-table pf-ghost-table">
         <thead><tr><th>종목</th><th>기준일 평가액</th><th>기준일 비중</th><th>상태 · 사유</th></tr></thead>
@@ -230,12 +240,15 @@ function _pfGhostPostSaleHtml(postSale) {
     outcomeLine = ` · 20거래일 기준: ${outcomeParts.join(' / ')}`;
   }
 
+  const nhScopeNote = '<p class="pf-chart-note pf-ghost-nh-note">실현손익 출처는 NH 일반 계좌 원장 기준(ISA·연금 등 제외)이며, 그 외 계좌 매도는 수동 매매 기록 또는 전 계좌 합산 스냅샷 소멸로만 반영됩니다.</p>';
+
   if (!items.length) {
     return `<div class="pf-ghost-postsale">
       <div class="pf-ghost-section-head">
         <h4>매도 후 추적 (5 · 20거래일 · 현재가)</h4>
         <span class="pf-chart-note">${escapeHtml(countParts.join(' · '))}</span>
       </div>
+      ${nhScopeNote}
       <p class="pf-risk-empty">선택 기간(${escapeHtml(ps.since || '')} 이후)에 확인된 매도 내역이 없습니다.</p>
     </div>`;
   }
@@ -247,12 +260,19 @@ function _pfGhostPostSaleHtml(postSale) {
       ? `${Number(item.quantity).toLocaleString('ko-KR', { maximumFractionDigits: 4 })}주`
       : '';
     const basisSub = item.price_basis === 'close_estimate' ? '<small class="pf-ghost-basis-note">종가 기준</small>' : '';
+    const dateSubParts = [escapeHtml(item.sale_type_label || '매도')];
+    if (item.matched_bar_date && item.matched_bar_date !== item.trade_date) {
+      dateSubParts.push(`현지봉 ${escapeHtml(item.matched_bar_date)}`);
+    }
+    const recordedNote = item.date_note
+      ? `<small class="pf-ghost-date-note">${escapeHtml(item.date_note)}</small>`
+      : '';
     const sellCell = item.sell_price !== null && item.sell_price !== undefined
       ? `<td class="num"><div>${pfGhostFmtPrice(item.sell_price, item.currency)}</div>${basisSub}</td>`
       : `<td class="pf-ghost-cell-muted"><span class="pf-ghost-uncalc-tag">미계산</span><small>${escapeHtml(item.reason || '')}</small></td>`;
 
     return `<tr>
-      <td><div>${escapeHtml(item.trade_date || '')}</div><small>${escapeHtml(item.sale_type_label || '매도')}</small></td>
+      <td><div>${escapeHtml(item.trade_date || '')}</div><small>${dateSubParts.join(' · ')}</small>${recordedNote}</td>
       <th scope="row"><div>${linkHtml}</div>${qtyText ? `<small>${escapeHtml(qtyText)}</small>` : ''}</th>
       <td><span class="pf-ghost-source-tag">${escapeHtml(item.source_label || item.source || '')}</span></td>
       ${sellCell}
@@ -270,6 +290,7 @@ function _pfGhostPostSaleHtml(postSale) {
       <h4>매도 후 추적 (5 · 20거래일 · 현재가)</h4>
       <span class="pf-chart-note">${escapeHtml(countParts.join(' · ') + outcomeLine)}</span>
     </div>
+    ${nhScopeNote}
     <div class="pf-insight-table-scroll">
       <table class="pf-insight-table pf-ghost-table pf-ghost-postsale-table">
         <thead>
@@ -300,7 +321,7 @@ function pfGhostHtml(data) {
   const baselineNotice = data.baseline_note
     ? `<p class="pf-insight-notice" role="note">${escapeHtml(data.baseline_note)}</p>`
     : '';
-  const assumptionNotice = `<p class="pf-insight-notice pf-ghost-assumption" role="note"><strong>비교 가정:</strong> 기간 중 순입출금은 방치 계좌에도 같은 정산일·같은 금액의 원화 현금으로 반영했으며(현금 비례 가정), 기준일 보유 수량과 원화 현금은 그대로 유지했습니다. 배당 재투자·매매 비용은 별도 가산하지 않은 세전 가격 기준입니다.</p>`;
+  const assumptionNotice = `<p class="pf-insight-notice pf-ghost-assumption" role="note"><strong>비교 가정:</strong> 기간 중 순입출금은 방치 계좌에도 같은 정산일·같은 금액의 원화 현금으로 반영했으며(현금 비례 가정), 미계산 종목은 실제·방치 양쪽에서 제외해 계산 가능 범위끼리만 비교합니다. 배당 재투자·매매 비용은 별도 가산하지 않은 세전 가격 기준입니다.</p>`;
   const chartBlock = canDrawChart
     ? `<div class="pf-nav-chart-container pf-nav-short pf-ghost-chart-wrap"><div id="pfGhostChart" style="width:100%;height:100%;"></div></div>`
     : '';

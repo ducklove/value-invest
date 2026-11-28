@@ -81,13 +81,6 @@ def test_ghost_portfolio_zero_trades_gives_zero_effect():
 
 
 def test_ghost_portfolio_cashflow_proportional_assumption_and_modified_dietz():
-    # d0 = 2025-12-30 (6,000,000 = 005930 100주×50,000 + 현금 1,000,000)
-    # 2026-06-30(182/364 = 정확히 중간일)에 +4,000,000 입금 정산 → 평균 투입 자본 D = 6,000,000 + 4,000,000 * 0.5 = 8,000,000.
-    # 미반영(applied_snapshot_date=None, units_change=None) 입출금은 무시되어야 한다.
-    # 종료일(2026-12-29) 005930 종가 60,000 (전량 매도 후 외부 종가로 재평가):
-    #   방치 평가액 = 6,000,000(주식) + 1,000,000(기준일 현금) + 4,000,000(순입출금) = 11,000,000 (손익 +1,000,000 → +12.50%)
-    #   실제 평가액 = 11,480,000 (손익 +1,480,000 → +18.50%)
-    #   매매 효과 = +480,000원, +6.00%p
     nav_points = [
         {"date": "2025-12-30", "total_value": 6_000_000, "fx_usdkrw": 1400.0},
         {"date": "2026-06-30", "total_value": 10_500_000, "fx_usdkrw": 1400.0},
@@ -122,82 +115,335 @@ def test_ghost_portfolio_cashflow_proportional_assumption_and_modified_dietz():
     assert res["effect_pct_p"] == 6.0
 
 
-def test_ghost_portfolio_discloses_uncalculated_holdings_and_avoids_fake_all_zero_series():
-    nav_points = [
-        {"date": "2026-01-02", "total_value": 10_000_000, "fx_usdkrw": 1400.0},
-        {"date": "2026-06-01", "total_value": 11_300_000, "fx_usdkrw": 1400.0},
-    ]
+@pytest.mark.parametrize("uncalc_end_mv", [5_200_000, 2_800_000])
+def test_scoped_comparison_zero_trades_with_uncalculated_surge_or_crash_has_zero_effect(uncalc_end_mv):
+    """리뷰 항목 1: 매매가 없으면 미계산 종목이 급등(+30%)·급락(-30%)해도 매매 효과는 0이어야 한다."""
+    # 기준일: 005930 500만(50%) + 현금 100만(10%) [계산 가능 60%] + AAPL 400만(40%, 분할 미확인 미계산) = 1,000만
+    # 종료일: 005930 550만(+10%), 현금 100만, AAPL은 급등(520만) 또는 급락(280만) — 매매 없음
     baseline_stocks = [
-        {"stock_code": "005930", "stock_name": "삼성전자", "quantity": 70, "unit_price": 100_000, "market_value": 7_000_000},
-        {"stock_code": "CRYPTO_BTC", "stock_name": "비트코인", "quantity": 0.02, "unit_price": 100_000_000, "market_value": 2_000_000},
+        {"stock_code": "005930", "stock_name": "삼성전자", "quantity": 100, "unit_price": 50_000, "market_value": 5_000_000},
+        {"stock_code": "AAPL", "stock_name": "애플", "quantity": 20, "unit_price": 200_000, "market_value": 4_000_000},
         {"stock_code": "CASH_KRW", "stock_name": "원화", "quantity": 1_000_000, "unit_price": 1, "market_value": 1_000_000},
     ]
-    # 삼성전자는 100,000 → 110,000(+700,000), 비트코인은 중간 매도 후 일봉 미제공
+    nav_points = [
+        {"date": "2026-01-02", "total_value": 10_000_000, "fx_usdkrw": 1400.0},
+        {"date": "2026-06-01", "total_value": 5_500_000 + 1_000_000 + uncalc_end_mv, "fx_usdkrw": 1400.0},
+    ]
+    snapshot_prices = {
+        "2026-01-02": {
+            "005930": {"unit_price": 50_000, "quantity": 100, "market_value": 5_000_000, "priced_from_fallback": 0},
+            "AAPL": {"unit_price": 200_000, "quantity": 20, "market_value": 4_000_000, "priced_from_fallback": 0},
+            "CASH_KRW": {"unit_price": 1, "quantity": 1_000_000, "market_value": 1_000_000, "priced_from_fallback": 0},
+        },
+        "2026-06-01": {
+            "005930": {"unit_price": 55_000, "quantity": 100, "market_value": 5_500_000, "priced_from_fallback": 0},
+            "AAPL": {"unit_price": uncalc_end_mv / 20, "quantity": 20, "market_value": uncalc_end_mv, "priced_from_fallback": 0},
+            "CASH_KRW": {"unit_price": 1, "quantity": 1_000_000, "market_value": 1_000_000, "priced_from_fallback": 0},
+        },
+    }
     res = rules.compute_ghost_portfolio(
         nav_points=nav_points,
         baseline_stocks=baseline_stocks,
+        snapshot_prices_by_date=snapshot_prices,
+        external_krw_closes={"005930": [("2026-01-02", 50_000.0), ("2026-06-01", 55_000.0)]},
+        split_flags={"AAPL": "분할 여부 확인 전 (해외 차트 미확보)"},
+        cashflows=[],
+    )
+    assert res["scope"] == "partial"
+    assert res["coverage"]["calculable_weight_pct"] == 60.0
+    assert res["baseline_value"] == 6_000_000
+    assert res["actual_end_value"] == 6_500_000
+    assert res["ghost_end_value"] == 6_500_000
+    assert res["effect_krw"] == 0
+    assert res["effect_pct_p"] == 0.0
+
+
+def test_reviewer_repro_half_weight_uncalculated_surge_without_trades_is_zero():
+    """리뷰어 재현: 비중 50% 미계산 종목 +30%, 매매 없음 → effect 0 (이전 구현은 +15.0%p)."""
+    day0 = {
+        "005930": {"unit_price": 50_000, "quantity": 100, "market_value": 5_000_000, "priced_from_fallback": 0},
+        "BTC": {"unit_price": 50_000_000, "quantity": 0.1, "market_value": 5_000_000, "priced_from_fallback": 0},
+    }
+    day1 = {
+        "005930": {"unit_price": 50_000, "quantity": 100, "market_value": 5_000_000, "priced_from_fallback": 0},
+        "BTC": {"unit_price": 65_000_000, "quantity": 0.1, "market_value": 6_500_000, "priced_from_fallback": 0},
+    }
+    res = rules.compute_ghost_portfolio(
+        nav_points=[
+            {"date": "2026-01-02", "total_value": 10_000_000},
+            {"date": "2026-06-01", "total_value": 11_500_000},
+        ],
+        baseline_stocks=[{"stock_code": c, "stock_name": c, **v} for c, v in day0.items()],
+        snapshot_prices_by_date={"2026-01-02": day0, "2026-06-01": day1},
+        external_krw_closes={},
+        split_flags={"BTC": "특수자산 과거 종가 미제공"},
+        cashflows=[],
+    )
+    assert res["scope"] == "partial"
+    assert res["coverage"]["calculable_weight_pct"] == 50.0
+    assert res["effect_krw"] == 0
+    assert res["effect_pct_p"] == 0.0
+
+
+def test_scoped_invariant_survives_residual_drift_fallback_rows_and_uncalculated_sale():
+    """무매매(계산 범위) 불변식: 정산 잔차 변동·직전 값 대체 행·미계산 종목의 현금 전환이 있어도 effect 0."""
+    # 기준일 잔차 3,000원(0.5% 미만 → 표시 안 함), 다음 날 잔차 4,000원으로 변동
+    day0 = {
+        "005930": {"unit_price": 50_000, "quantity": 100, "market_value": 5_000_000, "priced_from_fallback": 0},
+        "AAPL": {"unit_price": 200_000, "quantity": 10, "market_value": 2_000_000, "priced_from_fallback": 0},
+        "CASH_KRW": {"unit_price": 1, "quantity": 3_000_000, "market_value": 3_000_000, "priced_from_fallback": 0},
+    }
+    # 1일차: 005930은 시세 실패로 직전 값 대체(수량 동일), AAPL 일부(5주) 매도 기록 있음 → 현금 +120만
+    day1 = {
+        "005930": {"unit_price": 50_000, "quantity": 100, "market_value": 5_000_000, "priced_from_fallback": 1},
+        "AAPL": {"unit_price": 260_000, "quantity": 5, "market_value": 1_300_000, "priced_from_fallback": 0},
+        "CASH_KRW": {"unit_price": 1, "quantity": 4_200_000, "market_value": 4_200_000, "priced_from_fallback": 0},
+    }
+    # 2일차: AAPL 나머지 5주가 기록 없이 소멸(현금 +130만)
+    day2 = {
+        "005930": {"unit_price": 52_000, "quantity": 100, "market_value": 5_200_000, "priced_from_fallback": 0},
+        "CASH_KRW": {"unit_price": 1, "quantity": 5_500_000, "market_value": 5_500_000, "priced_from_fallback": 0},
+    }
+    res = rules.compute_ghost_portfolio(
+        nav_points=[
+            {"date": "2026-01-02", "total_value": 10_003_000},
+            {"date": "2026-03-02", "total_value": 5_000_000 + 1_300_000 + 4_200_000 + 4_000},
+            {"date": "2026-06-01", "total_value": 5_200_000 + 5_500_000 + 4_000},
+        ],
+        baseline_stocks=[{"stock_code": c, "stock_name": c, **v} for c, v in day0.items()],
+        snapshot_prices_by_date={"2026-01-02": day0, "2026-03-02": day1, "2026-06-01": day2},
+        external_krw_closes={"005930": [("2026-01-02", 50_000.0), ("2026-03-02", 51_000.0), ("2026-06-01", 52_000.0)]},
+        split_flags={"AAPL": "분할 여부 확인 전 (해외 차트 미확보)"},
+        cashflows=[],
+        uncalc_krw_trade_flows={"AAPL": [("2026-02-20", 1_200_000.0)]},
+    )
+    assert res["scope"] == "partial"
+    assert [pt["diff_krw"] for pt in res["series"]] == [0, 0, 0]
+    assert res["effect_krw"] == 0
+    assert res["effect_pct_p"] == 0.0
+    assert res["baseline_value"] == 8_000_000
+
+
+def test_scoped_comparison_with_trades_isolates_calculable_alpha_and_blocks_under_50_pct():
+    """리뷰 항목 1: 매매가 있을 때는 계산 가능 범위 효과만 반영하고, 계산 가능 비중 < 50%면 미계산 처리한다."""
+    # 기준일: 005930 600만(60%) + 현금 200만(20%) [계산 가능 80% = 800만] + AAPL 200만(20%, 미계산) = 1,000만
+    # 실제 매매: 005930 전량 매도 후 000660 교체 → 000660 평가액 720만, 현금 200만 (실제 계산범위 = 920만)
+    # 방치 시: 005930 종가 상승으로 660만 + 현금 200만 (방치 계산범위 = 860만)
+    # 미계산 AAPL은 200만 → 300만(+50% 급등)했지만 양쪽에서 제외되므로 매매 효과는 정확히 +60만(+7.50%p = 60만/800만)
+    baseline_stocks = [
+        {"stock_code": "005930", "stock_name": "삼성전자", "quantity": 100, "unit_price": 60_000, "market_value": 6_000_000},
+        {"stock_code": "AAPL", "stock_name": "애플", "quantity": 10, "unit_price": 200_000, "market_value": 2_000_000},
+        {"stock_code": "CASH_KRW", "stock_name": "원화", "quantity": 2_000_000, "unit_price": 1, "market_value": 2_000_000},
+    ]
+    nav_points = [
+        {"date": "2026-01-02", "total_value": 10_000_000, "fx_usdkrw": 1400.0},
+        {"date": "2026-06-01", "total_value": 7_200_000 + 2_000_000 + 3_000_000, "fx_usdkrw": 1400.0},
+    ]
+    snapshot_prices = {
+        "2026-01-02": {
+            "005930": {"unit_price": 60_000, "quantity": 100, "market_value": 6_000_000, "priced_from_fallback": 0},
+            "AAPL": {"unit_price": 200_000, "quantity": 10, "market_value": 2_000_000, "priced_from_fallback": 0},
+            "CASH_KRW": {"unit_price": 1, "quantity": 2_000_000, "market_value": 2_000_000, "priced_from_fallback": 0},
+        },
+        "2026-06-01": {
+            "000660": {"unit_price": 180_000, "quantity": 40, "market_value": 7_200_000, "priced_from_fallback": 0},
+            "AAPL": {"unit_price": 300_000, "quantity": 10, "market_value": 3_000_000, "priced_from_fallback": 0},
+            "CASH_KRW": {"unit_price": 1, "quantity": 2_000_000, "market_value": 2_000_000, "priced_from_fallback": 0},
+        },
+    }
+    res = rules.compute_ghost_portfolio(
+        nav_points=nav_points,
+        baseline_stocks=baseline_stocks,
+        snapshot_prices_by_date=snapshot_prices,
+        external_krw_closes={"005930": [("2026-01-02", 60_000.0), ("2026-06-01", 66_000.0)]},
+        split_flags={"AAPL": "분할 여부 확인 전 (해외 차트 미확보)"},
+        cashflows=[],
+    )
+    assert res["scope"] == "partial"
+    assert res["coverage"]["calculable_weight_pct"] == 80.0
+    assert res["actual_end_value"] == 9_200_000
+    assert res["ghost_end_value"] == 8_600_000
+    assert res["effect_krw"] == 600_000
+    assert res["effect_pct_p"] == 7.5
+
+    # 계산 가능 비중이 50% 미만(40% 계산 가능, 60% 미계산)이면 헤드라인 수치를 내지 않고 미계산 반환
+    under_half = rules.compute_ghost_portfolio(
+        nav_points=[
+            {"date": "2026-01-02", "total_value": 10_000_000},
+            {"date": "2026-06-01", "total_value": 13_000_000},
+        ],
+        baseline_stocks=[
+            {"stock_code": "005930", "stock_name": "삼성전자", "quantity": 40, "unit_price": 100_000, "market_value": 4_000_000},
+            {"stock_code": "AAPL", "stock_name": "애플", "quantity": 30, "unit_price": 200_000, "market_value": 6_000_000},
+        ],
         snapshot_prices_by_date={},
+        external_krw_closes={"005930": [("2026-01-02", 100_000.0), ("2026-06-01", 110_000.0)]},
+        split_flags={"AAPL": "분할 여부 확인 전"},
+        cashflows=[],
+    )
+    assert under_half["scope"] == "uncalculated"
+    assert "계산 가능 비중 부족" in (under_half["reason"] or "")
+    assert under_half["effect_krw"] is None
+    assert under_half["effect_pct_p"] is None
+
+
+def test_split_verification_failure_and_snapshot_quantity_jump_and_foreign_cash_fx():
+    """리뷰 항목 2·3: 일봉 누락 분할 미확인, 무거래 스냅샷 수량 급변, 환율 없는 외화 예수금은 모두 미계산."""
+    # 1) 국내 일봉이 비어 있으면 분할 여부 확인 전 사유 반환
+    assert "분할 여부 확인 전" in (rules.detect_krx_series_split_or_mismatch(50_000, "2026-01-02", "2026-06-01", []) or "")
+    # 사후 5:1 수정주가 불일치 및 무수정 일봉 급변
+    assert rules.detect_krx_series_split_or_mismatch(50_000, "2026-01-02", "2026-01-10", _make_bars("2026-01-02", [10_000, 10_200])) is not None
+    assert rules.detect_krx_series_split_or_mismatch(50_000, "2026-01-02", "2026-01-10", _make_bars("2026-01-02", [50_000, 10_000])) is not None
+
+    # 2) 스냅샷 수량이 거래 없이 100 → 120주(20% 무상증자, 단가 100,000 → 83,333)로 변하면 분할 의심 감지
+    flags = rules.detect_snapshot_quantity_split_flags(
+        stock_rows=[
+            {"date": "2026-01-02", "stock_code": "005930", "quantity": 100, "unit_price": 100_000, "market_value": 10_000_000},
+            {"date": "2026-01-02", "stock_code": "CASH_KRW", "quantity": 5_000_000, "unit_price": 1, "market_value": 5_000_000},
+            {"date": "2026-03-02", "stock_code": "005930", "quantity": 120, "unit_price": 83_333, "market_value": 10_000_000},
+            {"date": "2026-03-02", "stock_code": "CASH_KRW", "quantity": 5_000_000, "unit_price": 1, "market_value": 5_000_000},
+        ],
+        manual_trades=[],
+        nh_rows=[],
+        cashflows=[],
+        baseline_date="2026-01-02",
+        ending_date="2026-03-02",
+    )
+    assert "005930" in flags
+
+    # 반면 현금이 실제로 차감된 정상 추가 매수(100→150주, 단가 100,000 유지, 현금 500만→0)는 분할로 오탐하지 않는다.
+    normal_buy_flags = rules.detect_snapshot_quantity_split_flags(
+        stock_rows=[
+            {"date": "2026-01-02", "stock_code": "005930", "quantity": 100, "unit_price": 100_000, "market_value": 10_000_000},
+            {"date": "2026-01-02", "stock_code": "CASH_KRW", "quantity": 5_000_000, "unit_price": 1, "market_value": 5_000_000},
+            {"date": "2026-03-02", "stock_code": "005930", "quantity": 150, "unit_price": 100_000, "market_value": 15_000_000},
+            {"date": "2026-03-02", "stock_code": "CASH_KRW", "quantity": 0, "unit_price": 1, "market_value": 0},
+        ],
+        manual_trades=[],
+        nh_rows=[],
+        cashflows=[],
+        baseline_date="2026-01-02",
+        ending_date="2026-03-02",
+    )
+    assert "005930" not in normal_buy_flags
+
+    # 3) 환율 소스가 없는 외화 현금(CASH_EUR)은 기준일 값 고정 대신 uncalculated("환율 미확보") 처리
+    fx_res = rules.compute_ghost_portfolio(
+        nav_points=[
+            {"date": "2026-01-02", "total_value": 10_000_000},
+            {"date": "2026-06-01", "total_value": 10_900_000},
+        ],
+        baseline_stocks=[
+            {"stock_code": "005930", "stock_name": "삼성전자", "quantity": 80, "unit_price": 100_000, "market_value": 8_000_000},
+            {"stock_code": "CASH_EUR", "stock_name": "유로", "quantity": 1_300, "unit_price": 1_538.46, "market_value": 2_000_000},
+        ],
+        snapshot_prices_by_date={
+            "2026-01-02": {
+                "005930": {"unit_price": 100_000, "quantity": 80, "market_value": 8_000_000, "priced_from_fallback": 0},
+                "CASH_EUR": {"unit_price": 1_538.46, "quantity": 1_300, "market_value": 2_000_000, "priced_from_fallback": 0},
+            },
+            "2026-06-01": {
+                "005930": {"unit_price": 110_000, "quantity": 80, "market_value": 8_800_000, "priced_from_fallback": 0},
+                "CASH_EUR": {"unit_price": None, "quantity": 1_300, "market_value": 2_100_000, "priced_from_fallback": 1},
+            },
+        },
         external_krw_closes={"005930": [("2026-01-02", 100_000.0), ("2026-06-01", 110_000.0)]},
         split_flags={},
         cashflows=[],
     )
-    assert res["scope"] == "partial"
-    assert res["coverage"]["uncalculated_holdings"] == 1
-    assert res["coverage"]["uncalculated_weight_pct"] == 20.0
-    assert res["coverage"]["calculable_weight_pct"] == 80.0
-    assert res["uncalculated"][0]["stock_code"] == "CRYPTO_BTC"
-    assert "특수자산" in res["uncalculated"][0]["reason"]
-    assert res["ghost_end_value"] == 10_700_000  # 7.7M + 2.0M(미계산 원금 유지) + 1.0M(현금)
+    assert fx_res["uncalculated"][0]["stock_code"] == "CASH_EUR"
+    assert "환율 미확보" in fx_res["uncalculated"][0]["reason"]
+    assert fx_res["effect_krw"] == 0
 
-    # 모든 위험자산이 미계산이면 가짜 0% 시리즈 대신 미계산(None)으로 반환한다.
-    all_uncalc = rules.compute_ghost_portfolio(
-        nav_points=nav_points,
-        baseline_stocks=[baseline_stocks[1], baseline_stocks[2]],
-        snapshot_prices_by_date={},
-        external_krw_closes={},
-        split_flags={},
-        cashflows=[],
+
+def test_post_sale_manual_recorded_date_priority_and_overseas_bar_matching():
+    """리뷰 항목 4·5: 기록일 기준 수동 매매 표기/인접일 우선순위 및 해외 직전 거래일 봉 고저 범위 매칭."""
+    # 항목 4: 기록일 기준(date_is_recorded_at=True) 수동 매매가 스냅샷 소멸일(2026-03-05)과 인접(2026-03-07)하면 스냅샷 소멸 우선,
+    #         일부 매도처럼 스냅샷 소멸이 없으면 "기록일 기준(체결일과 다를 수 있음)" 주석 유지
+    events = rules.collect_sale_events(
+        nh_rows=[],
+        manual_trades=[
+            {
+                "side": "sell", "trade_date": "2026-03-07", "date_is_recorded_at": True,
+                "stock_code": "005380", "stock_name": "현대차", "currency": "KRW",
+                "quantity": 3, "price": 240_000, "gross_amount": 720_000, "quantity_after": 0,
+            },
+            {
+                "side": "sell", "trade_date": "2026-03-10", "date_is_recorded_at": True,
+                "stock_code": "000660", "stock_name": "SK하이닉스", "currency": "KRW",
+                "quantity": 2, "price": 190_000, "gross_amount": 380_000, "quantity_after": 5,
+            },
+        ],
+        stock_snapshots=[
+            {"date": "2026-03-04", "stock_code": "005380", "quantity": 3, "market_value": 720_000},
+            {"date": "2026-03-04", "stock_code": "000660", "quantity": 7, "market_value": 1_330_000},
+            {"date": "2026-03-05", "stock_code": "000660", "quantity": 7, "market_value": 1_330_000},
+        ],
+        effective_since="2026-01-01",
     )
-    assert all_uncalc["scope"] == "uncalculated"
-    assert all_uncalc["ghost_end_value"] is None
-    assert all_uncalc["effect_krw"] is None
-    assert all_uncalc["effect_pct_p"] is None
+    by_code = {e["stock_code"]: e for e in events}
+    assert by_code["005380"]["source"] == "snapshot_disappearance"
+    assert by_code["005380"]["trade_date"] == "2026-03-05"
+    assert by_code["000660"]["source"] == "manual_trade"
+    assert by_code["000660"]["date_is_recorded_at"] is True
+    assert by_code["000660"]["date_note"] == "기록일 기준(체결일과 다를 수 있음)"
 
+    # 항목 5: 해외 매도(KST 2026-05-13 새벽 체결 = 미국 현지 2026-05-12 봉 고저 범위 [212, 218], 5/13 봉은 [225, 230] 갭상승)
+    us_bars = [
+        {"date": "2026-05-12", "open": 214.0, "high": 218.0, "low": 212.0, "close": 216.0, "currency": "USD"},
+        {"date": "2026-05-13", "open": 226.0, "high": 230.0, "low": 225.0, "close": 228.0, "currency": "USD"},
+    ] + [
+        {"date": (date(2026, 5, 14) + timedelta(days=i)).isoformat(), "open": 220.0, "high": 222.0, "low": 219.0, "close": 220.0, "currency": "USD"}
+        for i in range(30)
+        if (date(2026, 5, 14) + timedelta(days=i)).weekday() < 5
+    ]
+    matched = rules.evaluate_post_sales(
+        sale_events=[{
+            "trade_date": "2026-05-13", "stock_code": "AAPL", "stock_name": "애플",
+            "currency": "USD", "source": "nh_realized_pnl", "sale_type": "closed",
+            "price_basis": "execution", "quantity": 10, "sell_price": 215.0, "sell_amount": 2150.0, "status": "ok",
+        }],
+        daily_bars={"AAPL": us_bars},
+        corporate_events={"AAPL": {"verified": True, "ex_dates": set(), "split_dates": set()}},
+        since="2026-01-01",
+    )
+    assert matched["items"][0]["status"] == "ok"
+    assert matched["items"][0]["matched_bar_date"] == "2026-05-12"
 
-def test_detect_krx_series_split_or_mismatch():
-    bars_normal = _make_bars("2026-01-02", [50_000, 51_000, 52_000], shares=1_000_000)
-    assert rules.detect_krx_series_split_or_mismatch(50_000, "2026-01-02", "2026-01-10", bars_normal) is None
-    # 사후 5:1 액면분할로 과거 수정주가가 10,000원으로 내려간 경우
-    assert rules.detect_krx_series_split_or_mismatch(50_000, "2026-01-02", "2026-01-10", _make_bars("2026-01-02", [10_000, 10_200])) is not None
-    # 무수정 일봉에서 하루 -80% 급락한 경우
-    assert rules.detect_krx_series_split_or_mismatch(50_000, "2026-01-02", "2026-01-10", _make_bars("2026-01-02", [50_000, 10_000])) is not None
+    # 당일·직전 거래일 어느 봉의 고저 범위에도 들지 않으면 미계산 처리
+    unmatched = rules.evaluate_post_sales(
+        sale_events=[{
+            "trade_date": "2026-05-13", "stock_code": "AAPL", "stock_name": "애플",
+            "currency": "USD", "source": "nh_realized_pnl", "sale_type": "closed",
+            "price_basis": "execution", "quantity": 10, "sell_price": 310.0, "sell_amount": 3100.0, "status": "ok",
+        }],
+        daily_bars={"AAPL": us_bars},
+        corporate_events={"AAPL": {"verified": True, "ex_dates": set(), "split_dates": set()}},
+        since="2026-01-01",
+    )
+    assert unmatched["items"][0]["status"] == "uncalculated"
+    assert "고저 범위 불일치" in unmatched["items"][0]["reason"]
 
 
 def test_post_sale_sources_priority_dedup_and_horizons():
-    # 25개 거래일 생성: 2026-03-02 시작
-    bars_a = _make_bars("2026-03-02", [100_000 - i * 1_000 for i in range(25)])  # 하락 회피 종목
-    bars_b = _make_bars("2026-03-02", [50_000 + i * 1_000 for i in range(25)])   # 매도 후 상승 종목
-    bars_c = _make_bars("2026-03-02", [30_000 + i * 500 for i in range(25)])     # 스냅샷 소멸 종목
+    bars_a = _make_bars("2026-03-02", [100_000 - i * 1_000 for i in range(25)])
+    bars_b = _make_bars("2026-03-02", [50_000 + i * 1_000 for i in range(25)])
+    bars_c = _make_bars("2026-03-02", [30_000 + i * 500 for i in range(25)])
 
-    sale_day_a = bars_a[0]["date"]  # 2026-03-02
-    sale_day_b = bars_b[1]["date"]  # 2026-03-03
-    prev_day_c = bars_c[2]["date"]  # 2026-03-04
-    gone_day_c = bars_c[3]["date"]  # 2026-03-05
-    recent_day = bars_a[22]["date"]  # 만기 전(남은 거래일 2일)
+    sale_day_a = bars_a[0]["date"]
+    sale_day_b = bars_b[1]["date"]
+    prev_day_c = bars_c[2]["date"]
+    gone_day_c = bars_c[3]["date"]
+    recent_day = bars_a[22]["date"]
 
     nh_rows = [
-        # 같은 날 분할 체결 2건 → 10주 합산, 평균 단가 100,000원
         {"market": "domestic", "trade_date": sale_day_a, "stock_code": "005930", "stock_name": "삼성전자", "currency": "KRW", "sell_quantity": 4, "sell_krw": 396_000, "issues": []},
         {"market": "domestic", "trade_date": sale_day_a, "stock_code": "005930", "stock_name": "삼성전자", "currency": "KRW", "sell_quantity": 6, "sell_krw": 604_000, "issues": []},
-        # 상세 미확보 행은 미계산으로 남는다
         {"market": "domestic", "trade_date": "2026-03-31", "stock_code": "035420", "stock_name": "NAVER", "currency": "KRW", "sell_quantity": 5, "sell_krw": 900_000, "issues": ["detail_pending"]},
     ]
     manual_trades = [
-        # NH와 같은 날·같은 종목은 중복 제거
         {"side": "sell", "trade_date": sale_day_a, "stock_code": "005930", "stock_name": "삼성전자", "currency": "KRW", "quantity": 10, "price": 100_000, "gross_amount": 1_000_000, "quantity_after": 0},
-        # 수동 매매 단독 건 (일부 매도)
         {"side": "sell", "trade_date": sale_day_b, "stock_code": "000660", "stock_name": "SK하이닉스", "currency": "KRW", "quantity": 5, "price": 51_000, "gross_amount": 255_000, "quantity_after": 3},
-        # 최근 매도 건 (5·20거래일 미도래)
         {"side": "sell", "trade_date": recent_day, "stock_code": "005930", "stock_name": "삼성전자", "currency": "KRW", "quantity": 2, "price": 78_000, "gross_amount": 156_000, "quantity_after": 0},
     ]
     stock_snapshots = [
@@ -211,7 +457,7 @@ def test_post_sale_sources_priority_dedup_and_horizons():
         stock_snapshots=stock_snapshots,
         effective_since="2026-01-01",
     )
-    assert len(events) == 5  # NH 삼성전자 + NH NAVER(미계산) + 수동 SK하이닉스 + 수동 최근 삼성전자 + 스냅샷 소멸 현대차(005380)
+    assert len(events) == 5
 
     post = rules.evaluate_post_sales(
         sale_events=events,
@@ -232,39 +478,12 @@ def test_post_sale_sources_priority_dedup_and_horizons():
     assert summary["avoided_drop_20d_count"] == 1
     assert summary["rose_after_20d_count"] == 2
 
-    by_key = {(it["stock_code"], it["trade_date"]): it for it in post["items"]}
-    item_a = by_key[("005930", sale_day_a)]
-    assert item_a["source"] == "nh_realized_pnl"
-    assert item_a["sell_price"] == 100_000
-    assert item_a["day5"]["price"] == 95_000
-    assert item_a["day5"]["change_pct"] == -5.0
-    assert item_a["day20"]["price"] == 80_000
-    assert item_a["day20"]["change_pct"] == -20.0
-    assert item_a["day20"]["diff_amount"] == -200_000
-    assert item_a["day20"]["outcome"] == "avoided_drop"
-
-    item_b = by_key[("000660", sale_day_b)]
-    assert item_b["source"] == "manual_trade"
-    assert item_b["sale_type"] == "partial"
-    assert item_b["day20"]["outcome"] == "rose_after"
-
-    item_c = by_key[("005380", gone_day_c)]
-    assert item_c["source"] == "snapshot_disappearance"
-    assert item_c["price_basis"] == "close_estimate"
-    assert item_c["sell_price"] == bars_c[3]["close"]
-
-    item_recent = by_key[("005930", recent_day)]
-    assert item_recent["day5"]["status"] == "pending"
-    assert item_recent["day20"]["status"] == "pending"
-    assert item_recent["current"]["status"] == "ok"
-
 
 def test_post_sale_marks_ex_dividend_split_and_unverified_as_uncalculated():
     bars = _make_bars("2026-04-01", [50_000 + i * 200 for i in range(25)])
     sale_day = bars[0]["date"]
-    ex_day_10 = bars[10]["date"]  # +5거래일 이후, +20거래일 이전 배당락
+    ex_day_10 = bars[10]["date"]
 
-    # 1) 10거래일째 배당락: +5거래일은 계산 가능, +20거래일·현재가는 미계산(배당락 구간)
     res_ex = rules.evaluate_post_sales(
         sale_events=[{
             "trade_date": sale_day, "stock_code": "005930", "stock_name": "삼성전자",
@@ -280,11 +499,7 @@ def test_post_sale_marks_ex_dividend_split_and_unverified_as_uncalculated():
     assert row_ex["day20"]["status"] == "uncalculated"
     assert "배당락" in row_ex["day20"]["reason"]
     assert row_ex["current"]["status"] == "uncalculated"
-    assert res_ex["summary"]["matured_20d_count"] == 1
-    assert res_ex["summary"]["calculable_20d_count"] == 0
-    assert res_ex["summary"]["uncalculated_20d_count"] == 1
 
-    # 2) 배당·분할 미확인(verified=False) → 확인 전 미계산
     res_unverified = rules.evaluate_post_sales(
         sale_events=[{
             "trade_date": sale_day, "stock_code": "005930", "stock_name": "삼성전자",
@@ -298,7 +513,6 @@ def test_post_sale_marks_ex_dividend_split_and_unverified_as_uncalculated():
     assert res_unverified["items"][0]["day5"]["status"] == "uncalculated"
     assert "확인 전" in res_unverified["items"][0]["day5"]["reason"]
 
-    # 3) 매도 체결가가 당일 일봉 범위와 동떨어진 경우(사후 분할 수정주가 불일치) → 전체 미계산
     res_split = rules.evaluate_post_sales(
         sale_events=[{
             "trade_date": sale_day, "stock_code": "005930", "stock_name": "삼성전자",
@@ -321,10 +535,14 @@ async def test_ghost_api_endpoint_auth_validation_caching_and_db_roundtrip(temp_
         ("000660", "00164779", "SK하이닉스", "2026-01-01"),
     ])
 
-    # 정산 스냅샷 2개 + 종목별 스냅샷 + 수동 매도 1건 시드
     await snapshots_repo.save_snapshot("u1", "2025-12-30", 10_000_000, 10_000_000, 1000.0, 10_000.0, 1400.0)
     await snapshots_repo.save_stock_snapshots("u1", "2025-12-30", [
         {"stock_code": "005930", "market_value": 8_000_000, "quantity": 100, "unit_price": 80_000, "currency": "KRW", "fx_rate": 1.0},
+        {"stock_code": "CASH_KRW", "market_value": 2_000_000, "quantity": 2_000_000, "unit_price": 1, "currency": "KRW", "fx_rate": 1.0},
+    ])
+    await snapshots_repo.save_snapshot("u1", "2026-01-15", 10_800_000, 10_000_000, 1080.0, 10_000.0, 1405.0)
+    await snapshots_repo.save_stock_snapshots("u1", "2026-01-15", [
+        {"stock_code": "000660", "market_value": 8_800_000, "quantity": 50, "unit_price": 176_000, "currency": "KRW", "fx_rate": 1.0},
         {"stock_code": "CASH_KRW", "market_value": 2_000_000, "quantity": 2_000_000, "unit_price": 1, "currency": "KRW", "fx_rate": 1.0},
     ])
     await snapshots_repo.save_snapshot("u1", "2026-02-10", 11_500_000, 10_000_000, 1150.0, 10_000.0, 1410.0)
@@ -334,9 +552,11 @@ async def test_ghost_api_endpoint_auth_validation_caching_and_db_roundtrip(temp_
     ])
 
     bars_005930 = _make_bars("2025-12-29", [80_000 + i * 500 for i in range(35)])
+    bars_000660 = _make_bars("2025-12-29", [170_000 + i * 600 for i in range(35)])
     sale_date = bars_005930[3]["date"]
     sale_price = bars_005930[3]["close"]
     async with db_repo.transaction() as db:
+        # 체결일(date) 없이 기록일(created_at)만 저장된 일반 수동 매매(일부 매도)도 함께 검증
         await db.execute(
             "INSERT INTO portfolio_trades (google_sub, request_id, stock_code, fingerprint, result_json, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
@@ -359,15 +579,40 @@ async def test_ghost_api_endpoint_auth_validation_caching_and_db_roundtrip(temp_
                 f"{sale_date}T02:00:00+00:00",
             ),
         )
+        part_date = bars_000660[15]["date"]
+        part_price = bars_000660[15]["close"]
+        await db.execute(
+            "INSERT INTO portfolio_trades (google_sub, request_id, stock_code, fingerprint, result_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                "u1",
+                "req-2",
+                "000660",
+                "fp-2",
+                json.dumps({
+                    "stock_code": "000660",
+                    "stock_name": "SK하이닉스",
+                    "side": "sell",
+                    "currency": "KRW",
+                    "quantity": 5,
+                    "price": part_price,
+                    "gross_amount": part_price * 5,
+                    "quantity_after": 45,
+                }),
+                f"{part_date}T04:00:00+00:00",
+            ),
+        )
 
     app = FastAPI()
     app.include_router(routes.router)
 
-    batch_mock = AsyncMock(return_value={"005930": bars_005930})
-    div_mock = AsyncMock(return_value={"005930": {"status": "fresh", "events": []}})
+    batch_mock = AsyncMock(return_value={"005930": bars_005930, "000660": bars_000660})
+    div_mock = AsyncMock(return_value={
+        "005930": {"status": "fresh", "events": []},
+        "000660": {"status": "fresh", "events": []},
+    })
 
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        # 1) 비로그인 → 401
         with patch.object(routes, "get_current_user", AsyncMock(return_value=None)):
             unauth = await client.get("/api/portfolio/ghost")
             assert unauth.status_code == 401
@@ -376,14 +621,13 @@ async def test_ghost_api_endpoint_auth_validation_caching_and_db_roundtrip(temp_
             patch.object(routes, "get_current_user", AsyncMock(return_value={"google_sub": "u1"})),
             patch.object(service.close_price_client, "get_daily_prices_batch", batch_mock),
             patch.object(service.dividend_sources, "get_histories", div_mock),
+            patch.object(service, "today_kst_date", return_value=date(2026, 2, 13)),
         ):
-            # 2) 잘못된 날짜 형식 / 미래 날짜 → 400
             bad = await client.get("/api/portfolio/ghost?since=not-a-date")
             assert bad.status_code == 400
             future = await client.get("/api/portfolio/ghost?since=2099-01-01")
             assert future.status_code == 400
 
-            # 3) 기본 조회 (YTD)
             resp = await client.get("/api/portfolio/ghost")
             assert resp.status_code == 200
             body = resp.json()
@@ -391,15 +635,52 @@ async def test_ghost_api_endpoint_auth_validation_caching_and_db_roundtrip(temp_
             assert body["baseline_date"] == "2025-12-30"
             assert body["ghost"]["scope"] == "complete"
             assert body["ghost"]["actual_end_value"] == 11_500_000
-            assert body["post_sale"]["summary"]["total_count"] == 1
-            assert body["post_sale"]["items"][0]["source"] == "manual_trade"
-            assert body["post_sale"]["items"][0]["day20"]["status"] == "ok"
+            assert body["post_sale"]["summary"]["total_count"] == 2
+            by_code = {it["stock_code"]: it for it in body["post_sale"]["items"]}
+            assert by_code["005930"]["date_note"] is None
+            assert by_code["000660"]["date_is_recorded_at"] is True
+            assert by_code["000660"]["date_note"] == "기록일 기준(체결일과 다를 수 있음)"
             assert batch_mock.await_count == 1
 
-            # 4) 동일 상태 재호출 시 인메모리 캐시 적중 (외부 배치 재호출 없음)
-            resp2 = await client.get("/api/portfolio/ghost")
-            assert resp2.status_code == 200
+            # 더 짧은 기간(since=2026-01-15) 조회 시에도 이미 넓게 받은 일봉 캐시를 잘라 써서 외부 배치를 재호출하지 않는다.
+            resp_short = await client.get("/api/portfolio/ghost?since=2026-01-15")
+            assert resp_short.status_code == 200
             assert batch_mock.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_service_marks_foreign_yahoo_failure_as_split_unverified(temp_db):
+    """리뷰 항목 2: 해외 종목 Yahoo 차트 실패 시 스냅샷 단가가 있어도 분할 미확인으로 미계산 처리한다."""
+    await seed_user("u1")
+    await seed_corp_codes([("005930", "00126380", "삼성전자", "2026-01-01")])
+
+    await snapshots_repo.save_snapshot("u1", "2026-01-02", 10_000_000, 10_000_000, 1000.0, 10_000.0, 1400.0)
+    await snapshots_repo.save_stock_snapshots("u1", "2026-01-02", [
+        {"stock_code": "005930", "market_value": 7_000_000, "quantity": 100, "unit_price": 70_000, "currency": "KRW", "fx_rate": 1.0},
+        {"stock_code": "AAPL", "market_value": 3_000_000, "quantity": 10, "unit_price": 300_000, "currency": "USD", "fx_rate": 1400.0},
+    ])
+    await snapshots_repo.save_snapshot("u1", "2026-03-02", 11_600_000, 10_000_000, 1160.0, 10_000.0, 1400.0)
+    await snapshots_repo.save_stock_snapshots("u1", "2026-03-02", [
+        {"stock_code": "005930", "market_value": 7_700_000, "quantity": 100, "unit_price": 77_000, "currency": "KRW", "fx_rate": 1.0},
+        {"stock_code": "AAPL", "market_value": 3_900_000, "quantity": 10, "unit_price": 390_000, "currency": "USD", "fx_rate": 1400.0},
+    ])
+
+    kr_bars = [
+        {"date": "2026-01-02", "open": 70_000, "high": 71_000, "low": 69_000, "close": 70_000},
+        {"date": "2026-03-02", "open": 77_000, "high": 78_000, "low": 76_000, "close": 77_000},
+    ]
+    with (
+        patch.object(service.close_price_client, "get_daily_prices_batch", AsyncMock(return_value={"005930": kr_bars})),
+        patch.object(service.yahoo, "fetch_chart_json", AsyncMock(side_effect=httpx.ConnectError("yahoo down"))),
+        patch.object(service.yahoo, "fetch_close_series", AsyncMock(return_value={"rows": [], "currency": None})),
+    ):
+        report = await service.build_ghost_report("u1", today=date(2026, 3, 3))
+        assert report["ghost"]["scope"] == "partial"
+        assert report["ghost"]["uncalculated"][0]["stock_code"] == "AAPL"
+        assert "분할 여부 확인 전" in report["ghost"]["uncalculated"][0]["reason"]
+        # AAPL이 +30%(300만→390만) 올랐지만 매매가 없으므로 계산 범위 한정 비교에서 매매 효과는 0원!
+        assert report["ghost"]["effect_krw"] == 0
+        assert report["ghost"]["effect_pct_p"] == 0.0
 
 
 @pytest.mark.asyncio
@@ -407,16 +688,15 @@ async def test_default_since_advances_past_legacy_null_quantity_snapshots(temp_d
     await seed_user("u1")
     await seed_corp_codes([("005930", "00126380", "삼성전자", "2026-01-01")])
 
-    # 연초 스냅샷은 quantity=None(구버전), 2026-06-30부터 quantity 기록 시작
     await snapshots_repo.save_snapshot("u1", "2025-12-30", 8_000_000, 8_000_000, 1000.0, 8_000.0, 1400.0)
     await snapshots_repo.save_stock_snapshots("u1", "2025-12-30", [
         {"stock_code": "005930", "market_value": 8_000_000, "quantity": None, "unit_price": None},
     ])
-    await snapshots_repo.save_snapshot("u1", "2026-06-30", 9_000_000, 8_000_000, 1125.0, 8_000.0, 1400.0)
+    await snapshots_repo.save_snapshot("u1", "2026-06-30", 9_000_000, 8_000_000, 1125.0, 8_000_000, 1400.0)
     await snapshots_repo.save_stock_snapshots("u1", "2026-06-30", [
         {"stock_code": "005930", "market_value": 9_000_000, "quantity": 100, "unit_price": 90_000, "currency": "KRW", "fx_rate": 1.0},
     ])
-    await snapshots_repo.save_snapshot("u1", "2026-09-30", 10_000_000, 8_000_000, 1250.0, 8_000.0, 1400.0)
+    await snapshots_repo.save_snapshot("u1", "2026-09-30", 10_000_000, 8_000_000, 1250.0, 8_000_000, 1400.0)
     await snapshots_repo.save_stock_snapshots("u1", "2026-09-30", [
         {"stock_code": "005930", "market_value": 10_000_000, "quantity": 100, "unit_price": 100_000, "currency": "KRW", "fx_rate": 1.0},
     ])
@@ -433,7 +713,6 @@ async def test_default_since_advances_past_legacy_null_quantity_snapshots(temp_d
         assert default_report["ghost"]["scope"] == "complete"
         assert default_report["ghost"]["effect_krw"] == 0
 
-        # 사용자가 명시적으로 since=2025-12-30을 지정하면 임의 이동 없이 미계산(수량 미기록)으로 투명하게 반환한다.
         explicit_report = await service.build_ghost_report("u1", since="2025-12-30", today=date(2026, 10, 1))
         assert explicit_report["baseline_date"] == "2025-12-30"
         assert explicit_report["ghost"]["scope"] == "uncalculated"

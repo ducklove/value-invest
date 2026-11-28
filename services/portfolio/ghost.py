@@ -44,6 +44,7 @@ GHOST_CACHE_TTL = 300.0
 PRICE_SERIES_CACHE_TTL = 900.0
 CORP_EVENT_CACHE_TTL = 900.0
 UPSTREAM_TIMEOUT_SECONDS = 8.0
+DEFAULT_LOOKBACK_CACHE_DAYS = 420
 
 _ghost_cache = MemoryTTLCache("portfolio.ghost", GHOST_CACHE_TTL, evict_expired_after=1800)
 _price_cache = MemoryTTLCache("portfolio.ghost.prices", PRICE_SERIES_CACHE_TTL, evict_expired_after=3600)
@@ -133,6 +134,7 @@ async def _state_signature(user: str, since_key: str, today: date) -> str:
 
 
 async def _load_all_manual_trades(user: str) -> list[dict[str, Any]]:
+    """수동 매매 기록을 읽고 체결일 명시 여부(`date_is_recorded_at`)를 구분한다."""
     db = await db_repo.get_db()
     rows = await (
         await db.execute(
@@ -148,8 +150,11 @@ async def _load_all_manual_trades(user: str) -> list[dict[str, Any]]:
             continue
         if not isinstance(payload, dict):
             continue
-        raw_date = str(payload.get("date") or "").strip()[:10]
+        explicit_date = str(payload.get("date") or payload.get("trade_date") or "").strip()[:10]
+        date_is_recorded_at = False
+        raw_date = explicit_date
         if not raw_date:
+            date_is_recorded_at = True
             created = str(row["created_at"] or "").strip()
             if created:
                 try:
@@ -159,7 +164,7 @@ async def _load_all_manual_trades(user: str) -> list[dict[str, Any]]:
                     raw_date = dt.astimezone(KST).date().isoformat()
                 except ValueError:
                     raw_date = created[:10]
-        out.append({**payload, "trade_date": raw_date})
+        out.append({**payload, "trade_date": raw_date, "date_is_recorded_at": date_is_recorded_at})
     return out
 
 
@@ -258,10 +263,6 @@ async def _resolve_stock_names(user: str, codes: set[str]) -> dict[str, str]:
 
 def _yahoo_range_for(since: date, today: date) -> str:
     days = max(1, (today - since).days + 45)
-    if days <= 160:
-        return "6mo"
-    if days <= 350:
-        return "1y"
     if days <= 700:
         return "2y"
     if days <= 1800:
@@ -269,17 +270,25 @@ def _yahoo_range_for(since: date, today: date) -> str:
     return "10y"
 
 
+def _slice_bars(rows: list[dict[str, Any]], since_iso: str, until_iso: str) -> list[dict[str, Any]]:
+    return [r for r in rows if since_iso <= str(r.get("date") or "")[:10] <= until_iso]
+
+
 async def _fetch_domestic_bars(codes: list[str], since: date, until: date) -> dict[str, list[dict[str, Any]]]:
-    """국내 종목 일봉(시가·고가·저가·종가·상장주식수)을 배치 우선 조회하고 누락분은 KIS 프록시로 보충한다."""
+    """국내 종목 일봉을 종목별 넉넉한 범위(최소 약 14개월)로 캐시하고 요청 구간으로 잘라 반환한다."""
     if not codes:
         return {}
+    since_iso = since.isoformat()
+    until_iso = until.isoformat()
+    fetch_since = min(since, until - timedelta(days=DEFAULT_LOOKBACK_CACHE_DAYS))
+    fetch_since_iso = fetch_since.isoformat()
+
     results: dict[str, list[dict[str, Any]]] = {}
     uncached: list[str] = []
-    cache_prefix = f"KR:{since.isoformat()}:{until.isoformat()}"
     for code in codes:
-        cached = _price_cache.get(f"{cache_prefix}:{code}")
-        if cached is not None:
-            results[code] = cached
+        cached = _price_cache.get(f"KR:{until_iso}:{code}")
+        if cached is not None and cached["covered_since"] <= since_iso:
+            results[code] = _slice_bars(cached["rows"], since_iso, until_iso)
         else:
             uncached.append(code)
     if not uncached:
@@ -289,7 +298,7 @@ async def _fetch_domestic_bars(codes: list[str], since: date, until: date) -> di
     batch_rows: dict[str, list[dict[str, Any]]] = {}
     try:
         batch_rows = await asyncio.wait_for(
-            close_price_client.get_daily_prices_batch(uncached, since=since, until=until, fields=fields),
+            close_price_client.get_daily_prices_batch(uncached, since=fetch_since, until=until, fields=fields),
             timeout=UPSTREAM_TIMEOUT_SECONDS,
         )
     except _FETCH_ERRORS as exc:
@@ -300,8 +309,8 @@ async def _fetch_domestic_bars(codes: list[str], since: date, until: date) -> di
         rows = batch_rows.get(code) or []
         if rows:
             normalized = [{**r, "currency": "KRW"} for r in rows]
-            results[code] = normalized
-            _price_cache.set(f"{cache_prefix}:{code}", normalized)
+            _price_cache.set(f"KR:{until_iso}:{code}", {"covered_since": fetch_since_iso, "rows": normalized})
+            results[code] = _slice_bars(normalized, since_iso, until_iso)
         else:
             still_missing.append(code)
 
@@ -314,7 +323,7 @@ async def _fetch_domestic_bars(codes: list[str], since: date, until: date) -> di
         async with sem:
             try:
                 rows = await asyncio.wait_for(
-                    close_price_client.get_daily_prices(code, since=since, until=until, fields=fields),
+                    close_price_client.get_daily_prices(code, since=fetch_since, until=until, fields=fields),
                     timeout=4.0,
                 )
                 if rows:
@@ -323,7 +332,7 @@ async def _fetch_domestic_bars(codes: list[str], since: date, until: date) -> di
                 pass
             try:
                 closes = await asyncio.wait_for(
-                    close_price_client.get_daily_closes(code, since=since, until=until),
+                    close_price_client.get_daily_closes(code, since=fetch_since, until=until),
                     timeout=3.0,
                 )
                 if closes:
@@ -332,7 +341,7 @@ async def _fetch_domestic_bars(codes: list[str], since: date, until: date) -> di
                 pass
             try:
                 payload = await asyncio.wait_for(
-                    kis_proxy_client.get_history(code, start_date=since, end_date=until, period="D", adjusted=True),
+                    kis_proxy_client.get_history(code, start_date=fetch_since, end_date=until, period="D", adjusted=True),
                     timeout=6.0,
                 )
                 items = payload.get("items") if isinstance(payload, dict) else []
@@ -363,9 +372,11 @@ async def _fetch_domestic_bars(codes: list[str], since: date, until: date) -> di
                 return code, []
 
     for code, rows in await asyncio.gather(*(fetch_one(c) for c in still_missing)):
-        results[code] = rows
         if rows:
-            _price_cache.set(f"{cache_prefix}:{code}", rows)
+            _price_cache.set(f"KR:{until_iso}:{code}", {"covered_since": fetch_since_iso, "rows": rows})
+            results[code] = _slice_bars(rows, since_iso, until_iso)
+        else:
+            results[code] = []
     return results
 
 
@@ -378,16 +389,24 @@ async def _fetch_foreign_chart_and_events(
     if not codes:
         return {}, {}
     ticker_map = await load_ticker_map()
-    range_ = _yahoo_range_for(since, until)
+    fetch_since = min(since, until - timedelta(days=DEFAULT_LOOKBACK_CACHE_DAYS))
+    fetch_since_iso = (fetch_since - timedelta(days=15)).isoformat()
+    slice_since_iso = (since - timedelta(days=15)).isoformat()
+    until_iso = until.isoformat()
+    range_ = _yahoo_range_for(fetch_since, until)
+
     bars_out: dict[str, dict[str, Any]] = {}
     events_out: dict[str, dict[str, Any]] = {}
     sem = asyncio.Semaphore(4)
 
     async def one(code: str) -> None:
-        cache_key = f"YF:{range_}:{until.isoformat()}:{code}"
+        cache_key = f"YF:{until_iso}:{code}"
         cached = _price_cache.get(cache_key)
-        if cached is not None:
-            bars_out[code] = cached["bars"]
+        if cached is not None and cached["covered_since"] <= slice_since_iso:
+            bars_out[code] = {
+                "rows": _slice_bars(cached["bars"]["rows"], slice_since_iso, until_iso),
+                "currency": cached["bars"]["currency"],
+            }
             events_out[code] = cached["events"]
             return
         static = identifiers.static_foreign_ticker(code) or {}
@@ -423,7 +442,7 @@ async def _fetch_foreign_chart_and_events(
                 d_iso = datetime.fromtimestamp(int(ts), tz=zone).date().isoformat()
             except (TypeError, ValueError, OverflowError, OSError):
                 continue
-            if d_iso < (since - timedelta(days=15)).isoformat() or d_iso > until.isoformat():
+            if d_iso < fetch_since_iso or d_iso > until_iso:
                 continue
             bar: dict[str, Any] = {"date": d_iso, "close": round(float(close), 6), "currency": currency}
             op = chart.opens[idx] if idx < len(chart.opens) else None
@@ -436,7 +455,6 @@ async def _fetch_foreign_chart_and_events(
             if lo is not None and lo > 0:
                 bar["low"] = round(float(lo), 6)
             rows.append(bar)
-        # 같은 거래소 날짜 중복 봉은 마지막 값 유지
         dedup = {r["date"]: r for r in rows}
         sorted_rows = [dedup[k] for k in sorted(dedup)]
 
@@ -463,38 +481,43 @@ async def _fetch_foreign_chart_and_events(
 
         bar_pack = {"rows": sorted_rows, "currency": currency}
         ev_pack = {"verified": True, "ex_dates": ex_dates, "split_dates": split_dates}
-        bars_out[code] = bar_pack
-        events_out[code] = ev_pack
         if sorted_rows:
-            _price_cache.set(cache_key, {"bars": bar_pack, "events": ev_pack})
+            _price_cache.set(cache_key, {"covered_since": fetch_since_iso, "bars": bar_pack, "events": ev_pack})
+        bars_out[code] = {"rows": _slice_bars(sorted_rows, slice_since_iso, until_iso), "currency": currency}
+        events_out[code] = ev_pack
 
     await asyncio.gather(*(one(c) for c in codes))
     return bars_out, events_out
 
 
 async def _fetch_fx_closes(currencies_needed: set[str], since: date, until: date) -> dict[str, list[tuple[str, float]]]:
-    """USD 외 통화의 원화 환율 일봉(Yahoo XXXKRW=X) 조회."""
-    targets = sorted({c for c in currencies_needed if c and c not in {"KRW", "USD"}})
+    """외화 통화의 원화 환율 일봉(Yahoo XXXKRW=X)을 넓게 캐시하고 요청 구간으로 잘라 반환한다."""
+    targets = sorted({c for c in currencies_needed if c and c != "KRW"})
     if not targets:
         return {}
-    range_ = _yahoo_range_for(since, until)
+    fetch_since = min(since, until - timedelta(days=DEFAULT_LOOKBACK_CACHE_DAYS))
+    fetch_since_iso = (fetch_since - timedelta(days=15)).isoformat()
+    slice_since_iso = (since - timedelta(days=15)).isoformat()
+    until_iso = until.isoformat()
+    range_ = _yahoo_range_for(fetch_since, until)
+
     out: dict[str, list[tuple[str, float]]] = {}
     for cur in targets:
-        cache_key = f"FX:{range_}:{until.isoformat()}:{cur}"
+        cache_key = f"FX:{until_iso}:{cur}"
         cached = _price_cache.get(cache_key)
-        if cached is not None:
-            out[cur] = cached
+        if cached is not None and cached["covered_since"] <= slice_since_iso:
+            out[cur] = [(d, v) for d, v in cached["pairs"] if slice_since_iso <= d <= until_iso]
             continue
         series = await yahoo.fetch_close_series(f"{cur}KRW=X", range_=range_, interval="1d", session_date=False)
         pairs = [
             (str(r["date"])[:10], float(r["close"]))
             for r in (series.get("rows") or [])
-            if r.get("date") and (r.get("close") or 0) > 0
+            if r.get("date") and (r.get("close") or 0) > 0 and fetch_since_iso <= str(r["date"])[:10] <= until_iso
         ]
         pairs.sort(key=lambda p: p[0])
-        out[cur] = pairs
         if pairs:
-            _price_cache.set(cache_key, pairs)
+            _price_cache.set(cache_key, {"covered_since": fetch_since_iso, "pairs": pairs})
+        out[cur] = [(d, v) for d, v in pairs if slice_since_iso <= d <= until_iso]
     return out
 
 
@@ -524,7 +547,6 @@ async def _fetch_domestic_corporate_events(
         verified = feed.get("status") == "fresh"
         raw_events = list(feed.get("events") or [])
 
-        # 배당 0건인 국내 종목은 dividend_sources에서 KIS 빈 목록이 Yahoo 404로 넘어갈 수 있으므로 KIS 응답을 직접 확인한다.
         if not verified:
             try:
                 payload = await asyncio.wait_for(
@@ -585,6 +607,38 @@ def _select_anchor_snapshot(
     return (nav_rows[0], "earliest_snapshot", str(nav_rows[0]["date"])[:10]) if nav_rows else (None, "unavailable", year_start_iso)
 
 
+def _collect_krw_trade_flows_by_code(
+    nh_rows: list[dict[str, Any]],
+    manual_trades: list[dict[str, Any]],
+) -> dict[str, list[tuple[str, float]]]:
+    """미계산 종목이 기간 중 매매되어 현금으로 전환된 경우 원화 유입(+)/유출(-)을 추적한다."""
+    by_code: dict[str, list[tuple[str, float]]] = {}
+    nh_days: set[tuple[str, str]] = set()
+    for row in nh_rows or []:
+        issues = set(row.get("issues") or ())
+        if "detail_pending" in issues or "detail_missing" in issues or "fx_implausible" in issues:
+            continue
+        code = normalize_portfolio_code(row.get("stock_code") or row.get("symbol"))
+        t_date = str(row.get("trade_date") or "")[:10]
+        sell_krw = row.get("sell_krw")
+        if code and len(t_date) == 10 and sell_krw and float(sell_krw) > 0:
+            by_code.setdefault(code, []).append((t_date, float(sell_krw)))
+            nh_days.add((code, t_date))
+    for tr in manual_trades or []:
+        code = normalize_portfolio_code(tr.get("stock_code"))
+        t_date = str(tr.get("trade_date") or "")[:10]
+        if not code or len(t_date) != 10 or tr.get("currency") != "KRW":
+            continue
+        if tr.get("side") == "sell" and (code, t_date) in nh_days:
+            continue
+        cash_change = tr.get("cash_change")
+        if cash_change is None and tr.get("gross_amount") and tr.get("side") in {"buy", "sell"}:
+            cash_change = float(tr["gross_amount"]) * (1.0 if tr["side"] == "sell" else -1.0)
+        if cash_change is not None and float(cash_change) != 0:
+            by_code.setdefault(code, []).append((t_date, float(cash_change)))
+    return by_code
+
+
 async def _compute_ghost_payload(user: str, requested_since: date | None, today: date) -> dict[str, Any]:
     raw_nav = await nav_link.get_nav_history(user)
     today_iso = today.isoformat()
@@ -600,8 +654,6 @@ async def _compute_ghost_payload(user: str, requested_since: date | None, today:
     anchor, baseline_mode, effective_since = _select_anchor_snapshot(nav_rows, requested_since, today)
     baseline_note: str | None = None
 
-    # 기본 조회(since 미지정)에서 연초 스냅샷에 종목 수량이 전혀 기록되지 않은 구버전 구간이면
-    # 수량 기록이 시작된 첫 정산일로 기준일을 자동 조정하고 사유를 밝힌다.
     if requested_since is None and anchor is not None and nav_rows:
         anchor_date = str(anchor["date"])[:10]
         anchor_stocks = await snapshots.get_stock_snapshots_exact_date(user, anchor_date)
@@ -625,7 +677,6 @@ async def _compute_ghost_payload(user: str, requested_since: date | None, today:
     selected_nav = [r for r in nav_rows if baseline_date and str(r["date"])[:10] >= baseline_date]
     ending_date = str(selected_nav[-1]["date"])[:10] if selected_nav else None
 
-    # 종목별 스냅샷·매매·NH 실현손익 병렬 로드
     stock_range_start = min(baseline_date, effective_since) if baseline_date else effective_since
     stock_rows_task = asyncio.create_task(
         _load_stock_snapshots_range(user, stock_range_start, ending_date or today_iso)
@@ -651,7 +702,6 @@ async def _compute_ghost_payload(user: str, requested_since: date | None, today:
 
     stock_names = await _resolve_stock_names(user, all_codes)
 
-    # 매도 사건 수집
     sale_snapshots = [r for r in stock_rows if not baseline_date or str(r["date"])[:10] >= baseline_date]
     sale_events = rules.collect_sale_events(
         nh_rows=nh_rows,
@@ -661,20 +711,38 @@ async def _compute_ghost_payload(user: str, requested_since: date | None, today:
         stock_names=stock_names,
     )
 
-    # 일봉이 필요한 종목 집합 (기준일 보유 + 매도 추적 대상)
     baseline_stocks = [r for r in stock_rows if baseline_date and str(r["date"])[:10] == baseline_date]
     snapshot_prices_by_date: dict[str, dict[str, dict[str, Any]]] = {}
     for r in stock_rows:
         d = str(r["date"])[:10]
         c = normalize_portfolio_code(r.get("stock_code"))
-        if d and c:
-            snapshot_prices_by_date.setdefault(d, {})[c] = r
+        if not d or not c:
+            continue
+        day_bucket = snapshot_prices_by_date.setdefault(d, {})
+        existing = day_bucket.get(c)
+        if existing is None:
+            day_bucket[c] = dict(r)
+        else:
+            existing["market_value"] = float(existing.get("market_value") or 0.0) + float(r.get("market_value") or 0.0)
+            q_a, q_b = existing.get("quantity"), r.get("quantity")
+            existing["quantity"] = None if (q_a is None or q_b is None) else (float(q_a) + float(q_b))
+            existing["priced_from_fallback"] = bool(existing.get("priced_from_fallback") or r.get("priced_from_fallback"))
+            if existing["quantity"] and existing["quantity"] != 0:
+                existing["unit_price"] = existing["market_value"] / existing["quantity"]
 
     needed_kr_codes: set[str] = set()
     needed_foreign_codes: set[str] = set()
+    baseline_foreign_cash_currencies: set[str] = set()
     for row in baseline_stocks:
         c = normalize_portfolio_code(row.get("stock_code"))
-        if not c or is_cash_asset(c) or is_special_asset(c):
+        if not c:
+            continue
+        if is_cash_asset(c):
+            cur = c.removeprefix("CASH_")
+            if cur and cur != "KRW":
+                baseline_foreign_cash_currencies.add(cur)
+            continue
+        if is_special_asset(c):
             continue
         if is_korean_stock(c):
             needed_kr_codes.add(c)
@@ -708,29 +776,51 @@ async def _compute_ghost_payload(user: str, requested_since: date | None, today:
         kr_bars_task, foreign_task, kr_corp_task
     )
 
-    # 유령 포트폴리오용 원화 환산 종가 시계열 및 분할 감지 구성
     external_krw_closes: dict[str, list[tuple[str, float]]] = {}
     split_flags: dict[str, str] = {}
 
     if baseline_date and ending_date:
-        for code, bars in kr_bars.items():
+        # 1) 스냅샷 수량 급변(거래 없이 수량 점프) 감지
+        split_flags.update(
+            rules.detect_snapshot_quantity_split_flags(
+                stock_rows=stock_rows,
+                manual_trades=manual_trades,
+                nh_rows=nh_rows,
+                cashflows=cashflows,
+                baseline_date=baseline_date,
+                ending_date=ending_date,
+            )
+        )
+
+        # 2) 국내 기준일 보유 종목: 일봉 누락으로 분할 여부를 확인 못 한 종목도 미계산으로 표시
+        baseline_kr_codes = {
+            normalize_portfolio_code(r.get("stock_code"))
+            for r in baseline_stocks
+            if is_korean_stock(r.get("stock_code"))
+        }
+        for code in sorted(needed_kr_codes | baseline_kr_codes):
+            bars = kr_bars.get(code) or []
             pairs = [(str(b["date"])[:10], float(b["close"])) for b in bars if b.get("date") and (b.get("close") or 0) > 0]
             pairs.sort(key=lambda p: p[0])
             if pairs:
                 external_krw_closes[code] = pairs
-            base_row = (snapshot_prices_by_date.get(baseline_date) or {}).get(code)
-            base_unit = float(base_row["unit_price"]) if base_row and base_row.get("unit_price") else None
-            split_reason = rules.detect_krx_series_split_or_mismatch(base_unit, baseline_date, ending_date, bars)
-            if split_reason:
-                split_flags[code] = split_reason
+            if code in baseline_kr_codes:
+                base_row = (snapshot_prices_by_date.get(baseline_date) or {}).get(code)
+                base_unit = float(base_row["unit_price"]) if base_row and base_row.get("unit_price") else None
+                split_reason = rules.detect_krx_series_split_or_mismatch(base_unit, baseline_date, ending_date, bars)
+                if split_reason:
+                    split_flags[code] = split_reason
 
-        # 해외 보유 종목의 원화 환산 종가 (USD는 스냅샷 fx_usdkrw 우선, 그 외 통화는 Yahoo FX 일봉 사용)
-        foreign_currencies = {
+        # 3) 외화 환율 시계열 (해외 주식 통화 + 외화 예수금 통화)
+        foreign_stock_currencies = {
             str(pack.get("currency") or "").upper()
-            for code, pack in foreign_packs.items()
-            if pack.get("rows")
+            for pack in foreign_packs.values()
+            if pack.get("rows") and pack.get("currency")
         }
-        fx_closes = await _fetch_fx_closes(foreign_currencies | {"USD"}, price_since, today)
+        fx_needed = (foreign_stock_currencies | baseline_foreign_cash_currencies) - {"KRW"}
+        if needed_foreign_codes:
+            fx_needed.add("USD")
+        fx_closes = await _fetch_fx_closes(fx_needed, price_since, today)
         snap_usd_pairs = [
             (str(pt["date"])[:10], float(pt["fx_usdkrw"]))
             for pt in selected_nav
@@ -738,11 +828,30 @@ async def _compute_ghost_payload(user: str, requested_since: date | None, today:
         ]
         usd_series = sorted({d: r for d, r in [*(fx_closes.get("USD") or []), *snap_usd_pairs]}.items())
 
-        for code, pack in foreign_packs.items():
+        for cur in baseline_foreign_cash_currencies:
+            cash_fx = usd_series if cur == "USD" else (fx_closes.get(cur) or [])
+            if cash_fx:
+                external_krw_closes[f"CASH_{cur}"] = cash_fx
+
+        # 4) 해외 기준일 보유 종목: Yahoo 차트 실패로 분할 여부를 확인 못 한 종목은 미계산("분할 여부 확인 전")
+        baseline_foreign_codes = {
+            normalize_portfolio_code(r.get("stock_code"))
+            for r in baseline_stocks
+            if r.get("stock_code")
+            and not is_korean_stock(r.get("stock_code"))
+            and not is_cash_asset(r.get("stock_code"))
+            and not is_special_asset(r.get("stock_code"))
+        }
+        for code in sorted(baseline_foreign_codes | set(foreign_packs)):
+            pack = foreign_packs.get(code) or {}
             f_ev = foreign_corp_events.get(code) or {}
-            if any(baseline_date < s_d <= ending_date for s_d in (f_ev.get("split_dates") or ())):
-                split_flags[code] = "액면분할·병합 구간"
-                continue
+            if code in baseline_foreign_codes:
+                if not f_ev.get("verified") or not pack.get("rows"):
+                    split_flags.setdefault(code, "분할 여부 확인 전 (해외 차트 미확보)")
+                    continue
+                if any(baseline_date < s_d <= ending_date for s_d in (f_ev.get("split_dates") or ())):
+                    split_flags[code] = "액면분할·병합 구간"
+                    continue
             cur = str(pack.get("currency") or "").upper()
             fx_list = usd_series if cur == "USD" else (fx_closes.get(cur) or [])
             if not fx_list and cur != "KRW":
@@ -769,6 +878,7 @@ async def _compute_ghost_payload(user: str, requested_since: date | None, today:
             split_flags=split_flags,
             cashflows=cashflows,
             stock_names=stock_names,
+            uncalc_krw_trade_flows=_collect_krw_trade_flows_by_code(nh_rows, manual_trades),
         )
     else:
         ghost_result = {
@@ -778,7 +888,6 @@ async def _compute_ghost_payload(user: str, requested_since: date | None, today:
             "assumptions": list(rules.GHOST_ASSUMPTIONS),
         }
 
-    # 매도 후 추적 평가 (각 종목의 거래통화 일봉 기준)
     combined_bars: dict[str, list[dict[str, Any]]] = dict(kr_bars)
     for code, pack in foreign_packs.items():
         if code in sold_foreign_codes and pack.get("rows"):

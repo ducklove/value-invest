@@ -86,6 +86,7 @@ function samplePayload(overrides = {}) {
       items: [
         {
           trade_date: '2026-05-12',
+          matched_bar_date: '2026-05-12',
           stock_code: '005930',
           stock_name: '삼성전자',
           currency: 'KRW',
@@ -94,6 +95,8 @@ function samplePayload(overrides = {}) {
           sale_type: 'closed',
           sale_type_label: '전량',
           price_basis: 'execution',
+          date_is_recorded_at: false,
+          date_note: null,
           quantity: 100,
           sell_price: 80000,
           sell_amount: 8000000,
@@ -105,6 +108,7 @@ function samplePayload(overrides = {}) {
         },
         {
           trade_date: '2026-06-20',
+          matched_bar_date: '2026-06-20',
           stock_code: '000660',
           stock_name: 'SK하이닉스',
           currency: 'KRW',
@@ -113,6 +117,8 @@ function samplePayload(overrides = {}) {
           sale_type: 'partial',
           sale_type_label: '일부',
           price_basis: 'execution',
+          date_is_recorded_at: true,
+          date_note: '기록일 기준(체결일과 다를 수 있음)',
           quantity: 10,
           sell_price: 200000,
           sell_amount: 2000000,
@@ -124,6 +130,7 @@ function samplePayload(overrides = {}) {
         },
         {
           trade_date: '2026-11-24',
+          matched_bar_date: '2026-11-24',
           stock_code: '005380',
           stock_name: '현대차',
           currency: 'KRW',
@@ -132,6 +139,8 @@ function samplePayload(overrides = {}) {
           sale_type: 'closed',
           sale_type_label: '전량',
           price_basis: 'close_estimate',
+          date_is_recorded_at: false,
+          date_note: null,
           quantity: 5,
           sell_price: 250000,
           sell_amount: 1250000,
@@ -148,7 +157,7 @@ function samplePayload(overrides = {}) {
   };
 }
 
-test('유령 포트폴리오 요약·두 선 차트·순입출금 가정과 매도 후 추적 표·종목 링크를 렌더링한다', async () => {
+test('유령 포트폴리오 요약·계산 범위·두 선 차트·NH 일반 계좌 문구·기록일 주석과 종목 링크를 렌더링한다', async () => {
   const dom = setup();
   try {
     dom.window.apiFetchJson = async () => samplePayload();
@@ -156,9 +165,11 @@ test('유령 포트폴리오 요약·두 선 차트·순입출금 가정과 매�
 
     const content = dom.window.document.getElementById('pfGhostContent');
     const text = content.textContent;
-    assert.match(text, /올해 매매 효과/);
+    assert.match(text, /올해 매매 효과 \(계산 범위\(기준일 비중 100\.0%\) 기준\)/);
     assert.match(text, /\+2\.40%p \(\+480만원\)/);
     assert.match(text, /현금 비례 가정/);
+    assert.match(text, /NH 일반 계좌 원장 기준\(ISA·연금 등 제외\)/);
+    assert.match(text, /기록일 기준\(체결일과 다를 수 있음\)/);
     assert.match(text, /전체 매도 3건 · 계산 가능 2건 · 20거래일 만기 2건\(계산 가능 1건 · 미계산 1건\) · 미도래 1건/);
 
     assert.equal(dom.window.PortfolioTrendChart.created.length, 1);
@@ -181,7 +192,7 @@ test('유령 포트폴리오 요약·두 선 차트·순입출금 가정과 매�
   }
 });
 
-test('미계산 보유 종목이 있으면 제외하지 않고 종목·비중·사유를 명시한다', async () => {
+test('계산 범위 한정 비교 시 기준일 비중을 헤드라인에 붙이고 50% 미만이면 헤드라인 수치를 내지 않는다', async () => {
   const dom = setup();
   try {
     const base = samplePayload();
@@ -199,25 +210,29 @@ test('미계산 보유 종목이 있으면 제외하지 않고 종목·비중·�
     await dom.window.pfLoadGhostPanel({ force: true });
 
     const content = dom.window.document.getElementById('pfGhostContent');
-    assert.match(content.textContent, /일부 미계산 포함 · 계산 범위 85\.0%/);
+    assert.match(content.textContent, /올해 매매 효과 \(계산 범위\(기준일 비중 85\.0%\) 기준\)/);
+    assert.match(content.textContent, /실제 평가액 \(계산 범위\)/);
     assert.match(content.textContent, /비트코인/);
     assert.match(content.textContent, /15\.00%/);
     assert.match(content.textContent, /특수자산 과거 종가 미제공/);
 
-    // 전 종목 미계산일 때는 가짜 숫자를 만들지 않고 미계산으로 표시한다.
-    const allUncalc = samplePayload({
+    // 계산 가능 비중 < 50% (미계산)일 때는 가짜 수치를 내지 않고 사유를 표시한다.
+    const lowWeight = samplePayload({
       ghost: {
         ...partial.ghost,
         scope: 'uncalculated',
-        reason: '기준일 보유 종목 가격 미확인',
+        reason: '계산 가능 비중 부족 (기준일 계산 가능 비중 40.0% < 50%)',
+        actual_end_value: null,
         ghost_end_value: null,
         effect_krw: null,
         effect_pct_p: null,
       },
     });
-    dom.window.apiFetchJson = async () => allUncalc;
+    dom.window.apiFetchJson = async () => lowWeight;
     await dom.window.pfLoadGhostPanel({ force: true });
     assert.match(content.textContent, /올해 매매 효과: 미계산/);
+    assert.match(content.textContent, /계산 가능 비중 부족/);
+    assert.equal(content.textContent.includes('+480만원'), false);
     assert.equal(content.querySelector('#pfGhostChart'), null);
   } finally {
     dom.window.close();
