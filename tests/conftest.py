@@ -68,4 +68,7 @@ def _reset_short_lived_quote_caches():
     screener_history = sys.modules.get("services.screener_history")
     if screener_history is not None:
         screener_history.reset_state()
+    ghost = sys.modules.get("services.portfolio.ghost")
+    if ghost is not None:
+        ghost.reset_cache()
     yield

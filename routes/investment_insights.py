@@ -11,7 +11,7 @@ from core.deps import get_current_user
 from repositories import investment_insights as repo
 from repositories import journal
 from routes.response_models import AttributionResponse, RealizedTaxResponse, ThesesResponse
-from services.portfolio import attribution, realized_tax, theses
+from services.portfolio import attribution, ghost, realized_tax, theses
 from services.portfolio.time_windows import today_kst_date
 
 router = APIRouter()
@@ -105,6 +105,16 @@ async def get_attribution(request: Request, start: date | None = Query(None), en
 async def get_realized_tax(request: Request):
     """입력 없이 저장된 NH 원장으로 계산한다. 이 요청은 NH를 호출하지 않는다."""
     return await realized_tax.build_summary(await owner(request))
+
+
+@router.get("/api/portfolio/ghost")
+async def get_ghost_portfolio(request: Request, since: str | None = Query(None)):
+    """기준일 보유 고정(유령 포트폴리오) 대 실제 평가액 비교 및 매도 후 5·20거래일·현재가 추적."""
+    user = await owner(request)
+    try:
+        return await ghost.build_ghost_report(user, since=since)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.post("/api/portfolio/income-events", status_code=201)
